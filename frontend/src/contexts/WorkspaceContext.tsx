@@ -132,8 +132,14 @@ export function WorkspaceProvider({
       }
       const data = (await res.json()) as WorkspaceProjectSummary[]
       setProjectList(data)
+      trackTraceEvent('workspace_project_list_loaded', { count: data.length })
     } catch (err) {
       console.error('Project list error:', err)
+      trackTraceEvent(
+        'workspace_project_list_error',
+        { detail: err instanceof Error ? err.message : String(err) },
+        { level: 'warn' }
+      )
     } finally {
       setProjectListLoading(false)
     }
@@ -149,6 +155,9 @@ export function WorkspaceProvider({
       setProjectId(id)
       setStatus(null)
       setErrorMessage(null)
+      setActivePhase('brief')
+      setHighestReachedPhase('brief')
+      setUserOverridePhase(false)
       setLoading(true)
       setPolling(true)
     },
@@ -292,6 +301,7 @@ export function WorkspaceProvider({
 
   useEffect(() => {
     if (!status || userOverridePhase) return
+    if (projectId && status.project_id && status.project_id !== projectId) return
     const autoPhase = stageToPhase(status.current_stage)
     const autoIdx = phaseIndex(autoPhase)
     const currentHighestIdx = phaseIndex(highestReachedPhase)
@@ -305,8 +315,9 @@ export function WorkspaceProvider({
   }, [activePhase, highestReachedPhase, status, userOverridePhase])
 
   useEffect(() => {
+    if (projectId && status?.project_id && status.project_id !== projectId) return
     setUserOverridePhase(false)
-  }, [status?.current_stage])
+  }, [projectId, status?.current_stage, status?.project_id])
 
   const handleSetActivePhase = useCallback((phase: Phase) => {
     trackTraceEvent(
