@@ -1,6 +1,6 @@
 'use client'
 
-import StarRating from '@/components/StarRating'
+import { useState } from 'react'
 
 interface Supplier {
   name: string
@@ -33,6 +33,14 @@ interface Verification {
 interface SupplierCardProps {
   supplier: Supplier
   verification?: Verification
+  dark?: boolean
+}
+
+function getRiskDot(risk: string): string {
+  if (risk === 'low') return 'bg-teal'
+  if (risk === 'medium') return 'bg-warm'
+  if (risk === 'high') return 'bg-red-400'
+  return 'bg-ink-4/30'
 }
 
 function getSourceLabel(source: string): string | null {
@@ -46,144 +54,200 @@ function getSourceLabel(source: string): string | null {
   return null
 }
 
+function getInitials(name: string): string {
+  return name
+    .split(/[\s&]+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+}
+
 export default function SupplierCard({
   supplier,
   verification,
+  dark = false,
 }: SupplierCardProps) {
+  const [expanded, setExpanded] = useState(false)
   const sourceLabel = getSourceLabel(supplier.source)
-  const riskColor =
-    verification?.risk_level === 'low'
-      ? 'text-green-400 bg-green-400/10 border-green-400/20'
-      : verification?.risk_level === 'medium'
-      ? 'text-amber-400 bg-amber-400/10 border-amber-400/20'
-      : verification?.risk_level === 'high'
-      ? 'text-red-400 bg-red-400/10 border-red-400/20'
-      : ''
+  const score = verification?.composite_score ?? supplier.relevance_score
+
+  const bg = dark ? 'bg-search-surface' : 'bg-white'
+  const border = dark ? 'border-white/[0.06]' : 'border-surface-3'
+  const textPrimary = dark ? 'text-white' : 'text-ink'
+  const textSecondary = dark ? 'text-white/60' : 'text-ink-3'
+  const textMuted = dark ? 'text-white/40' : 'text-ink-4'
 
   return (
-    <div className="glass-card p-4 hover:border-teal/30 transition-all group">
-      {/* Header row */}
-      <div className="flex items-start justify-between mb-2">
+    <div
+      onClick={() => setExpanded(!expanded)}
+      className={`${bg} border ${border} rounded-xl cursor-pointer transition-all hover:shadow-sm`}
+    >
+      {/* ── Collapsed Row ─────────────────────── */}
+      <div className="flex items-center gap-4 px-5 py-4">
+        {/* Avatar */}
+        <div
+          className={`w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
+            dark ? 'bg-white/10 text-white' : 'bg-surface-2 text-ink-3'
+          }`}
+        >
+          {getInitials(supplier.name)}
+        </div>
+
+        {/* Name + location */}
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-medium text-workspace-text truncate group-hover:text-teal transition-colors">
+          <p className={`text-[13px] font-heading ${textPrimary} truncate`}>
             {supplier.name}
-          </h3>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            {supplier.city && (
-              <span className="text-[11px] text-workspace-muted">
-                {supplier.city}
-                {supplier.country ? `, ${supplier.country}` : ''}
-              </span>
-            )}
-            {supplier.is_intermediary && (
-              <span className="text-[9px] px-1.5 py-0.5 bg-amber-400/10 text-amber-400 rounded border border-amber-400/20">
-                intermediary
-              </span>
-            )}
-          </div>
+          </p>
+          {supplier.city && (
+            <p className={`text-[10px] ${textMuted}`}>
+              {supplier.city}{supplier.country ? `, ${supplier.country}` : ''}
+            </p>
+          )}
         </div>
 
-        {/* Relevance score */}
-        <div className="text-right ml-3 shrink-0">
-          <span className="text-lg font-bold text-workspace-text">
-            {Math.round(supplier.relevance_score)}
-          </span>
-          <p className="text-[9px] text-workspace-muted">relevance</p>
-        </div>
-      </div>
-
-      {/* Description */}
-      {supplier.description && (
-        <p className="text-xs text-workspace-muted leading-relaxed mb-3 line-clamp-2">
-          {supplier.description}
-        </p>
-      )}
-
-      {/* Badges row */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+        {/* Risk dot */}
         {verification && (
           <span
-            className={`text-[10px] px-2 py-0.5 rounded-full border ${riskColor}`}
-          >
-            {verification.risk_level} risk · {Math.round(verification.composite_score)}
-          </span>
-        )}
-        {sourceLabel && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-workspace-hover text-workspace-muted border border-workspace-border">
-            {sourceLabel}
-          </span>
-        )}
-        {supplier.language_discovered &&
-          supplier.language_discovered !== 'en' && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
-              {supplier.language_discovered}
-            </span>
-          )}
-      </div>
-
-      {/* Rating */}
-      {supplier.google_rating && (
-        <div className="flex items-center gap-2 mb-3">
-          <StarRating
-            score={supplier.google_rating}
-            showNumber={true}
-            size="sm"
+            className={`status-dot ${getRiskDot(verification.risk_level)}`}
+            title={`${verification.risk_level} risk`}
           />
-          {supplier.google_review_count && (
-            <span className="text-[10px] text-workspace-muted">
-              ({supplier.google_review_count})
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Certifications */}
-      {supplier.certifications.length > 0 && (
-        <div className="flex gap-1 flex-wrap mb-3">
-          {supplier.certifications.slice(0, 3).map((cert) => (
-            <span
-              key={cert}
-              className="text-[9px] px-1.5 py-0.5 bg-teal/10 text-teal rounded border border-teal/20"
-            >
-              {cert}
-            </span>
-          ))}
-          {supplier.certifications.length > 3 && (
-            <span className="text-[9px] text-workspace-muted">
-              +{supplier.certifications.length - 3}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Footer links */}
-      <div className="flex items-center gap-3 text-[11px]">
-        {supplier.website && (
-          <a
-            href={supplier.website}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-teal hover:text-teal-300 transition-colors"
-          >
-            Website →
-          </a>
         )}
-        {supplier.product_page_url && (
-          <a
-            href={supplier.product_page_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-teal hover:text-teal-300 transition-colors font-medium"
-          >
-            Product →
-          </a>
-        )}
-        {supplier.estimated_shipping_cost && (
-          <span className="text-workspace-muted">
-            Ship: {supplier.estimated_shipping_cost}
+
+        {/* Score */}
+        <div className="text-right shrink-0">
+          <span className={`text-[18px] font-heading ${textPrimary}`}>
+            {Math.round(score)}
           </span>
-        )}
+          <p className={`text-[9px] ${textMuted}`}>score</p>
+        </div>
       </div>
+
+      {/* ── Expanded Detail ───────────────────── */}
+      {expanded && (
+        <div className={`px-5 pb-5 pt-0 border-t ${border} animate-fin`}>
+          <div className="pt-4 space-y-4">
+            {/* Description */}
+            {supplier.description && (
+              <p className={`text-[12px] leading-relaxed ${textSecondary}`}>
+                {supplier.description}
+              </p>
+            )}
+
+            {/* Specs grid */}
+            <div className="grid grid-cols-2 gap-x-8 gap-y-2">
+              {sourceLabel && (
+                <div>
+                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Source</p>
+                  <p className={`text-[12px] ${textSecondary}`}>{sourceLabel}</p>
+                </div>
+              )}
+              {supplier.google_rating && (
+                <div>
+                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Google Rating</p>
+                  <p className={`text-[12px] ${textSecondary}`}>
+                    {supplier.google_rating}/5
+                    {supplier.google_review_count ? ` (${supplier.google_review_count} reviews)` : ''}
+                  </p>
+                </div>
+              )}
+              {supplier.estimated_shipping_cost && (
+                <div>
+                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Est. Shipping</p>
+                  <p className={`text-[12px] ${textSecondary}`}>{supplier.estimated_shipping_cost}</p>
+                </div>
+              )}
+              {supplier.is_intermediary && (
+                <div>
+                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Type</p>
+                  <p className={`text-[12px] ${textSecondary}`}>Intermediary</p>
+                </div>
+              )}
+              {supplier.language_discovered && supplier.language_discovered !== 'en' && (
+                <div>
+                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Language</p>
+                  <p className={`text-[12px] ${textSecondary}`}>{supplier.language_discovered}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Score bar */}
+            {verification && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Composite Score</p>
+                  <p className={`text-[11px] font-semibold ${textPrimary}`}>{Math.round(verification.composite_score)}/100</p>
+                </div>
+                <div className={`score-bar ${dark ? '!bg-white/10' : ''}`}>
+                  <div
+                    className={`score-bar-fill ${dark ? '!bg-teal' : ''}`}
+                    style={{ width: `${Math.min(verification.composite_score, 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Certifications */}
+            {supplier.certifications.length > 0 && (
+              <div>
+                <p className={`text-[9px] uppercase tracking-wider ${textMuted} mb-1.5`}>Certifications</p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {supplier.certifications.map((cert) => (
+                    <span
+                      key={cert}
+                      className={`text-[10px] px-2 py-0.5 rounded-full ${
+                        dark
+                          ? 'bg-teal/10 text-teal border border-teal/20'
+                          : 'bg-teal/5 text-teal border border-teal/15'
+                      }`}
+                    >
+                      {cert}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Contact links */}
+            <div className={`flex items-center gap-4 pt-1 text-[11px]`}>
+              {supplier.website && (
+                <a
+                  href={supplier.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-teal hover:underline"
+                >
+                  Website
+                </a>
+              )}
+              {supplier.product_page_url && (
+                <a
+                  href={supplier.product_page_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-teal hover:underline"
+                >
+                  Product Page
+                </a>
+              )}
+              {supplier.email && (
+                <a
+                  href={`mailto:${supplier.email}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-teal hover:underline"
+                >
+                  Email
+                </a>
+              )}
+              {supplier.phone && (
+                <span className={textSecondary}>{supplier.phone}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

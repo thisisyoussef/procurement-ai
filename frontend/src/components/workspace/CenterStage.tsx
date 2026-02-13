@@ -15,10 +15,10 @@ export default function CenterStage() {
     <>
       {/* Backend offline warning */}
       {backendOk === false && (
-        <div className="mb-6 p-4 glass-card border-red-500/30">
-          <p className="text-red-400 font-medium text-sm">Backend API is not reachable</p>
-          <p className="text-workspace-muted text-xs mt-1">
-            Start the backend: <code className="text-red-300">uvicorn app.main:app --reload --port 8000</code>
+        <div className="mx-6 mt-6 card border-l-[3px] border-l-red-400 px-5 py-4">
+          <p className="text-[13px] font-semibold text-ink-2">Backend API is not reachable</p>
+          <p className="text-[11px] text-ink-4 mt-1">
+            Start the backend with <code className="text-ink-3 font-mono text-[10px]">uvicorn app.main:app --reload --port 8000</code>
           </p>
         </div>
       )}

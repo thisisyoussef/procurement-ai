@@ -1,9 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
-import SearchForm from '@/components/SearchForm'
-import RequirementsCard from '@/components/RequirementsCard'
-import ClarifyingQuestions from '@/components/ClarifyingQuestions'
+
+const SUGGESTIONS = [
+  'Custom enamel pins for my streetwear brand',
+  'Organic cotton tote bags, 500 units',
+  'Biodegradable food packaging, small batch',
+  'Hand-poured soy candles with custom labels',
+]
 
 export default function BriefPhase() {
   const {
@@ -15,110 +20,239 @@ export default function BriefPhase() {
     handleClarifyingAnswered,
   } = useWorkspace()
 
+  const [input, setInput] = useState('')
   const currentStage = status?.current_stage || 'idle'
   const isClarifying = currentStage === 'clarifying'
   const hasClarifyingQuestions = !!(
     status?.clarifying_questions && status.clarifying_questions.length > 0
   )
+  const parsed = status?.parsed_requirements
 
-  // ─── State 1: No project yet ─────────────────────
+  const onSubmit = (text: string) => {
+    if (!text.trim()) return
+    handleSearch(text.trim())
+    setInput('')
+  }
+
+  // ─── State 1: Empty — no project yet ─────────────────
   if (!projectId && !loading) {
     return (
-      <div>
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-heading text-workspace-text mb-3">
-            What do you need made?
-          </h1>
-          <p className="text-workspace-muted max-w-xl mx-auto">
-            Describe your product. Tamkin will find suppliers, verify them,
-            compare options, and recommend the best path forward.
-          </p>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
+        <h1 className="font-heading text-4xl text-ink text-center mb-3">
+          What do you need <em className="text-teal">made</em>?
+        </h1>
+        <p className="text-[14px] text-ink-3 text-center max-w-lg mb-8">
+          Describe your product. Tamkin will find suppliers, verify them,
+          compare options, and recommend the best path forward.
+        </p>
+
+        {/* Input area */}
+        <div className="w-full max-w-xl">
+          <div className="card p-1.5">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  onSubmit(input)
+                }
+              }}
+              placeholder="Describe what you want manufactured..."
+              rows={3}
+              className="w-full resize-none bg-transparent px-4 py-3 text-[14px] text-ink
+                         placeholder:text-ink-4 focus:outline-none"
+            />
+            <div className="flex justify-end px-2 pb-2">
+              <button
+                onClick={() => onSubmit(input)}
+                disabled={!input.trim() || loading}
+                className="px-5 py-2 bg-teal text-white rounded-lg text-[13px] font-medium
+                           hover:bg-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                Start sourcing
+              </button>
+            </div>
+          </div>
+
+          {/* Suggestion chips */}
+          <div className="flex flex-wrap gap-2 mt-4 justify-center">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => onSubmit(s)}
+                className="text-[11px] px-3 py-1.5 rounded-full border border-surface-3
+                           text-ink-4 hover:border-teal hover:text-teal transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="dark-override">
-          <SearchForm onSearch={handleSearch} loading={loading} />
-        </div>
-
+        {/* Error */}
         {errorMessage && (
-          <div className="mt-6 p-4 glass-card border-red-500/30">
-            <p className="text-red-400 font-medium text-sm">Error</p>
-            <p className="text-red-300 text-sm mt-1">{errorMessage}</p>
+          <div className="mt-6 card border-l-[3px] border-l-red-400 px-5 py-4 max-w-xl w-full">
+            <p className="text-[13px] font-semibold text-ink-2">Error</p>
+            <p className="text-[11px] text-ink-3 mt-1">{errorMessage}</p>
           </div>
         )}
       </div>
     )
   }
 
-  // ─── State 2: Parsing / waiting ──────────────────
-  if (loading && !status?.parsed_requirements && !isClarifying) {
+  // ─── State 2: Parsing / waiting ──────────────────────
+  if (loading && !parsed && !isClarifying) {
     return (
-      <div className="text-center py-16">
-        <div className="inline-flex items-center gap-3 px-6 py-3 glass-card">
-          <span className="w-2 h-2 rounded-full bg-teal animate-pulse" />
-          <span className="text-sm text-workspace-text">
-            {currentStage === 'parsing'
-              ? 'Analyzing your requirements...'
-              : currentStage === 'discovering'
-              ? 'Brief parsed. Searching for suppliers...'
-              : 'Processing...'}
-          </span>
-        </div>
-
+      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
+        <span className="status-dot bg-teal animate-pulse-dot mb-4" style={{ width: 10, height: 10 }} />
+        <p className="text-[14px] text-ink-2 font-medium">
+          {currentStage === 'parsing'
+            ? 'Analyzing your requirements...'
+            : currentStage === 'discovering'
+            ? 'Brief parsed. Searching for suppliers...'
+            : 'Processing...'}
+        </p>
         {status?.progress_events && status.progress_events.length > 0 && (
-          <p className="mt-4 text-xs text-workspace-muted italic">
+          <p className="mt-3 text-[12px] text-ink-4">
             {status.progress_events[status.progress_events.length - 1]?.detail}
           </p>
         )}
-
-        {/* Show search form so user can see what they entered */}
-        <div className="mt-8 dark-override">
-          <SearchForm onSearch={handleSearch} loading={loading} />
-        </div>
       </div>
     )
   }
 
-  // ─── State 3: Clarifying questions ───────────────
-  // ─── State 4: Requirements parsed ────────────────
+  // ─── State 3: Parsed + optional clarifying questions ──
   return (
-    <div className="space-y-6">
-      {/* Always show search form at top */}
-      <div className="dark-override">
-        <SearchForm onSearch={handleSearch} loading={loading} />
-      </div>
-
+    <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+      {/* Error */}
       {errorMessage && (
-        <div className="p-4 glass-card border-red-500/30">
-          <p className="text-red-400 font-medium text-sm">Error</p>
-          <p className="text-red-300 text-sm mt-1">{errorMessage}</p>
+        <div className="card border-l-[3px] border-l-red-400 px-5 py-4">
+          <p className="text-[13px] font-semibold text-ink-2">Error</p>
+          <p className="text-[11px] text-ink-3 mt-1">{errorMessage}</p>
         </div>
       )}
 
       {/* Clarifying Questions */}
       {isClarifying && hasClarifyingQuestions && projectId && (
-        <div className="dark-override">
-          <ClarifyingQuestions
-            projectId={projectId}
-            questions={status!.clarifying_questions!}
-            onAnswered={handleClarifyingAnswered}
-          />
-        </div>
+        <ClarifyingQuestionsInline
+          questions={status!.clarifying_questions!}
+          projectId={projectId}
+          onAnswered={handleClarifyingAnswered}
+        />
       )}
 
       {/* Parsed Requirements */}
-      {status?.parsed_requirements && (
-        <div className="dark-override">
-          <RequirementsCard requirements={status.parsed_requirements} />
+      {parsed && (
+        <div className="card p-6">
+          <h2 className="font-heading text-lg text-ink mb-4">Parsed Brief</h2>
+          <div className="space-y-3">
+            {Object.entries(parsed).map(([key, value]) => {
+              if (!value || (Array.isArray(value) && value.length === 0)) return null
+              const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+              return (
+                <div key={key} className="flex items-start gap-4">
+                  <span className="text-[11px] text-ink-4 w-32 shrink-0 pt-0.5 text-right">{label}</span>
+                  <span className="text-[13px] text-ink-2">
+                    {Array.isArray(value) ? value.join(', ') : String(value)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
-      {/* Error state */}
+      {/* Pipeline error */}
       {status?.error && (
-        <div className="p-4 glass-card border-red-500/30">
-          <p className="text-red-400 font-medium text-sm">Pipeline Error</p>
-          <p className="text-red-300 text-sm mt-1">{status.error}</p>
+        <div className="card border-l-[3px] border-l-red-400 px-5 py-4">
+          <p className="text-[13px] font-semibold text-ink-2">Pipeline Error</p>
+          <p className="text-[11px] text-ink-3 mt-1">{status.error}</p>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Inline Clarifying Questions Component ──────────────
+
+function ClarifyingQuestionsInline({
+  questions,
+  projectId,
+  onAnswered,
+}: {
+  questions: { field: string; question: string; importance: string; suggestions: string[] }[]
+  projectId: string
+  onAnswered: () => void
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+
+  const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
+
+  const handleSubmit = async () => {
+    setSubmitting(true)
+    try {
+      const { authFetch } = await import('@/lib/auth')
+      await authFetch(`${API_BASE}/api/v1/projects/${projectId}/clarify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      })
+      onAnswered()
+    } catch (err) {
+      console.error('Clarify error:', err)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="card p-6">
+      <h2 className="font-heading text-lg text-ink mb-1">A few quick questions</h2>
+      <p className="text-[12px] text-ink-4 mb-5">Help us refine your brief for better results.</p>
+
+      <div className="space-y-5">
+        {questions.map((q) => (
+          <div key={q.field}>
+            <label className="text-[13px] text-ink-2 font-medium block mb-2">{q.question}</label>
+            {q.suggestions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {q.suggestions.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setAnswers((prev) => ({ ...prev, [q.field]: s }))}
+                    className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors ${
+                      answers[q.field] === s
+                        ? 'border-teal bg-teal/5 text-teal'
+                        : 'border-surface-3 text-ink-4 hover:border-teal hover:text-teal'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+            <input
+              type="text"
+              value={answers[q.field] || ''}
+              onChange={(e) => setAnswers((prev) => ({ ...prev, [q.field]: e.target.value }))}
+              placeholder="Type your answer..."
+              className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[13px] text-ink
+                         placeholder:text-ink-4 focus:ring-1 focus:ring-teal/30 focus:border-teal/50 focus:outline-none bg-cream/50"
+            />
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={handleSubmit}
+        disabled={submitting}
+        className="mt-5 px-5 py-2.5 bg-teal text-white rounded-lg text-[13px] font-medium
+                   hover:bg-teal-600 disabled:opacity-30 transition-colors"
+      >
+        {submitting ? 'Submitting...' : 'Continue'}
+      </button>
     </div>
   )
 }

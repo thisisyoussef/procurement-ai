@@ -11,7 +11,15 @@
       "Bash(git remote add:*)",
       "Bash(git init:*)",
       "Bash(git branch:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(wc:*)",
+      "Bash(git -C /Users/youss/Development/procurement-ai ls-files:*)",
+      "Bash(git -C /Users/youss/Development/procurement-ai status frontend/)",
+      "Bash(git pull:*)",
+      "Bash(alembic upgrade:*)",
+      "Bash(PYTHONPATH=. alembic upgrade:*)"
     ]
   }
 }

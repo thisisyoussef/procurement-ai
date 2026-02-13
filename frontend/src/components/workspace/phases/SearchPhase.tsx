@@ -6,6 +6,11 @@ import SupplierCard from '../SupplierCard'
 
 type SortKey = 'relevance' | 'rating' | 'verification' | 'name'
 
+const SEARCH_STEPS = [
+  { stage: 'discovering', label: 'Discovering suppliers worldwide' },
+  { stage: 'verifying', label: 'Verifying credentials & websites' },
+]
+
 export default function SearchPhase() {
   const { status, loading } = useWorkspace()
 
@@ -17,6 +22,8 @@ export default function SearchPhase() {
 
   const suppliers = status?.discovery_results?.suppliers || []
   const verifications = status?.verification_results?.verifications || []
+  const currentStage = status?.current_stage || 'idle'
+  const productType = status?.parsed_requirements?.product_type || 'your product'
 
   // Verification map
   const verificationMap = useMemo(() => {
@@ -83,155 +90,205 @@ export default function SearchPhase() {
 
   const visible = filtered.slice(0, visibleCount)
 
-  // Loading state
+  // ─── Dark searching state ────────────────────────────
   if (!status?.discovery_results) {
     return (
-      <div className="text-center py-16">
+      <div className="bg-search-bg min-h-[80vh] -mx-0 flex flex-col items-center justify-center relative overflow-hidden">
+        {/* Breathing glow */}
+        <div
+          className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-teal/20 animate-breathe pointer-events-none"
+          style={{ filter: 'blur(80px)' }}
+        />
+
         {loading ? (
-          <div className="inline-flex items-center gap-3 px-6 py-3 glass-card">
-            <span className="w-2 h-2 rounded-full bg-teal animate-pulse" />
-            <span className="text-sm text-workspace-text">
-              {status?.current_stage === 'discovering'
-                ? 'Discovering suppliers...'
-                : status?.current_stage === 'verifying'
-                ? 'Verifying suppliers...'
-                : 'Working...'}
-            </span>
+          <div className="relative z-10 text-center px-6">
+            <p className="text-white/90 font-heading text-2xl mb-2">
+              Searching the world for{' '}
+              <em className="text-teal">{productType}</em>
+            </p>
+            <p className="text-white/40 text-[13px] mb-10">
+              This usually takes 1-3 minutes
+            </p>
+
+            {/* Progress steps */}
+            <div className="flex flex-col items-start gap-4 max-w-xs mx-auto">
+              {SEARCH_STEPS.map((step) => {
+                const isDone =
+                  step.stage === 'discovering'
+                    ? !!status?.discovery_results
+                    : step.stage === 'verifying'
+                    ? !!status?.verification_results
+                    : false
+                const isActive = currentStage === step.stage
+
+                return (
+                  <div key={step.stage} className="flex items-center gap-3">
+                    <span
+                      className={`status-dot ${
+                        isDone
+                          ? 'bg-teal/40'
+                          : isActive
+                          ? 'bg-teal animate-pulse-dot'
+                          : 'bg-white/20'
+                      }`}
+                    />
+                    <span
+                      className={`text-[12px] ${
+                        isActive ? 'text-white' : isDone ? 'text-white/40' : 'text-white/20'
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Large counter */}
+            {suppliers.length > 0 && (
+              <div className="mt-10">
+                <span className="text-5xl font-heading text-teal">
+                  {suppliers.length}
+                </span>
+                <p className="text-white/40 text-[11px] mt-1">suppliers found</p>
+              </div>
+            )}
           </div>
         ) : (
-          <p className="text-workspace-muted text-sm">
-            No supplier results yet. Start a project in the Brief phase.
-          </p>
+          <div className="relative z-10 text-center px-6">
+            <p className="text-white/50 text-[13px]">
+              No supplier results yet. Start a project in the Brief phase.
+            </p>
+          </div>
         )}
       </div>
     )
   }
 
+  // ─── Results with dark background ────────────────────
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-xl font-heading text-workspace-text">
-            Discovered Suppliers
-          </h2>
-          <div className="flex gap-3 text-xs text-workspace-muted mt-1">
-            <span>{status.discovery_results.total_raw_results} raw</span>
-            <span>{status.discovery_results.deduplicated_count} unique</span>
-            <span>{suppliers.length} active</span>
+    <div className="bg-search-bg min-h-[80vh] px-6 py-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-xl font-heading text-white">
+              Discovered Suppliers
+            </h2>
+            <div className="flex gap-3 text-[11px] text-white/40 mt-1">
+              <span>{status.discovery_results.total_raw_results} raw</span>
+              <span>{status.discovery_results.deduplicated_count} unique</span>
+              <span>{suppliers.length} active</span>
+            </div>
           </div>
+
+          {/* Still processing indicator */}
+          {(currentStage === 'discovering' || currentStage === 'verifying') && (
+            <div className="flex items-center gap-2 text-[11px] text-teal">
+              <span className="status-dot bg-teal animate-pulse-dot" />
+              {currentStage === 'discovering' ? 'Finding more...' : 'Verifying...'}
+            </div>
+          )}
         </div>
 
-        {/* Still verifying indicator */}
-        {(status.current_stage === 'discovering' ||
-          status.current_stage === 'verifying') && (
-          <div className="flex items-center gap-2 px-3 py-1.5 glass-card text-xs text-teal">
-            <span className="w-1.5 h-1.5 rounded-full bg-teal animate-pulse" />
-            {status.current_stage === 'discovering'
-              ? 'Finding more...'
-              : 'Verifying...'}
+        {/* Filter Bar */}
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter suppliers..."
+            className="flex-1 min-w-[160px] bg-search-surface border border-white/[0.06] rounded-lg px-3 py-2 text-[12px]
+                       text-white placeholder:text-white/30
+                       focus:outline-none focus:ring-1 focus:ring-teal/30 focus:border-teal/30"
+          />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            className="bg-search-surface border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] text-white/60
+                       focus:outline-none focus:ring-1 focus:ring-teal/30"
+          >
+            <option value="relevance">Relevance</option>
+            <option value="rating">Rating</option>
+            <option value="verification">Verification</option>
+            <option value="name">Name</option>
+          </select>
+          <select
+            value={filterCountry}
+            onChange={(e) => setFilterCountry(e.target.value)}
+            className="bg-search-surface border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] text-white/60
+                       focus:outline-none focus:ring-1 focus:ring-teal/30"
+          >
+            <option value="all">All countries</option>
+            {countries.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <label className="flex items-center gap-1.5 text-[11px] text-white/40 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showIntermediaries}
+              onChange={(e) => setShowIntermediaries(e.target.checked)}
+              className="rounded border-white/20 accent-teal"
+            />
+            Intermediaries
+          </label>
+          <span className="text-[11px] text-white/30">
+            {filtered.length} of {suppliers.length}
+          </span>
+        </div>
+
+        {/* Supplier list */}
+        <div className="space-y-2">
+          {visible.map((supplier: any, i: number) => (
+            <SupplierCard
+              key={`${supplier.name}-${i}`}
+              supplier={supplier}
+              verification={verificationMap.get(supplier.name)}
+              dark
+            />
+          ))}
+        </div>
+
+        {/* Show more */}
+        {filtered.length > 12 && (
+          <div className="mt-6 flex items-center justify-center gap-3">
+            {visibleCount < filtered.length && (
+              <button
+                onClick={() => setVisibleCount((c) => Math.min(c + 12, filtered.length))}
+                className="px-4 py-2 text-[12px] text-teal border border-teal/20 rounded-lg
+                           hover:bg-teal/10 transition-colors"
+              >
+                Show more ({filtered.length - visibleCount} remaining)
+              </button>
+            )}
+            {visibleCount > 12 && (
+              <button
+                onClick={() => setVisibleCount(12)}
+                className="px-4 py-2 text-[12px] text-white/40 hover:text-white/60 transition-colors"
+              >
+                Show less
+              </button>
+            )}
+          </div>
+        )}
+
+        {filtered.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-white/40 text-[13px]">No suppliers match your filters.</p>
+            <button
+              onClick={() => {
+                setSearchQuery('')
+                setFilterCountry('all')
+                setShowIntermediaries(true)
+              }}
+              className="mt-2 text-[12px] text-teal hover:underline"
+            >
+              Clear filters
+            </button>
           </div>
         )}
       </div>
-
-      {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-3 mb-5 p-3 glass-card">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search suppliers..."
-          className="flex-1 min-w-[180px] bg-workspace-bg border border-workspace-border rounded-lg px-3 py-1.5 text-sm
-                     text-workspace-text placeholder:text-workspace-muted/50
-                     focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal/50"
-        />
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortKey)}
-          className="bg-workspace-bg border border-workspace-border rounded-lg px-3 py-1.5 text-sm text-workspace-muted
-                     focus:outline-none focus:ring-2 focus:ring-teal/30"
-        >
-          <option value="relevance">Relevance</option>
-          <option value="rating">Rating</option>
-          <option value="verification">Verification</option>
-          <option value="name">Name</option>
-        </select>
-        <select
-          value={filterCountry}
-          onChange={(e) => setFilterCountry(e.target.value)}
-          className="bg-workspace-bg border border-workspace-border rounded-lg px-3 py-1.5 text-sm text-workspace-muted
-                     focus:outline-none focus:ring-2 focus:ring-teal/30"
-        >
-          <option value="all">All countries</option>
-          {countries.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-1.5 text-[11px] text-workspace-muted cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showIntermediaries}
-            onChange={(e) => setShowIntermediaries(e.target.checked)}
-            className="rounded border-workspace-border accent-teal"
-          />
-          Intermediaries
-        </label>
-        <span className="text-[11px] text-workspace-muted">
-          {filtered.length} of {suppliers.length}
-        </span>
-      </div>
-
-      {/* Card Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {visible.map((supplier: any, i: number) => (
-          <SupplierCard
-            key={`${supplier.name}-${i}`}
-            supplier={supplier}
-            verification={verificationMap.get(supplier.name)}
-          />
-        ))}
-      </div>
-
-      {/* Show more / less */}
-      {filtered.length > 12 && (
-        <div className="mt-6 flex items-center justify-center gap-3">
-          {visibleCount < filtered.length && (
-            <button
-              onClick={() => setVisibleCount((c) => Math.min(c + 12, filtered.length))}
-              className="px-4 py-2 text-sm text-teal bg-teal/10 rounded-lg
-                         hover:bg-teal/20 transition-colors font-medium border border-teal/20"
-            >
-              Show more ({filtered.length - visibleCount} remaining)
-            </button>
-          )}
-          {visibleCount > 12 && (
-            <button
-              onClick={() => setVisibleCount(12)}
-              className="px-4 py-2 text-sm text-workspace-muted hover:text-workspace-text transition-colors"
-            >
-              Show less
-            </button>
-          )}
-        </div>
-      )}
-
-      {filtered.length === 0 && (
-        <div className="text-center py-12 text-workspace-muted">
-          <p>No suppliers match your filters.</p>
-          <button
-            onClick={() => {
-              setSearchQuery('')
-              setFilterCountry('all')
-              setShowIntermediaries(true)
-            }}
-            className="mt-2 text-sm text-teal hover:text-teal-300"
-          >
-            Clear filters
-          </button>
-        </div>
-      )}
     </div>
   )
 }

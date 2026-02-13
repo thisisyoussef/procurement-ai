@@ -2,39 +2,28 @@
 
 import { useMemo } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
-import StarRating from '@/components/StarRating'
 
-function ScoreBar({ score, label }: { score: number; label: string }) {
-  const color =
-    score >= 70
-      ? 'bg-green-400'
-      : score >= 40
-      ? 'bg-amber-400'
-      : 'bg-red-400'
+function ScoreBar({ score, label, compact }: { score: number; label: string; compact?: boolean }) {
   return (
     <div>
-      <div className="flex justify-between text-[11px] mb-1">
-        <span className="text-workspace-muted">{label}</span>
-        <span className="font-medium text-workspace-text">{Math.round(score)}</span>
+      <div className="flex justify-between text-[10px] mb-1">
+        <span className="text-ink-4">{label}</span>
+        <span className="font-medium text-ink-2">{Math.round(score)}</span>
       </div>
-      <div className="h-1.5 bg-workspace-hover rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full`} style={{ width: `${score}%` }} />
+      <div className="score-bar">
+        <div className="score-bar-fill" style={{ width: `${Math.min(score, 100)}%` }} />
       </div>
     </div>
   )
 }
 
-function ConfidenceBadge({ confidence }: { confidence: string }) {
-  const styles: Record<string, string> = {
-    high: 'bg-green-400/10 text-green-400 border-green-400/20',
-    medium: 'bg-amber-400/10 text-amber-400 border-amber-400/20',
-    low: 'bg-red-400/10 text-red-400 border-red-400/20',
-  }
-  return (
-    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${styles[confidence] || styles.low}`}>
-      {confidence}
-    </span>
-  )
+function getInitials(name: string): string {
+  return name
+    .split(/[\s&]+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
 }
 
 export default function ComparePhase() {
@@ -45,7 +34,6 @@ export default function ComparePhase() {
   const suppliers = status?.discovery_results?.suppliers
   const verifications = status?.verification_results
 
-  // Maps
   const verificationMap = useMemo(() => {
     const map = new Map<string, any>()
     if (verifications?.verifications) {
@@ -65,20 +53,20 @@ export default function ComparePhase() {
   // Loading
   if (!comparison && !recommendation) {
     return (
-      <div className="text-center py-16">
+      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
         {loading ? (
-          <div className="inline-flex items-center gap-3 px-6 py-3 glass-card">
-            <span className="w-2 h-2 rounded-full bg-teal animate-pulse" />
-            <span className="text-sm text-workspace-text">
+          <>
+            <span className="status-dot bg-teal animate-pulse-dot mb-4" style={{ width: 10, height: 10 }} />
+            <p className="text-[14px] text-ink-2 font-medium">
               {status?.current_stage === 'comparing'
-                ? 'Comparing suppliers...'
+                ? 'Comparing suppliers side by side...'
                 : status?.current_stage === 'recommending'
                 ? 'Generating recommendations...'
                 : 'Working...'}
-            </span>
-          </div>
+            </p>
+          </>
         ) : (
-          <p className="text-workspace-muted text-sm">
+          <p className="text-ink-4 text-[13px]">
             Comparison results will appear here after supplier verification.
           </p>
         )}
@@ -91,126 +79,109 @@ export default function ComparePhase() {
     : []
 
   return (
-    <div className="space-y-8">
-      {/* ── Section 1: Comparison Matrix ──────────── */}
-      {comparison && (
+    <div className="max-w-5xl mx-auto px-6 py-8 space-y-10">
+      {/* ── Editorial Supplier Cards ──────────── */}
+      {comparison && sorted.length > 0 && (
         <div>
-          <h2 className="text-xl font-heading text-workspace-text mb-4">
-            Supplier Comparison
-          </h2>
+          <h2 className="font-heading text-2xl text-ink mb-2">Supplier Comparison</h2>
 
-          {/* Best-of badges */}
-          <div className="flex gap-2 mb-4 flex-wrap">
+          {/* Best-of text badges */}
+          <div className="flex gap-3 mb-6 flex-wrap text-[11px] text-ink-3">
             {comparison.best_value && (
-              <span className="text-[11px] px-3 py-1 bg-green-400/10 text-green-400 rounded-full border border-green-400/20">
-                Best Value: {comparison.best_value}
-              </span>
+              <span>Best Value: <span className="text-teal font-medium">{comparison.best_value}</span></span>
             )}
             {comparison.best_quality && (
-              <span className="text-[11px] px-3 py-1 bg-teal/10 text-teal rounded-full border border-teal/20">
-                Best Quality: {comparison.best_quality}
-              </span>
+              <span>Best Quality: <span className="text-teal font-medium">{comparison.best_quality}</span></span>
             )}
             {comparison.best_speed && (
-              <span className="text-[11px] px-3 py-1 bg-purple-400/10 text-purple-400 rounded-full border border-purple-400/20">
-                Fastest: {comparison.best_speed}
-              </span>
+              <span>Fastest: <span className="text-teal font-medium">{comparison.best_speed}</span></span>
             )}
           </div>
 
-          {/* Table */}
-          <div className="glass-card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-workspace-border">
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">Supplier</th>
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">Est. Price</th>
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">Shipping</th>
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">Landed</th>
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">MOQ</th>
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">Lead Time</th>
-                  <th className="text-right py-3 px-4 text-workspace-muted text-xs font-medium">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((c: any, i: number) => (
-                  <tr
-                    key={i}
-                    className={`border-b border-workspace-border/50 ${
-                      i === 0 ? 'bg-teal/5' : ''
-                    }`}
-                  >
-                    <td className="py-3 px-4 font-medium text-workspace-text">
-                      {i === 0 && <span className="text-teal mr-1">★</span>}
-                      {c.supplier_name}
-                    </td>
-                    <td className="py-3 px-4 text-workspace-muted">{c.estimated_unit_price || '—'}</td>
-                    <td className="py-3 px-4 text-workspace-muted">
-                      {c.estimated_shipping_cost ? (
-                        <span className="text-teal">{c.estimated_shipping_cost}</span>
-                      ) : '—'}
-                    </td>
-                    <td className="py-3 px-4 text-workspace-text font-medium">
-                      {c.estimated_landed_cost || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-workspace-muted">{c.moq || '—'}</td>
-                    <td className="py-3 px-4 text-workspace-muted">{c.lead_time || '—'}</td>
-                    <td className="py-3 px-4 text-right">
-                      <span className="font-bold text-lg text-workspace-text">
-                        {Math.round(c.overall_score)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* Side-by-side editorial cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            {sorted.slice(0, 4).map((c: any, i: number) => {
+              const isRecommended = i === 0
+              return (
+                <div
+                  key={i}
+                  className={`card p-5 ${isRecommended ? 'border-t-[2px] border-t-teal' : ''}`}
+                >
+                  {isRecommended && (
+                    <p className="text-[9px] font-bold text-teal tracking-[2px] uppercase mb-3">Recommended</p>
+                  )}
 
-          {/* Strengths / Weaknesses Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-            {sorted.map((c: any, i: number) => (
-              <div key={i} className="glass-card p-4">
-                <h4 className="font-medium text-workspace-text text-sm mb-2">{c.supplier_name}</h4>
-
-                {/* Star ratings */}
-                {(c.price_score || c.quality_score || c.shipping_score) && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-3 pb-3 border-b border-workspace-border/50">
-                    {c.price_score ? <StarRating score={c.price_score} label="Price" size="sm" /> : null}
-                    {c.quality_score ? <StarRating score={c.quality_score} label="Quality" size="sm" /> : null}
-                    {c.shipping_score ? <StarRating score={c.shipping_score} label="Shipping" size="sm" /> : null}
-                    {c.lead_time_score ? <StarRating score={c.lead_time_score} label="Speed" size="sm" /> : null}
+                  {/* Avatar + name */}
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-surface-2 flex items-center justify-center text-[12px] font-bold text-ink-3 shrink-0">
+                      {getInitials(c.supplier_name)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-heading text-[15px] text-ink truncate">{c.supplier_name}</p>
+                      {c.moq && <p className="text-[10px] text-ink-4">MOQ: {c.moq}</p>}
+                    </div>
                   </div>
-                )}
 
-                {c.strengths?.length > 0 && (
-                  <div className="mb-2">
-                    <p className="text-[10px] text-green-400 font-medium mb-1">Strengths</p>
-                    <ul className="text-xs text-workspace-muted space-y-0.5">
+                  {/* Large price */}
+                  {c.estimated_landed_cost && (
+                    <p className="font-heading text-2xl text-ink mb-1">
+                      {c.estimated_landed_cost}
+                    </p>
+                  )}
+                  {c.estimated_unit_price && !c.estimated_landed_cost && (
+                    <p className="font-heading text-2xl text-ink mb-1">
+                      {c.estimated_unit_price}
+                    </p>
+                  )}
+                  {c.lead_time && (
+                    <p className="text-[10px] text-ink-4 mb-4">{c.lead_time} lead time</p>
+                  )}
+
+                  {/* Score bars */}
+                  <div className="space-y-2 mb-4">
+                    {c.price_score != null && <ScoreBar score={c.price_score} label="Price" />}
+                    {c.quality_score != null && <ScoreBar score={c.quality_score} label="Quality" />}
+                    {c.shipping_score != null && <ScoreBar score={c.shipping_score} label="Shipping" />}
+                    {c.lead_time_score != null && <ScoreBar score={c.lead_time_score} label="Speed" />}
+                  </div>
+
+                  {/* Strengths / Weaknesses as dot-prefixed text */}
+                  {c.strengths?.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-[9px] uppercase tracking-wider text-ink-4 mb-1">Strengths</p>
                       {c.strengths.map((s: string, j: number) => (
-                        <li key={j}>+ {s}</li>
+                        <p key={j} className="text-[11px] text-ink-3 flex items-start gap-1.5">
+                          <span className="text-teal mt-1 shrink-0">·</span> {s}
+                        </p>
                       ))}
-                    </ul>
-                  </div>
-                )}
-                {c.weaknesses?.length > 0 && (
-                  <div>
-                    <p className="text-[10px] text-red-400 font-medium mb-1">Weaknesses</p>
-                    <ul className="text-xs text-workspace-muted space-y-0.5">
+                    </div>
+                  )}
+                  {c.weaknesses?.length > 0 && (
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider text-ink-4 mb-1">Weaknesses</p>
                       {c.weaknesses.map((w: string, j: number) => (
-                        <li key={j}>- {w}</li>
+                        <p key={j} className="text-[11px] text-ink-3 flex items-start gap-1.5">
+                          <span className="text-red-400 mt-1 shrink-0">·</span> {w}
+                        </p>
                       ))}
-                    </ul>
+                    </div>
+                  )}
+
+                  {/* Overall score */}
+                  <div className="mt-4 pt-3 border-t border-surface-3 flex items-center justify-between">
+                    <span className="text-[10px] text-ink-4">Overall</span>
+                    <span className="font-heading text-xl text-ink">{Math.round(c.overall_score)}</span>
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              )
+            })}
           </div>
 
           {/* Narrative */}
           {comparison.analysis_narrative && (
-            <div className="mt-6 p-4 glass-card">
-              <h4 className="text-xs font-medium text-workspace-muted mb-2">Analysis</h4>
-              <p className="text-sm text-workspace-text leading-relaxed whitespace-pre-line">
+            <div className="mt-6 card p-6">
+              <p className="text-[9px] uppercase tracking-wider text-ink-4 mb-2">Analysis</p>
+              <p className="text-[13px] text-ink-2 leading-relaxed whitespace-pre-line">
                 {comparison.analysis_narrative}
               </p>
             </div>
@@ -218,127 +189,89 @@ export default function ComparePhase() {
         </div>
       )}
 
-      {/* ── Section 2: AI Recommendations ────────── */}
+      {/* ── AI Recommendation ─────────────────── */}
       {recommendation && (
         <div>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-7 h-7 rounded-full bg-teal flex items-center justify-center">
-              <span className="text-workspace-bg text-xs font-bold">AI</span>
-            </div>
-            <h2 className="text-xl font-heading text-workspace-text">
-              Recommendations
-            </h2>
-          </div>
+          <h2 className="font-heading text-2xl text-ink mb-4">Recommendation</h2>
 
-          {/* Executive summary */}
+          {/* Executive summary with teal left line */}
           {recommendation.executive_summary && (
-            <div className="p-4 glass-card border-teal/20 mb-6">
-              <p className="text-sm text-workspace-text leading-relaxed">
+            <div className="border-l-[2px] border-l-teal pl-5 mb-8">
+              <p className="text-[14px] text-ink-2 leading-relaxed">
                 {recommendation.executive_summary}
               </p>
             </div>
           )}
 
-          {/* Ranked cards */}
+          {/* Ranked picks */}
           <div className="space-y-4">
             {recommendation.recommendations.map((rec: any) => {
               const supplier = suppliers?.[rec.supplier_index]
-              const verification = verificationMap.get(rec.supplier_name)
               const comp = comparisonMap.get(rec.supplier_name)
 
               return (
                 <div
                   key={rec.rank}
-                  className={`glass-card p-5 ${
-                    rec.rank === 1 ? 'border-teal/30 bg-teal/5' : ''
-                  }`}
+                  className={`card p-5 ${rec.rank === 1 ? 'border-t-[2px] border-t-teal' : ''}`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
                       <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold ${
                           rec.rank === 1
-                            ? 'bg-teal text-workspace-bg'
-                            : rec.rank === 2
-                            ? 'bg-workspace-muted text-workspace-bg'
-                            : 'bg-workspace-hover text-workspace-muted'
+                            ? 'bg-teal text-white'
+                            : 'bg-surface-2 text-ink-3'
                         }`}
                       >
-                        #{rec.rank}
+                        {rec.rank}
                       </div>
                       <div>
-                        <h3 className="font-semibold text-workspace-text text-lg">
-                          {rec.supplier_name}
-                        </h3>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <span className="text-[10px] px-2 py-0.5 bg-workspace-hover text-workspace-muted rounded-full border border-workspace-border">
-                            {rec.best_for}
-                          </span>
-                          <ConfidenceBadge confidence={rec.confidence} />
-                        </div>
+                        <h3 className="font-heading text-lg text-ink">{rec.supplier_name}</h3>
+                        <p className="text-[11px] text-ink-4">{rec.best_for}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className="text-2xl font-bold text-workspace-text">
+                      <span className="font-heading text-2xl text-ink">
                         {Math.round(rec.overall_score)}
                       </span>
-                      <p className="text-[10px] text-workspace-muted">/ 100</p>
+                      <p className="text-[9px] text-ink-4">/ 100</p>
                     </div>
                   </div>
 
-                  <p className="mt-3 text-sm text-workspace-muted leading-relaxed">
+                  <p className="mt-3 text-[12px] text-ink-3 leading-relaxed">
                     {rec.reasoning}
                   </p>
 
-                  {/* Cost breakdown */}
+                  {/* Cost row */}
                   {comp && (comp.estimated_unit_price || comp.estimated_landed_cost) && (
-                    <div className="mt-3 flex flex-wrap gap-4 text-xs">
+                    <div className="mt-3 flex flex-wrap gap-4 text-[11px]">
                       {comp.estimated_unit_price && (
-                        <div>
-                          <span className="text-workspace-muted">Unit: </span>
-                          <span className="text-workspace-text font-medium">{comp.estimated_unit_price}</span>
-                        </div>
+                        <span><span className="text-ink-4">Unit:</span> <span className="text-ink-2 font-medium">{comp.estimated_unit_price}</span></span>
                       )}
                       {comp.estimated_shipping_cost && (
-                        <div>
-                          <span className="text-workspace-muted">Ship: </span>
-                          <span className="text-teal font-medium">{comp.estimated_shipping_cost}</span>
-                        </div>
+                        <span><span className="text-ink-4">Shipping:</span> <span className="text-teal">{comp.estimated_shipping_cost}</span></span>
                       )}
                       {comp.estimated_landed_cost && (
-                        <div>
-                          <span className="text-workspace-muted">Landed: </span>
-                          <span className="text-workspace-text font-bold">{comp.estimated_landed_cost}</span>
-                        </div>
+                        <span><span className="text-ink-4">Landed:</span> <span className="text-ink font-semibold">{comp.estimated_landed_cost}</span></span>
                       )}
                     </div>
                   )}
 
-                  {/* Star ratings */}
-                  {comp && (comp.price_score || comp.quality_score) && (
-                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-                      {comp.price_score ? <StarRating score={comp.price_score} label="Price" size="sm" /> : null}
-                      {comp.quality_score ? <StarRating score={comp.quality_score} label="Quality" size="sm" /> : null}
-                      {comp.shipping_score ? <StarRating score={comp.shipping_score} label="Shipping" size="sm" /> : null}
-                      {comp.lead_time_score ? <StarRating score={comp.lead_time_score} label="Speed" size="sm" /> : null}
-                    </div>
-                  )}
-
-                  {/* Contact info */}
+                  {/* Contact */}
                   {supplier && (
-                    <div className="mt-3 flex items-center gap-3 flex-wrap">
+                    <div className="mt-3 flex items-center gap-3 text-[11px]">
                       {supplier.website && (
                         <a
                           href={supplier.website}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs px-3 py-1.5 bg-workspace-hover text-workspace-muted rounded-lg hover:text-teal transition-colors border border-workspace-border"
+                          className="text-teal hover:underline"
                         >
-                          Website →
+                          Website
                         </a>
                       )}
                       {supplier.email && (
-                        <span className="text-xs text-workspace-muted">{supplier.email}</span>
+                        <span className="text-ink-4">{supplier.email}</span>
                       )}
                     </div>
                   )}
@@ -349,16 +282,16 @@ export default function ComparePhase() {
 
           {/* Caveats */}
           {recommendation.caveats?.length > 0 && (
-            <div className="mt-6 p-4 glass-card border-amber-400/20">
-              <h4 className="text-xs font-medium text-amber-400 mb-2">Caveats</h4>
-              <ul className="space-y-1">
+            <div className="mt-6 card border-l-[2px] border-l-warm px-5 py-4">
+              <p className="text-[9px] uppercase tracking-wider text-ink-4 mb-2">Caveats</p>
+              <div className="space-y-1.5">
                 {recommendation.caveats.map((caveat: string, i: number) => (
-                  <li key={i} className="text-sm text-workspace-muted flex items-start gap-2">
-                    <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
-                    <span>{caveat}</span>
-                  </li>
+                  <p key={i} className="text-[12px] text-ink-3 flex items-start gap-2">
+                    <span className="text-warm mt-0.5 shrink-0">·</span>
+                    {caveat}
+                  </p>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
         </div>

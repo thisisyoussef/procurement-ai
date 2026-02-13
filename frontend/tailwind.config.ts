@@ -9,6 +9,16 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        cream: '#FAFAF7',
+        surface: '#FFFFFF',
+        'surface-2': '#F3F2EF',
+        'surface-3': '#EAE8E4',
+        ink: {
+          DEFAULT: '#111111',
+          2: '#333333',
+          3: '#777777',
+          4: '#AAAAAA',
+        },
         teal: {
           DEFAULT: '#00c9a7',
           50: '#ecfdf8',
@@ -22,27 +32,9 @@ const config: Config = {
           800: '#006758',
           900: '#005548',
         },
-        gold: {
-          DEFAULT: '#d4af37',
-          50: '#fdf8e8',
-          100: '#faefc4',
-          200: '#f5df8a',
-          300: '#eecf50',
-          400: '#d4af37',
-          500: '#b8922c',
-          600: '#967523',
-          700: '#74591b',
-          800: '#5c4617',
-          900: '#4a3912',
-        },
-        workspace: {
-          bg: '#0d1117',
-          surface: '#161b22',
-          border: '#30363d',
-          hover: '#1c2128',
-          muted: '#8b949e',
-          text: '#e6edf3',
-        },
+        warm: '#C9A96E',
+        'search-bg': '#0A0A0A',
+        'search-surface': '#141414',
       },
       fontFamily: {
         heading: ['"DM Serif Text"', 'Georgia', 'serif'],

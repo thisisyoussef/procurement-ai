@@ -15,13 +15,18 @@ export default function OutreachPhase() {
 
   if (!projectId || !recommendations || !discoveryResults) {
     return (
-      <div className="text-center py-16">
-        <p className="text-workspace-muted text-sm">
+      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
+        <p className="text-[13px] text-ink-4">
           Complete the Search phase to begin supplier outreach.
         </p>
       </div>
     )
   }
+
+  // Stats
+  const sentCount = o.outreachState?.supplier_statuses?.filter((s) => s.email_sent).length ?? 0
+  const awaitingCount = o.outreachState?.supplier_statuses?.filter((s) => s.email_sent && !s.response_received).length ?? 0
+  const responseCount = o.outreachState?.supplier_statuses?.filter((s) => s.response_received).length ?? 0
 
   const tabs: { key: OutreachTab; label: string; show: boolean }[] = [
     { key: 'select', label: 'Select', show: true },
@@ -35,34 +40,41 @@ export default function OutreachPhase() {
   ]
 
   return (
-    <div>
-      <h2 className="text-xl font-heading text-workspace-text mb-4">
-        Supplier Outreach
-      </h2>
+    <div className="max-w-4xl mx-auto px-6 py-8">
+      {/* Hero */}
+      <h2 className="font-heading text-2xl text-ink mb-1">Reaching out to the world.</h2>
+      {o.outreachState && (
+        <div className="flex gap-4 text-[11px] text-ink-4 mb-6">
+          <span>{sentCount} quoted</span>
+          <span>{awaitingCount} awaiting</span>
+          <span>{responseCount} responded</span>
+        </div>
+      )}
 
       {/* Sub-tabs */}
-      <div className="flex gap-1 mb-6 overflow-x-auto pb-1">
+      <div className="flex gap-0 border-b border-surface-3 mb-6 overflow-x-auto">
         {tabs.filter((t) => t.show).map((t) => (
           <button
             key={t.key}
             onClick={() => o.setTab(t.key)}
-            className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
-              o.tab === t.key
-                ? 'bg-teal/10 text-teal border border-teal/30'
-                : 'text-workspace-muted hover:bg-workspace-hover hover:text-workspace-text border border-transparent'
+            className={`relative px-4 py-3 text-[11px] font-medium tracking-[0.3px] transition-colors whitespace-nowrap ${
+              o.tab === t.key ? 'text-ink' : 'text-ink-4 hover:text-ink-3'
             }`}
           >
             {t.label}
+            {o.tab === t.key && (
+              <span className="absolute bottom-0 left-4 right-4 h-[1.5px] bg-teal rounded-full" />
+            )}
           </button>
         ))}
       </div>
 
       {/* Error */}
       {o.error && (
-        <div className="mb-4 p-3 glass-card border-red-500/30 text-sm text-red-400">
-          {o.error}
-          <button onClick={() => o.setError(null)} className="ml-2 text-red-300 hover:text-red-200">
-            ✕
+        <div className="mb-4 card border-l-[3px] border-l-red-400 px-5 py-3 flex items-center justify-between">
+          <span className="text-[12px] text-ink-2">{o.error}</span>
+          <button onClick={() => o.setError(null)} className="text-ink-4 hover:text-ink-2 text-[12px]">
+            Dismiss
           </button>
         </div>
       )}
@@ -70,37 +82,35 @@ export default function OutreachPhase() {
       {/* ── Select Suppliers ─────────────────────── */}
       {o.tab === 'select' && (
         <div>
-          <p className="text-sm text-workspace-muted mb-4">
+          <p className="text-[12px] text-ink-3 mb-4">
             Select suppliers to contact with RFQ emails:
           </p>
           <div className="space-y-2">
             {recommendations.recommendations.map((rec: any) => (
               <label
                 key={rec.supplier_index}
-                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-colors ${
                   o.selectedIndices.includes(rec.supplier_index)
-                    ? 'border-teal/40 bg-teal/5'
-                    : 'border-workspace-border hover:bg-workspace-hover'
+                    ? 'border-teal/40 bg-teal/[0.03]'
+                    : 'border-surface-3 hover:bg-surface-2/50'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={o.selectedIndices.includes(rec.supplier_index)}
                   onChange={() => o.toggleSupplier(rec.supplier_index)}
-                  className="rounded border-workspace-border accent-teal"
+                  className="rounded border-surface-3 accent-teal"
                 />
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-workspace-text">
+                <div className="flex-1 min-w-0">
+                  <span className="text-[13px] font-medium text-ink">
                     #{rec.rank} {rec.supplier_name}
                   </span>
-                  <span className="ml-2 text-xs text-workspace-muted">
-                    Score: {Math.round(rec.overall_score)} · {rec.best_for}
+                  <span className="ml-2 text-[11px] text-ink-4">
+                    Score: {Math.round(rec.overall_score)}
                   </span>
                 </div>
                 {discoveryResults.suppliers[rec.supplier_index]?.email && (
-                  <span className="text-[10px] text-teal bg-teal/10 px-2 py-0.5 rounded-full border border-teal/20">
-                    Has email
-                  </span>
+                  <span className="status-dot bg-teal" title="Has email" />
                 )}
               </label>
             ))}
@@ -108,8 +118,8 @@ export default function OutreachPhase() {
           <button
             onClick={o.startOutreach}
             disabled={o.selectedIndices.length === 0 || o.loading}
-            className="mt-4 px-5 py-2.5 bg-teal text-workspace-bg rounded-lg text-sm font-medium
-                       hover:bg-teal-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="mt-4 px-5 py-2.5 bg-teal text-white rounded-lg text-[13px] font-medium
+                       hover:bg-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             {o.loading ? 'Drafting...' : `Draft RFQ Emails (${o.selectedIndices.length})`}
           </button>
@@ -120,14 +130,13 @@ export default function OutreachPhase() {
       {o.tab === 'drafts' && o.outreachState && (
         <div className="space-y-4">
           {o.outreachState.draft_emails.map((draft, i) => (
-            <div key={i} className="glass-card p-4">
+            <div key={i} className="card p-5">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-workspace-text">{draft.supplier_name}</h3>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                  draft.status === 'sent' ? 'bg-green-400/10 text-green-400 border border-green-400/20'
-                  : draft.status === 'failed' ? 'bg-red-400/10 text-red-400 border border-red-400/20'
-                  : 'bg-workspace-hover text-workspace-muted border border-workspace-border'
-                }`}>
+                <h3 className="text-[13px] font-semibold text-ink">{draft.supplier_name}</h3>
+                <span className="flex items-center gap-1.5 text-[10px] text-ink-4">
+                  <span className={`status-dot ${
+                    draft.status === 'sent' ? 'bg-teal' : draft.status === 'failed' ? 'bg-red-400' : 'bg-ink-4/30'
+                  }`} />
                   {draft.status}
                 </span>
               </div>
@@ -137,21 +146,21 @@ export default function OutreachPhase() {
                   <input
                     value={o.editSubject}
                     onChange={(e) => o.setEditSubject(e.target.value)}
-                    className="w-full bg-workspace-bg border border-workspace-border rounded px-3 py-1.5 text-sm text-workspace-text mb-2"
+                    className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink mb-2 focus:ring-1 focus:ring-teal/30 focus:border-teal/50 focus:outline-none"
                   />
                   <textarea
                     value={o.editBody}
                     onChange={(e) => o.setEditBody(e.target.value)}
                     rows={8}
-                    className="w-full bg-workspace-bg border border-workspace-border rounded px-3 py-2 text-sm text-workspace-text"
+                    className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink focus:ring-1 focus:ring-teal/30 focus:border-teal/50 focus:outline-none resize-none"
                   />
                 </>
               ) : (
                 <>
-                  <p className="text-xs text-workspace-muted mb-1">
-                    Subject: <span className="text-workspace-text">{draft.subject}</span>
+                  <p className="text-[11px] text-ink-4 mb-1">
+                    Subject: <span className="text-ink-2">{draft.subject}</span>
                   </p>
-                  <pre className="text-xs text-workspace-muted whitespace-pre-wrap bg-workspace-bg rounded p-3 max-h-40 overflow-y-auto border border-workspace-border/50">
+                  <pre className="text-[11px] text-ink-3 whitespace-pre-wrap bg-cream rounded-lg p-3 max-h-40 overflow-y-auto border border-surface-3">
                     {draft.body}
                   </pre>
                 </>
@@ -162,7 +171,7 @@ export default function OutreachPhase() {
                   {o.editingDraft === i ? (
                     <button
                       onClick={() => o.setEditingDraft(null)}
-                      className="text-xs px-3 py-1.5 border border-workspace-border rounded text-workspace-muted hover:bg-workspace-hover"
+                      className="text-[11px] px-3 py-1.5 border border-surface-3 rounded-lg text-ink-4 hover:bg-surface-2 transition-colors"
                     >
                       Cancel
                     </button>
@@ -173,7 +182,7 @@ export default function OutreachPhase() {
                         o.setEditSubject(draft.subject)
                         o.setEditBody(draft.body)
                       }}
-                      className="text-xs px-3 py-1.5 border border-workspace-border rounded text-workspace-muted hover:bg-workspace-hover"
+                      className="text-[11px] px-3 py-1.5 border border-surface-3 rounded-lg text-ink-4 hover:bg-surface-2 transition-colors"
                     >
                       Edit
                     </button>
@@ -181,7 +190,7 @@ export default function OutreachPhase() {
                   <button
                     onClick={() => o.approveAndSend(i)}
                     disabled={o.loading}
-                    className="text-xs px-3 py-1.5 bg-teal text-workspace-bg rounded hover:bg-teal-400 disabled:opacity-30"
+                    className="text-[11px] px-3 py-1.5 bg-teal text-white rounded-lg hover:bg-teal-600 disabled:opacity-30 transition-colors"
                   >
                     {o.loading ? 'Sending...' : 'Approve & Send'}
                   </button>
@@ -195,38 +204,31 @@ export default function OutreachPhase() {
       {/* ── Tracking ─────────────────────────────── */}
       {o.tab === 'tracking' && o.outreachState && (
         <div>
-          <div className="glass-card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-workspace-border">
-                  <th className="text-left py-3 px-4 text-workspace-muted text-xs font-medium">Supplier</th>
-                  <th className="text-center py-3 px-4 text-workspace-muted text-xs font-medium">Sent</th>
-                  <th className="text-center py-3 px-4 text-workspace-muted text-xs font-medium">Response</th>
-                  <th className="text-center py-3 px-4 text-workspace-muted text-xs font-medium">Follow-ups</th>
-                </tr>
-              </thead>
-              <tbody>
-                {o.outreachState.supplier_statuses.map((s, i) => (
-                  <tr key={i} className="border-b border-workspace-border/50">
-                    <td className="py-3 px-4 text-workspace-text">{s.supplier_name}</td>
-                    <td className="py-3 px-4 text-center">
-                      {s.email_sent ? <span className="text-green-400">Sent</span> : <span className="text-workspace-muted">Pending</span>}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      {s.response_received ? <span className="text-green-400">Received</span>
-                        : s.email_sent ? <span className="text-amber-400">Awaiting</span>
-                        : <span className="text-workspace-muted">—</span>}
-                    </td>
-                    <td className="py-3 px-4 text-center text-workspace-muted">{s.follow_ups_sent}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-2">
+            {o.outreachState.supplier_statuses.map((s, i) => (
+              <div key={i} className="card px-5 py-3 flex items-center gap-4">
+                <span className="text-[13px] text-ink flex-1">{s.supplier_name}</span>
+                <span className="flex items-center gap-1.5 text-[10px] text-ink-4">
+                  <span className={`status-dot ${s.email_sent ? 'bg-teal' : 'bg-ink-4/30'}`} />
+                  {s.email_sent ? 'Sent' : 'Pending'}
+                </span>
+                <span className="flex items-center gap-1.5 text-[10px] text-ink-4">
+                  <span className={`status-dot ${
+                    s.response_received ? 'bg-teal' : s.email_sent ? 'bg-warm' : 'bg-ink-4/30'
+                  }`} />
+                  {s.response_received ? 'Received' : s.email_sent ? 'Awaiting' : '--'}
+                </span>
+                <span className="text-[10px] text-ink-4">
+                  {s.follow_ups_sent} follow-ups
+                </span>
+              </div>
+            ))}
           </div>
           <button
             onClick={o.generateFollowUps}
             disabled={o.loading}
-            className="mt-4 text-xs px-4 py-2 border border-workspace-border rounded-lg text-workspace-muted hover:bg-workspace-hover disabled:opacity-30"
+            className="mt-4 text-[11px] px-4 py-2 border border-surface-3 rounded-lg text-ink-4
+                       hover:bg-surface-2 disabled:opacity-30 transition-colors"
           >
             {o.loading ? 'Generating...' : 'Generate Follow-ups'}
           </button>
@@ -236,13 +238,14 @@ export default function OutreachPhase() {
       {/* ── Parse Responses ──────────────────────── */}
       {o.tab === 'responses' && o.outreachState && (
         <div>
-          <p className="text-sm text-workspace-muted mb-3">
+          <p className="text-[12px] text-ink-3 mb-3">
             Paste a supplier&apos;s email response to extract structured quote data:
           </p>
           <select
             value={o.parseSupplierIdx ?? ''}
             onChange={(e) => o.setParseSupplierIdx(Number(e.target.value))}
-            className="w-full bg-workspace-bg border border-workspace-border rounded-lg px-3 py-2 text-sm text-workspace-text mb-3"
+            className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink mb-3
+                       focus:ring-1 focus:ring-teal/30 focus:border-teal/50 focus:outline-none"
           >
             <option value="">Select a supplier...</option>
             {o.outreachState.supplier_statuses.map((s) => (
@@ -254,14 +257,14 @@ export default function OutreachPhase() {
             onChange={(e) => o.setResponseText(e.target.value)}
             placeholder="Paste the supplier's email response here..."
             rows={8}
-            className="w-full bg-workspace-bg border border-workspace-border rounded-lg px-3 py-2 text-sm text-workspace-text
-                       placeholder:text-workspace-muted/50 resize-none"
+            className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink
+                       placeholder:text-ink-4 resize-none focus:ring-1 focus:ring-teal/30 focus:border-teal/50 focus:outline-none"
           />
           <button
             onClick={o.parseResponse}
             disabled={o.parseSupplierIdx === null || !o.responseText.trim() || o.loading}
-            className="mt-3 px-4 py-2 bg-teal text-workspace-bg rounded-lg text-sm font-medium
-                       hover:bg-teal-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="mt-3 px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium
+                       hover:bg-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             {o.loading ? 'Parsing...' : 'Parse Quote'}
           </button>
@@ -272,34 +275,30 @@ export default function OutreachPhase() {
       {o.tab === 'quotes' && o.outreachState && (
         <div>
           {o.outreachState.parsed_quotes.length === 0 ? (
-            <p className="text-sm text-workspace-muted text-center py-8">
+            <p className="text-[13px] text-ink-4 text-center py-8">
               No quotes parsed yet. Go to Responses to add one.
             </p>
           ) : (
             <>
               <div className="space-y-3">
                 {o.outreachState.parsed_quotes.map((q, i) => (
-                  <div key={i} className="glass-card p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-semibold text-workspace-text">{q.supplier_name}</h3>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                        q.confidence_score >= 80 ? 'bg-green-400/10 text-green-400 border-green-400/20'
-                        : q.confidence_score >= 50 ? 'bg-amber-400/10 text-amber-400 border-amber-400/20'
-                        : 'bg-red-400/10 text-red-400 border-red-400/20'
-                      }`}>
+                  <div key={i} className="card p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-[13px] font-semibold text-ink">{q.supplier_name}</h3>
+                      <span className="text-[10px] text-ink-4">
                         {Math.round(q.confidence_score)}% confidence
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div><span className="text-workspace-muted">Unit Price:</span> <span className="text-workspace-text font-medium">{q.unit_price || 'N/A'}</span></div>
-                      <div><span className="text-workspace-muted">MOQ:</span> <span className="text-workspace-text">{q.moq || 'N/A'}</span></div>
-                      <div><span className="text-workspace-muted">Lead Time:</span> <span className="text-workspace-text">{q.lead_time || 'N/A'}</span></div>
-                      <div><span className="text-workspace-muted">Payment:</span> <span className="text-workspace-text">{q.payment_terms || 'N/A'}</span></div>
-                      <div><span className="text-workspace-muted">Shipping:</span> <span className="text-workspace-text">{q.shipping_terms || 'N/A'}</span></div>
-                      <div><span className="text-workspace-muted">Currency:</span> <span className="text-workspace-text">{q.currency}</span></div>
+                    <div className="grid grid-cols-2 gap-3 text-[11px]">
+                      <div><span className="text-ink-4">Unit Price:</span> <span className="text-ink-2 font-medium">{q.unit_price || 'N/A'}</span></div>
+                      <div><span className="text-ink-4">MOQ:</span> <span className="text-ink-2">{q.moq || 'N/A'}</span></div>
+                      <div><span className="text-ink-4">Lead Time:</span> <span className="text-ink-2">{q.lead_time || 'N/A'}</span></div>
+                      <div><span className="text-ink-4">Payment:</span> <span className="text-ink-2">{q.payment_terms || 'N/A'}</span></div>
+                      <div><span className="text-ink-4">Shipping:</span> <span className="text-ink-2">{q.shipping_terms || 'N/A'}</span></div>
+                      <div><span className="text-ink-4">Currency:</span> <span className="text-ink-2">{q.currency}</span></div>
                     </div>
                     {q.notes && (
-                      <p className="mt-2 text-xs text-workspace-muted bg-workspace-bg rounded p-2 border border-workspace-border/50">
+                      <p className="mt-2 text-[11px] text-ink-4 bg-cream rounded-lg p-2 border border-surface-3">
                         {q.notes}
                       </p>
                     )}
@@ -309,8 +308,8 @@ export default function OutreachPhase() {
               <button
                 onClick={o.recompare}
                 disabled={o.loading}
-                className="mt-4 px-4 py-2 bg-teal text-workspace-bg rounded-lg text-sm font-medium
-                           hover:bg-teal-400 disabled:opacity-30 transition-colors"
+                className="mt-4 px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium
+                           hover:bg-teal-600 disabled:opacity-30 transition-colors"
               >
                 {o.loading ? 'Re-comparing...' : 'Re-compare with Real Quotes'}
               </button>
@@ -324,12 +323,12 @@ export default function OutreachPhase() {
         <div>
           {(!o.outreachState.follow_up_emails || o.outreachState.follow_up_emails.length === 0) ? (
             <div className="text-center py-8">
-              <p className="text-sm text-workspace-muted mb-3">No follow-ups generated yet.</p>
+              <p className="text-[13px] text-ink-4 mb-3">No follow-ups generated yet.</p>
               <button
                 onClick={o.generateFollowUps}
                 disabled={o.loading}
-                className="px-4 py-2 bg-teal text-workspace-bg rounded-lg text-sm font-medium
-                           hover:bg-teal-400 disabled:opacity-30 transition-colors"
+                className="px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium
+                           hover:bg-teal-600 disabled:opacity-30 transition-colors"
               >
                 {o.loading ? 'Generating...' : 'Generate Follow-ups'}
               </button>
@@ -337,21 +336,21 @@ export default function OutreachPhase() {
           ) : (
             <div className="space-y-3">
               {o.outreachState.follow_up_emails.map((fu, i) => (
-                <div key={i} className="glass-card p-4">
+                <div key={i} className="card p-5">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-workspace-text">{fu.supplier_name}</h3>
+                    <h3 className="text-[13px] font-semibold text-ink">{fu.supplier_name}</h3>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-workspace-muted">#{fu.follow_up_number}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                        fu.status === 'sent' ? 'bg-green-400/10 text-green-400 border-green-400/20'
-                        : 'bg-workspace-hover text-workspace-muted border-workspace-border'
-                      }`}>{fu.status}</span>
+                      <span className="text-[10px] text-ink-4">#{fu.follow_up_number}</span>
+                      <span className="flex items-center gap-1.5 text-[10px] text-ink-4">
+                        <span className={`status-dot ${fu.status === 'sent' ? 'bg-teal' : 'bg-ink-4/30'}`} />
+                        {fu.status}
+                      </span>
                     </div>
                   </div>
-                  <p className="text-xs text-workspace-muted mb-1">
-                    Subject: <span className="text-workspace-text">{fu.subject}</span>
+                  <p className="text-[11px] text-ink-4 mb-1">
+                    Subject: <span className="text-ink-2">{fu.subject}</span>
                   </p>
-                  <pre className="text-xs text-workspace-muted whitespace-pre-wrap bg-workspace-bg rounded p-3 max-h-32 overflow-y-auto border border-workspace-border/50">
+                  <pre className="text-[11px] text-ink-3 whitespace-pre-wrap bg-cream rounded-lg p-3 max-h-32 overflow-y-auto border border-surface-3">
                     {fu.body}
                   </pre>
                 </div>
@@ -365,15 +364,15 @@ export default function OutreachPhase() {
       {o.tab === 'auto' && (
         <div>
           <div className="flex items-center gap-2 mb-4">
-            <h3 className="text-sm font-semibold text-workspace-text">Auto-Outreach</h3>
-            <span className="text-[9px] font-medium bg-gold/10 text-gold px-1.5 py-0.5 rounded border border-gold/20">Beta</span>
+            <h3 className="text-[13px] font-semibold text-ink">Auto-Outreach</h3>
+            <span className="text-[9px] font-bold text-warm tracking-wider uppercase">Beta</span>
           </div>
-          <p className="text-sm text-workspace-muted mb-4">
+          <p className="text-[12px] text-ink-3 mb-4">
             Automatically draft and queue RFQ emails for suppliers above a minimum verification score.
           </p>
           <div className="mb-4">
-            <label className="text-xs text-workspace-muted mb-1 block">
-              Min score: <span className="font-medium text-workspace-text">{o.autoThreshold}</span>
+            <label className="text-[11px] text-ink-4 mb-1 block">
+              Min score: <span className="font-medium text-ink-2">{o.autoThreshold}</span>
             </label>
             <input
               type="range" min={40} max={100} step={5}
@@ -381,8 +380,8 @@ export default function OutreachPhase() {
               onChange={(e) => o.setAutoThreshold(Number(e.target.value))}
               className="w-full accent-teal"
             />
-            <div className="flex justify-between text-[10px] text-workspace-muted mt-0.5">
-              <span>40 (more)</span>
+            <div className="flex justify-between text-[9px] text-ink-4 mt-0.5">
+              <span>40 (more suppliers)</span>
               <span>100 (top only)</span>
             </div>
           </div>
@@ -390,28 +389,28 @@ export default function OutreachPhase() {
             <button
               onClick={o.configureAutoOutreach}
               disabled={o.loading}
-              className="px-4 py-2 border border-workspace-border rounded-lg text-sm text-workspace-muted hover:bg-workspace-hover disabled:opacity-30"
+              className="px-4 py-2 border border-surface-3 rounded-lg text-[11px] text-ink-4 hover:bg-surface-2 disabled:opacity-30 transition-colors"
             >
               {o.loading ? 'Saving...' : 'Save Config'}
             </button>
             <button
               onClick={o.startAutoOutreach}
               disabled={o.loading}
-              className="px-4 py-2 bg-teal text-workspace-bg rounded-lg text-sm font-medium hover:bg-teal-400 disabled:opacity-30"
+              className="px-4 py-2 bg-teal text-white rounded-lg text-[11px] font-medium hover:bg-teal-600 disabled:opacity-30 transition-colors"
             >
               {o.loading ? 'Drafting...' : 'Draft & Queue'}
             </button>
           </div>
           {o.autoStatus?.enabled && (
-            <div className="glass-card p-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-workspace-muted">Queued:</span> <span className="text-workspace-text font-medium">{o.autoStatus.queued_count}</span></div>
-                <div><span className="text-workspace-muted">Sent:</span> <span className="text-workspace-text font-medium">{o.autoStatus.sent_count}</span></div>
+            <div className="card p-4">
+              <div className="grid grid-cols-2 gap-3 text-[12px]">
+                <div><span className="text-ink-4">Queued:</span> <span className="text-ink font-medium">{o.autoStatus.queued_count}</span></div>
+                <div><span className="text-ink-4">Sent:</span> <span className="text-ink font-medium">{o.autoStatus.sent_count}</span></div>
               </div>
               {o.autoStatus.queued_suppliers.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
+                <div className="mt-3 flex flex-wrap gap-1.5">
                   {o.autoStatus.queued_suppliers.map((name) => (
-                    <span key={name} className="text-xs bg-teal/10 text-teal px-2 py-0.5 rounded-full border border-teal/20">{name}</span>
+                    <span key={name} className="text-[10px] bg-teal/5 text-teal px-2 py-0.5 rounded-full border border-teal/15">{name}</span>
                   ))}
                 </div>
               )}
@@ -424,17 +423,17 @@ export default function OutreachPhase() {
       {o.tab === 'phone' && (
         <div>
           {/* Config */}
-          <div className="glass-card p-4 mb-6">
+          <div className="card p-5 mb-6">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-workspace-text">AI Phone Calling</h3>
-                <span className="text-[9px] font-medium bg-purple-400/10 text-purple-400 px-1.5 py-0.5 rounded border border-purple-400/20">Retell AI</span>
+                <h3 className="text-[13px] font-semibold text-ink">AI Phone Calling</h3>
+                <span className="text-[9px] font-bold text-ink-4 tracking-wider uppercase">Retell AI</span>
               </div>
               <button
                 onClick={() => o.setPhoneConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                className={`relative w-9 h-5 rounded-full transition-colors ${o.phoneConfig.enabled ? 'bg-teal' : 'bg-workspace-border'}`}
+                className={`relative w-9 h-5 rounded-full transition-colors ${o.phoneConfig.enabled ? 'bg-teal' : 'bg-surface-3'}`}
               >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${o.phoneConfig.enabled ? 'translate-x-4' : ''}`} />
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${o.phoneConfig.enabled ? 'translate-x-4' : ''}`} />
               </button>
             </div>
 
@@ -442,11 +441,11 @@ export default function OutreachPhase() {
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-workspace-muted mb-1 block">Voice</label>
+                    <label className="text-[10px] text-ink-4 mb-1 block">Voice</label>
                     <select
                       value={o.phoneConfig.voice_id}
                       onChange={(e) => o.setPhoneConfig((prev) => ({ ...prev, voice_id: e.target.value }))}
-                      className="w-full bg-workspace-bg border border-workspace-border rounded px-3 py-1.5 text-sm text-workspace-text"
+                      className="w-full border border-surface-3 rounded-lg px-3 py-1.5 text-[12px] text-ink focus:ring-1 focus:ring-teal/30 focus:outline-none"
                     >
                       <option value="11labs-Adrian">Adrian (Male)</option>
                       <option value="11labs-Myra">Myra (Female)</option>
@@ -454,11 +453,11 @@ export default function OutreachPhase() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-workspace-muted mb-1 block">Max Duration</label>
+                    <label className="text-[10px] text-ink-4 mb-1 block">Max Duration</label>
                     <select
                       value={o.phoneConfig.max_call_duration_seconds}
                       onChange={(e) => o.setPhoneConfig((prev) => ({ ...prev, max_call_duration_seconds: Number(e.target.value) }))}
-                      className="w-full bg-workspace-bg border border-workspace-border rounded px-3 py-1.5 text-sm text-workspace-text"
+                      className="w-full border border-surface-3 rounded-lg px-3 py-1.5 text-[12px] text-ink focus:ring-1 focus:ring-teal/30 focus:outline-none"
                     >
                       <option value={180}>3 min</option>
                       <option value={300}>5 min</option>
@@ -467,7 +466,7 @@ export default function OutreachPhase() {
                   </div>
                 </div>
                 <button onClick={o.savePhoneConfig} disabled={o.loading}
-                  className="text-xs px-3 py-1.5 bg-teal text-workspace-bg rounded hover:bg-teal-400 disabled:opacity-30">
+                  className="text-[11px] px-3 py-1.5 bg-teal text-white rounded-lg hover:bg-teal-600 disabled:opacity-30 transition-colors">
                   {o.loading ? 'Saving...' : 'Save Config'}
                 </button>
               </div>
@@ -476,8 +475,8 @@ export default function OutreachPhase() {
 
           {/* Make a call */}
           {o.phoneConfig.enabled && (
-            <div className="glass-card p-4 mb-6">
-              <h3 className="text-sm font-semibold text-workspace-text mb-3">Make a Call</h3>
+            <div className="card p-5 mb-6">
+              <h3 className="text-[13px] font-semibold text-ink mb-3">Make a Call</h3>
               <div className="space-y-3">
                 <select
                   value={o.callSupplierIdx ?? ''}
@@ -487,7 +486,7 @@ export default function OutreachPhase() {
                     const supplier = discoveryResults.suppliers[idx]
                     if (supplier?.phone) o.setCallPhoneNumber(supplier.phone)
                   }}
-                  className="w-full bg-workspace-bg border border-workspace-border rounded-lg px-3 py-2 text-sm text-workspace-text"
+                  className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink focus:ring-1 focus:ring-teal/30 focus:outline-none"
                 >
                   <option value="">Select supplier...</option>
                   {recommendations.recommendations.map((rec: any) => (
@@ -501,19 +500,19 @@ export default function OutreachPhase() {
                   value={o.callPhoneNumber}
                   onChange={(e) => o.setCallPhoneNumber(e.target.value)}
                   placeholder="+1 (555) 123-4567"
-                  className="w-full bg-workspace-bg border border-workspace-border rounded-lg px-3 py-2 text-sm text-workspace-text placeholder:text-workspace-muted/50"
+                  className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink placeholder:text-ink-4 focus:ring-1 focus:ring-teal/30 focus:outline-none"
                 />
                 <textarea
                   value={o.callQuestions}
                   onChange={(e) => o.setCallQuestions(e.target.value)}
                   placeholder="Custom questions (one per line)..."
                   rows={3}
-                  className="w-full bg-workspace-bg border border-workspace-border rounded-lg px-3 py-2 text-sm text-workspace-text placeholder:text-workspace-muted/50 resize-none"
+                  className="w-full border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink placeholder:text-ink-4 resize-none focus:ring-1 focus:ring-teal/30 focus:outline-none"
                 />
                 <button
                   onClick={o.startPhoneCall}
                   disabled={o.callSupplierIdx === null || !o.callPhoneNumber.trim() || o.loading}
-                  className="px-4 py-2 bg-teal text-workspace-bg rounded-lg text-sm font-medium hover:bg-teal-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium hover:bg-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   {o.loading ? 'Calling...' : 'Start AI Call'}
                 </button>
@@ -524,36 +523,35 @@ export default function OutreachPhase() {
           {/* Call history */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-workspace-text">Call History</h3>
-              <button onClick={o.fetchPhoneCalls} className="text-xs text-teal hover:text-teal-300">Refresh</button>
+              <h3 className="text-[13px] font-semibold text-ink">Call History</h3>
+              <button onClick={o.fetchPhoneCalls} className="text-[11px] text-teal hover:underline">Refresh</button>
             </div>
             {o.phoneCalls.length === 0 ? (
-              <p className="text-sm text-workspace-muted text-center py-6">
+              <p className="text-[13px] text-ink-4 text-center py-6">
                 No calls yet.
               </p>
             ) : (
               <div className="space-y-3">
                 {o.phoneCalls.map((call) => {
-                  const statusColors: Record<string, string> = {
-                    pending: 'bg-amber-400/10 text-amber-400 border-amber-400/20',
-                    in_progress: 'bg-teal/10 text-teal border-teal/20',
-                    completed: 'bg-green-400/10 text-green-400 border-green-400/20',
-                    failed: 'bg-red-400/10 text-red-400 border-red-400/20',
-                    no_answer: 'bg-workspace-hover text-workspace-muted border-workspace-border',
-                  }
                   const parsed = o.parsedCallResults.find((r) => r.call_id === call.call_id)
 
                   return (
-                    <div key={call.call_id} className="glass-card p-4">
+                    <div key={call.call_id} className="card p-5">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-medium text-workspace-text">{call.supplier_name}</h4>
+                        <h4 className="text-[13px] font-medium text-ink">{call.supplier_name}</h4>
                         <div className="flex items-center gap-2">
                           {call.duration_seconds > 0 && (
-                            <span className="text-xs text-workspace-muted">
+                            <span className="text-[10px] text-ink-4">
                               {Math.floor(call.duration_seconds / 60)}m {Math.round(call.duration_seconds % 60)}s
                             </span>
                           )}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${statusColors[call.status] || statusColors.no_answer}`}>
+                          <span className="flex items-center gap-1.5 text-[10px] text-ink-4">
+                            <span className={`status-dot ${
+                              call.status === 'completed' ? 'bg-teal'
+                              : call.status === 'in_progress' ? 'bg-teal animate-pulse-dot'
+                              : call.status === 'failed' ? 'bg-red-400'
+                              : 'bg-ink-4/30'
+                            }`} />
                             {call.status}
                           </span>
                         </div>
@@ -562,46 +560,48 @@ export default function OutreachPhase() {
                       <div className="flex gap-2 flex-wrap">
                         {(call.status === 'pending' || call.status === 'in_progress') && (
                           <button onClick={() => o.refreshCallStatus(call.call_id)}
-                            className="text-xs px-3 py-1.5 border border-workspace-border rounded text-workspace-muted hover:bg-workspace-hover">
+                            className="text-[11px] px-3 py-1.5 border border-surface-3 rounded-lg text-ink-4 hover:bg-surface-2 transition-colors">
                             Check Status
                           </button>
                         )}
                         {call.transcript && (
                           <button
                             onClick={() => o.setExpandedTranscript(o.expandedTranscript === call.call_id ? null : call.call_id)}
-                            className="text-xs px-3 py-1.5 border border-workspace-border rounded text-workspace-muted hover:bg-workspace-hover"
+                            className="text-[11px] px-3 py-1.5 border border-surface-3 rounded-lg text-ink-4 hover:bg-surface-2 transition-colors"
                           >
                             {o.expandedTranscript === call.call_id ? 'Hide' : 'Transcript'}
                           </button>
                         )}
                         {call.status === 'completed' && call.transcript && !parsed && (
                           <button onClick={() => o.parseCallTranscript(call.call_id)} disabled={o.loading}
-                            className="text-xs px-3 py-1.5 bg-teal text-workspace-bg rounded hover:bg-teal-400 disabled:opacity-30">
+                            className="text-[11px] px-3 py-1.5 bg-teal text-white rounded-lg hover:bg-teal-600 disabled:opacity-30 transition-colors">
                             {o.loading ? 'Parsing...' : 'Parse'}
                           </button>
                         )}
                       </div>
 
                       {o.expandedTranscript === call.call_id && call.transcript && (
-                        <pre className="mt-3 text-xs text-workspace-muted whitespace-pre-wrap bg-workspace-bg rounded p-3 max-h-60 overflow-y-auto border border-workspace-border/50">
+                        <pre className="mt-3 text-[11px] text-ink-3 whitespace-pre-wrap bg-cream rounded-lg p-3 max-h-60 overflow-y-auto border border-surface-3">
                           {call.transcript}
                         </pre>
                       )}
 
                       {parsed && (
-                        <div className="mt-3 border-t border-workspace-border/50 pt-3">
-                          <h5 className="text-xs font-medium text-workspace-muted mb-2">Extracted</h5>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            {parsed.pricing_info && <div><span className="text-workspace-muted">Price:</span> <span className="text-workspace-text font-medium">{parsed.pricing_info}</span></div>}
-                            {parsed.moq && <div><span className="text-workspace-muted">MOQ:</span> <span className="text-workspace-text">{parsed.moq}</span></div>}
-                            {parsed.lead_time && <div><span className="text-workspace-muted">Lead:</span> <span className="text-workspace-text">{parsed.lead_time}</span></div>}
+                        <div className="mt-3 border-t border-surface-3 pt-3">
+                          <p className="text-[9px] uppercase tracking-wider text-ink-4 mb-2">Extracted</p>
+                          <div className="grid grid-cols-2 gap-2 text-[11px]">
+                            {parsed.pricing_info && <div><span className="text-ink-4">Price:</span> <span className="text-ink-2 font-medium">{parsed.pricing_info}</span></div>}
+                            {parsed.moq && <div><span className="text-ink-4">MOQ:</span> <span className="text-ink-2">{parsed.moq}</span></div>}
+                            {parsed.lead_time && <div><span className="text-ink-4">Lead:</span> <span className="text-ink-2">{parsed.lead_time}</span></div>}
                           </div>
                           {parsed.key_findings.length > 0 && (
-                            <ul className="mt-2 space-y-0.5">
+                            <div className="mt-2 space-y-0.5">
                               {parsed.key_findings.map((f: string, j: number) => (
-                                <li key={j} className="text-xs text-workspace-muted">• {f}</li>
+                                <p key={j} className="text-[11px] text-ink-3 flex items-start gap-1.5">
+                                  <span className="text-teal mt-0.5 shrink-0">·</span> {f}
+                                </p>
                               ))}
-                            </ul>
+                            </div>
                           )}
                         </div>
                       )}
