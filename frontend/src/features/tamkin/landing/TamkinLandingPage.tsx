@@ -12,6 +12,7 @@ import {
   Workflow,
 } from 'lucide-react'
 
+import ExperienceToggle from '@/features/tamkin/components/ExperienceToggle'
 import { checkBackendHealth, createMission } from '@/lib/api/tamkinClient'
 import { TAMKIN_CORE_LINE, TAMKIN_COPY } from '@/features/tamkin/copy/voice'
 
@@ -32,7 +33,7 @@ const INITIAL_FORM: IntakeFormState = {
 }
 
 const HERO_STATS = [
-  { label: 'Search + network in one flow', value: 'Hybrid sourcing' },
+  { label: 'Search + Network in one flow', value: 'Hybrid sourcing' },
   { label: 'Operator review points', value: 'High-impact only' },
   { label: 'Mission control speed', value: 'Minutes, not months' },
 ]
@@ -45,21 +46,21 @@ const HOW_IT_WORKS = [
   },
   {
     icon: Globe,
-    title: 'Agent runs search + vetting',
-    copy: 'The agent checks web sources, supplier directories, and your network memory for strong matches.',
+    title: 'Agent runs the search and vetting',
+    copy: 'The agent pulls from web sources, directories, and supplier memory while checking quality signals.',
   },
   {
     icon: Workflow,
-    title: 'Approve only key decisions',
-    copy: 'You only step in for shortlist lock-in, outbound send, and final supplier selection.',
+    title: 'Approve only what matters',
+    copy: 'You only step in for shortlist lock-in, outbound send, and final supplier decisions.',
   },
 ]
 
 interface TamkinLandingPageProps {
-  experienceEnabled?: boolean
+  experienceEnabled: boolean
 }
 
-export default function TamkinLandingPage({ experienceEnabled: _experienceEnabled }: TamkinLandingPageProps) {
+export default function TamkinLandingPage({ experienceEnabled }: TamkinLandingPageProps) {
   const router = useRouter()
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
   const [showIntake, setShowIntake] = useState(false)
@@ -88,7 +89,7 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
     ].filter(Boolean)
 
     return segments.length > 0
-      ? `${segments.join(' · ')}. Find strong suppliers, compare quotes, and ask me only for high-impact approvals.`
+      ? `${segments.join(' | ')}. Please find the right suppliers, compare quotes, and keep me updated with key approvals only.`
       : 'Tell Tamkin your product, quantity, budget, timeline, and destination to start a mission.'
   }, [form])
 
@@ -125,10 +126,11 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
 
   return (
     <main className="tamkin-shell min-h-screen overflow-x-clip">
+      <ExperienceToggle enabled={experienceEnabled} />
       <div className="tamkin-bg-orbs" aria-hidden />
 
       <header className="sticky top-0 z-40 border-b border-white/10 bg-[rgba(8,16,24,0.82)] backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="tamkin-gold-ring flex h-10 w-10 items-center justify-center rounded-xl bg-[#132235] shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
               <Factory className="h-5 w-5 text-[#f5d9ab]" />
@@ -139,15 +141,15 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            <span className="hidden rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-[#dbe4ef] lg:inline-flex">
+          <div className="flex items-center gap-3">
+            <span className="hidden rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-[#dbe4ef] md:inline-flex">
               {TAMKIN_COPY.navTagline}
             </span>
             <span
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              className={`rounded-full px-3 py-1 text-xs font-medium ${
                 backendOnline === false
-                  ? 'border-red-300/50 bg-red-500/20 text-red-100'
-                  : 'border-emerald-300/40 bg-emerald-500/20 text-emerald-100'
+                  ? 'border border-red-300/50 bg-red-500/20 text-red-100'
+                  : 'border border-emerald-300/40 bg-emerald-500/20 text-emerald-100'
               }`}
             >
               {backendOnline === false ? 'API offline' : 'API connected'}
@@ -156,17 +158,17 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
         </div>
       </header>
 
-      <section className="mx-auto grid w-full max-w-7xl gap-8 px-4 pb-12 pt-12 sm:px-6 lg:grid-cols-12 lg:gap-10 lg:px-8 lg:pt-16">
-        <div className="lg:col-span-7">
+      <section className="relative mx-auto grid w-full max-w-[1240px] gap-10 px-6 pb-20 pt-16 lg:grid-cols-[1.15fr_0.85fr]">
+        <div>
           <p className="mb-4 inline-flex rounded-full border border-[#f3cb8b66] bg-[#f3cb8b1f] px-4 py-1 text-xs uppercase tracking-[0.2em] text-[#f5d9ab]">
             {TAMKIN_COPY.heroEyebrow}
           </p>
-
-          <h1 className="tamkin-display text-4xl leading-[1.02] text-[#fff4dc] sm:text-5xl lg:text-6xl">
+          <h1 className="tamkin-display text-5xl leading-[1.02] text-[#fff4dc] md:text-6xl">
             {TAMKIN_COPY.heroTitle}
           </h1>
-
-          <p className="mt-5 max-w-2xl text-lg leading-relaxed text-[#cad6e3]">{TAMKIN_COPY.heroSubtitle}</p>
+          <p className="mt-5 max-w-2xl text-lg leading-relaxed text-[#cad6e3]">
+            {TAMKIN_COPY.heroSubtitle}
+          </p>
           <p className="mt-4 max-w-2xl text-base text-[#f3cb8b]">{TAMKIN_CORE_LINE}</p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -187,11 +189,11 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
 
           <p className="mt-4 text-sm text-[#95a8be]">{TAMKIN_COPY.trustLine}</p>
 
-          <div className="mt-8 grid gap-3 sm:grid-cols-3">
+          <div className="mt-8 grid gap-3 md:grid-cols-3">
             {HERO_STATS.map((item) => (
               <article
                 key={item.label}
-                className="rounded-2xl border border-white/10 bg-[linear-gradient(165deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02))] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.24)]"
+                className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)]"
               >
                 <p className="text-xl font-semibold text-[#f9f2e5]">{item.value}</p>
                 <p className="mt-1 text-xs text-[#96a9be]">{item.label}</p>
@@ -200,8 +202,8 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
           </div>
         </div>
 
-        <div id="mission-preview" className="lg:col-span-5">
-          <div className="tamkin-panel rounded-[28px] border border-white/10 bg-[linear-gradient(160deg,#131f2dcc,#0d1622e8)] p-5 shadow-[0_35px_90px_rgba(0,0,0,0.42)] sm:p-6">
+        <div id="mission-preview" className="relative">
+          <div className="tamkin-panel h-full rounded-[28px] border border-white/10 bg-[linear-gradient(160deg,#131f2dcc,#0d1622e8)] p-6 shadow-[0_35px_90px_rgba(0,0,0,0.42)]">
             <div className="mb-4 flex items-center justify-between">
               <p className="text-sm font-medium text-[#e8eff7]">Mission control preview</p>
               <span className="rounded-full border border-[#f3cb8b59] bg-[#f3cb8b26] px-3 py-1 text-xs text-[#f5d9ab]">
@@ -211,7 +213,7 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
 
             <div className="space-y-3">
               <div className="rounded-2xl border border-white/10 bg-[#0e1824] p-4">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-[#8ea3bb]">Mission input</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-[#8ea3bb]">Mission input</p>
                 <p className="mt-2 text-sm leading-relaxed text-[#ecf2f9]">{missionPreview}</p>
               </div>
 
@@ -234,22 +236,20 @@ export default function TamkinLandingPage({ experienceEnabled: _experienceEnable
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-7xl px-4 pb-12 sm:px-6 lg:px-8">
-        <div className="grid gap-4 md:grid-cols-3">
-          {HOW_IT_WORKS.map((item) => (
-            <article
-              key={item.title}
-              className="rounded-2xl border border-white/10 bg-[linear-gradient(170deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-6 transition hover:border-[#f3cb8b66] hover:bg-white/[0.055]"
-            >
-              <item.icon className="h-5 w-5 text-[#f5d9ab]" />
-              <h3 className="mt-4 text-lg font-semibold text-[#f7ede0]">{item.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[#afbed0]">{item.copy}</p>
-            </article>
-          ))}
-        </div>
+      <section className="mx-auto grid w-full max-w-[1240px] gap-8 px-6 pb-16 md:grid-cols-3">
+        {HOW_IT_WORKS.map((item) => (
+          <article
+            key={item.title}
+            className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-[#f3cb8b66] hover:bg-white/[0.055]"
+          >
+            <item.icon className="h-5 w-5 text-[#f5d9ab]" />
+            <h3 className="mt-4 text-lg font-semibold text-[#f7ede0]">{item.title}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-[#afbed0]">{item.copy}</p>
+          </article>
+        ))}
       </section>
 
-      <section className="mx-auto w-full max-w-7xl px-4 pb-20 sm:px-6 lg:px-8">
+      <section className="mx-auto w-full max-w-[1240px] px-6 pb-20">
         <div className="grid gap-6 rounded-[28px] border border-white/10 bg-[linear-gradient(145deg,#0f1824,#111f30)] p-8 md:grid-cols-[1.1fr_0.9fr]">
           <div>
             <h2 className="tamkin-display text-4xl text-[#fff2db]">A sourcing operator in your pocket</h2>
