@@ -1863,12 +1863,17 @@ async def get_communication_monitor(
 ):
     """Get full communication monitor state for outreach."""
     project = await _get_project(project_id, current_user)
-    outreach = _get_outreach_state(project)
     owner_email = _owner_email_from_user(current_user)
     if owner_email:
         project["owner_email"] = owner_email
     else:
         owner_email = await resolve_project_owner_email(project)
+    raw = project.get("outreach_state")
+    if raw:
+        outreach = OutreachState(**raw) if isinstance(raw, dict) else raw
+    else:
+        # Return an empty monitor snapshot instead of 400 when outreach has not started yet.
+        outreach = OutreachState()
     set_owner_email(outreach, owner_email)
     ensure_monitor(outreach, owner_email=owner_email)
 

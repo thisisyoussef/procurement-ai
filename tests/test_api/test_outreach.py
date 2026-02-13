@@ -320,6 +320,23 @@ def test_parse_response_excludes_supplier_when_unfulfillable():
     assert updated["outreach_state"]["excluded_suppliers"] == [0]
 
 
+def test_monitor_returns_empty_state_when_outreach_not_started():
+    _projects.clear()
+    project_id = "proj-outreach-monitor-empty"
+    _seed_project(project_id)
+    _projects[project_id].pop("outreach_state", None)
+
+    response = client.get(
+        f"/api/v1/projects/{project_id}/outreach/monitor",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_outbound"] == 0
+    assert payload["total_inbound"] == 0
+    assert isinstance(payload["messages"], list)
+
+
 def test_retry_failed_outreach_resends_failed_drafts():
     _projects.clear()
     project_id = "proj-outreach-retry-1"
