@@ -3,6 +3,7 @@
 import logging
 import time
 import traceback
+from collections import Counter
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,17 +15,16 @@ from app.schemas.agent_state import (
     AutoOutreachConfig,
     DiscoveredSupplier,
     DiscoveryResults,
+    OutreachEvent,
+    OutreachPlanStep,
     OutreachState,
     ParsedRequirements,
     RecommendationResult,
+    SupplierOutreachPlan,
     SupplierOutreachStatus,
     VerificationResults,
 )
-from app.schemas.project import (
-    EmailApprovalRequest,
-    OutreachStartRequest,
-    QuoteParseRequest,
-)
+from app.schemas.project import EmailApprovalRequest, OutreachStartRequest, QuoteParseRequest
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,66 @@ def _get_outreach_state(project: dict) -> OutreachState:
     return OutreachState(**raw) if isinstance(raw, dict) else raw
 
 
+def _append_event(
+    outreach: OutreachState,
+    event_type: str,
+    supplier_index: int | None = None,
+    supplier_name: str | None = None,
+    **details,
+) -> None:
+    outreach.events.append(
+        OutreachEvent(
+            event_type=event_type,
+            supplier_index=supplier_index,
+            supplier_name=supplier_name,
+            details=details,
+        )
+    )
+
+
+def _build_supplier_plan(
+    supplier: DiscoveredSupplier,
+    supplier_index: int,
+    requirements: ParsedRequirements,
+    recommendation_label: str | None,
+) -> SupplierOutreachPlan:
+    friction_risks: list[str] = []
+    if not supplier.email:
+        friction_risks.append("missing_direct_email")
+    if not requirements.quantity:
+        friction_risks.append("incomplete_quantity")
+    if not requirements.delivery_location:
+        friction_risks.append("missing_delivery_location")
+
+    objective = f"Secure a valid quote for {requirements.product_type}"
+    if recommendation_label:
+        objective += f" ({recommendation_label})"
+
+    steps = [
+        OutreachPlanStep(stage="intent_capture", objective="Confirm buying intent and constraints", owner="buyer", due_in_hours=0),
+        OutreachPlanStep(stage="rfq_send", objective="Send personalized RFQ with clear CTA", owner="system", due_in_hours=1),
+        OutreachPlanStep(stage="delivery_check", objective="Validate delivery/open signal", owner="system", due_in_hours=6),
+        OutreachPlanStep(stage="response_capture", objective="Capture and parse supplier response", owner="system", due_in_hours=48),
+        OutreachPlanStep(stage="decision_support", objective=objective, owner="system", due_in_hours=72),
+    ]
+
+    return SupplierOutreachPlan(
+        supplier_name=supplier.name,
+        supplier_index=supplier_index,
+        channel="email",
+        friction_risks=friction_risks,
+        steps=steps,
+    )
+
+
+def _upsert_plan(outreach: OutreachState, plan: SupplierOutreachPlan) -> None:
+    for idx, existing in enumerate(outreach.supplier_plans):
+        if existing.supplier_index == plan.supplier_index:
+            outreach.supplier_plans[idx] = plan
+            return
+    outreach.supplier_plans.append(plan)
+
+
 @router.post("/start")
 async def start_outreach(project_id: str, request: OutreachStartRequest):
     """Select suppliers and draft personalized RFQ emails."""
@@ -59,39 +119,36 @@ async def start_outreach(project_id: str, request: OutreachStartRequest):
         reqs = ParsedRequirements(**project["parsed_requirements"])
         discovery = DiscoveryResults(**project["discovery_results"])
         recs = RecommendationResult(**project["recommendation_result"])
+        rec_by_idx = {r.supplier_index: r.best_for for r in recs.recommendations}
 
-        # Get selected suppliers by index
         selected: list[DiscoveredSupplier] = []
+        selected_indices: list[int] = []
         for idx in request.supplier_indices:
-            if idx < len(discovery.suppliers):
+            if 0 <= idx < len(discovery.suppliers):
                 selected.append(discovery.suppliers[idx])
+                selected_indices.append(idx)
 
         if not selected:
             raise HTTPException(status_code=400, detail="No valid supplier indices provided")
 
-        # Draft emails
         result = await draft_outreach_emails(selected, reqs, recs)
 
-        # Initialize outreach state
-        supplier_statuses = [
-            SupplierOutreachStatus(
-                supplier_name=s.name,
-                supplier_index=idx,
-            )
-            for idx, s in zip(request.supplier_indices, selected)
-        ]
+        supplier_statuses = [SupplierOutreachStatus(supplier_name=s.name, supplier_index=idx) for idx, s in zip(selected_indices, selected)]
 
         outreach = OutreachState(
-            selected_suppliers=request.supplier_indices,
+            selected_suppliers=selected_indices,
             supplier_statuses=supplier_statuses,
             draft_emails=result.drafts,
         )
-        project["outreach_state"] = outreach.model_dump(mode="json")
 
-        return {
-            "drafts": [d.model_dump() for d in result.drafts],
-            "summary": result.summary,
-        }
+        _append_event(outreach, "intent_registered", details={"selected_suppliers": len(selected_indices)})
+        for idx, supplier in zip(selected_indices, selected):
+            plan = _build_supplier_plan(supplier, idx, reqs, rec_by_idx.get(idx))
+            _upsert_plan(outreach, plan)
+            _append_event(outreach, "outreach_planned", supplier_index=idx, supplier_name=supplier.name, friction_risks=plan.friction_risks)
+
+        project["outreach_state"] = outreach.model_dump(mode="json")
+        return {"drafts": [d.model_dump() for d in result.drafts], "summary": result.summary}
 
     except HTTPException:
         raise
@@ -111,35 +168,31 @@ async def approve_and_send(project_id: str, draft_index: int, request: EmailAppr
 
     draft = outreach.draft_emails[draft_index]
 
-    # Apply edits if provided
     if request.edited_subject:
         draft.subject = request.edited_subject
     if request.edited_body:
         draft.body = request.edited_body
 
-    # Determine recipient
+    _append_event(outreach, "draft_approved", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name)
+
     recipient = draft.recipient_email
     if not recipient:
-        # Try to find email from discovery results
         discovery = DiscoveryResults(**project["discovery_results"])
         if draft.supplier_index < len(discovery.suppliers):
             recipient = discovery.suppliers[draft.supplier_index].email
 
     if not recipient:
         draft.status = "failed"
+        _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason="missing_email")
         project["outreach_state"] = outreach.model_dump(mode="json")
-        return {
-            "sent": False,
-            "error": f"No email address found for {draft.supplier_name}. You'll need to provide one.",
-        }
+        return {"sent": False, "error": f"No email address found for {draft.supplier_name}. You'll need to provide one."}
 
-    # Send email
+    _append_event(outreach, "send_attempted", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, recipient=recipient)
     result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
 
     if result.get("sent"):
         draft.status = "sent"
         email_id = result.get("id", "")
-        # Update supplier outreach status with email ID for delivery tracking
         for status in outreach.supplier_statuses:
             if status.supplier_index == draft.supplier_index:
                 status.email_sent = True
@@ -147,16 +200,14 @@ async def approve_and_send(project_id: str, draft_index: int, request: EmailAppr
                 status.email_id = email_id
                 status.delivery_status = "sent"
                 break
+        _append_event(outreach, "email_sent", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, email_id=email_id)
     else:
         draft.status = "failed"
+        _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason=result.get("error", "unknown"))
 
     project["outreach_state"] = outreach.model_dump(mode="json")
 
-    return {
-        "sent": result.get("sent", False),
-        "error": result.get("error"),
-        "supplier_name": draft.supplier_name,
-    }
+    return {"sent": result.get("sent", False), "error": result.get("error"), "supplier_name": draft.supplier_name}
 
 
 @router.post("/parse-response")
@@ -181,16 +232,22 @@ async def parse_response(project_id: str, request: QuoteParseRequest):
             requirements=reqs,
         )
 
-        # Store the parsed quote
         outreach.parsed_quotes.append(quote)
 
-        # Update supplier status
         for status in outreach.supplier_statuses:
             if status.supplier_index == request.supplier_index:
                 status.response_received = True
                 status.response_text = request.response_text
                 status.parsed_quote = quote
                 break
+
+        _append_event(
+            outreach,
+            "quote_parsed",
+            supplier_index=request.supplier_index,
+            supplier_name=supplier.name,
+            confidence=quote.confidence_score,
+        )
 
         project["outreach_state"] = outreach.model_dump(mode="json")
 
@@ -211,14 +268,11 @@ async def generate_follow_up_emails(project_id: str):
     try:
         result = await generate_follow_ups(outreach, reqs)
 
-        # Store follow-up drafts
         outreach.follow_up_emails.extend(result.follow_ups)
+        _append_event(outreach, "followup_drafted", count=len(result.follow_ups))
         project["outreach_state"] = outreach.model_dump(mode="json")
 
-        return {
-            "follow_ups": [fu.model_dump() for fu in result.follow_ups],
-            "summary": result.summary,
-        }
+        return {"follow_ups": [fu.model_dump() for fu in result.follow_ups], "summary": result.summary}
 
     except Exception as e:
         logger.error("Follow-up generation failed: %s", traceback.format_exc())
@@ -244,6 +298,7 @@ async def send_follow_up(project_id: str, follow_up_index: int):
 
     if not recipient:
         fu.status = "failed"
+        _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason="missing_email")
         project["outreach_state"] = outreach.model_dump(mode="json")
         return {"sent": False, "error": f"No email for {fu.supplier_name}"}
 
@@ -256,16 +311,14 @@ async def send_follow_up(project_id: str, follow_up_index: int):
                 status.follow_ups_sent += 1
                 status.last_follow_up_at = time.time()
                 break
+        _append_event(outreach, "followup_sent", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name)
     else:
         fu.status = "failed"
+        _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason=result.get("error", "unknown"))
 
     project["outreach_state"] = outreach.model_dump(mode="json")
 
-    return {
-        "sent": result.get("sent", False),
-        "error": result.get("error"),
-        "supplier_name": fu.supplier_name,
-    }
+    return {"sent": result.get("sent", False), "error": result.get("error"), "supplier_name": fu.supplier_name}
 
 
 @router.get("/status")
@@ -273,6 +326,41 @@ async def get_outreach_status(project_id: str):
     """Get full outreach state for a project."""
     project = _get_project(project_id)
     return project.get("outreach_state") or {"error": "No outreach started"}
+
+
+@router.get("/plan")
+async def get_outreach_plan(project_id: str):
+    """Return intent-to-purchase execution plan and funnel metrics."""
+    project = _get_project(project_id)
+    outreach = _get_outreach_state(project)
+
+    sent = sum(1 for s in outreach.supplier_statuses if s.email_sent)
+    responded = sum(1 for s in outreach.supplier_statuses if s.response_received)
+    quoted = len(outreach.parsed_quotes)
+
+    friction = Counter()
+    for plan in outreach.supplier_plans:
+        friction.update(plan.friction_risks)
+
+    return {
+        "selected_suppliers": len(outreach.selected_suppliers),
+        "funnel": {
+            "intent": len(outreach.selected_suppliers),
+            "rfq_sent": sent,
+            "responses": responded,
+            "quotes_parsed": quoted,
+        },
+        "friction_risks": dict(friction),
+        "plans": [plan.model_dump() for plan in outreach.supplier_plans],
+    }
+
+
+@router.get("/timeline")
+async def get_outreach_timeline(project_id: str):
+    """Get immutable timeline events for outreach analytics."""
+    project = _get_project(project_id)
+    outreach = _get_outreach_state(project)
+    return {"events": [event.model_dump() for event in outreach.events], "count": len(outreach.events)}
 
 
 @router.post("/recompare")
@@ -287,7 +375,6 @@ async def recompare_with_quotes(project_id: str):
     try:
         from app.agents.orchestrator import rerun_from_stage
 
-        # Inject real quote data into comparison context
         modified = {}
         comp = project.get("comparison_result", {})
         comp["_real_quotes"] = [q.model_dump(mode="json") for q in outreach.parsed_quotes]
@@ -295,7 +382,6 @@ async def recompare_with_quotes(project_id: str):
 
         state = await rerun_from_stage(project, "compare", modified)
 
-        # Update project with new results
         if state.get("comparison_result"):
             project["comparison_result"] = state["comparison_result"]
         if state.get("recommendation_result"):
@@ -303,17 +389,14 @@ async def recompare_with_quotes(project_id: str):
         project["current_stage"] = "complete"
         project["status"] = "complete"
 
-        return {
-            "status": "success",
-            "message": f"Re-compared with {len(outreach.parsed_quotes)} real quotes",
-        }
+        _append_event(outreach, "recompare_completed", quote_count=len(outreach.parsed_quotes))
+        project["outreach_state"] = outreach.model_dump(mode="json")
+
+        return {"status": "success", "message": f"Re-compared with {len(outreach.parsed_quotes)} real quotes"}
 
     except Exception as e:
         logger.error("Recompare failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── Auto-Outreach Endpoints ─────────────────────────────────────
 
 
 @router.post("/auto-config")
@@ -321,7 +404,6 @@ async def set_auto_outreach_config(project_id: str, config: AutoOutreachConfig):
     """Save auto-outreach configuration for a project."""
     project = _get_project(project_id)
 
-    # Get or create outreach state
     raw = project.get("outreach_state")
     if raw:
         outreach = OutreachState(**raw) if isinstance(raw, dict) else raw
@@ -329,23 +411,15 @@ async def set_auto_outreach_config(project_id: str, config: AutoOutreachConfig):
         outreach = OutreachState()
 
     outreach.auto_config = config
+    _append_event(outreach, "auto_configured", mode=config.mode, threshold=config.auto_send_threshold)
     project["outreach_state"] = outreach.model_dump(mode="json")
 
-    return {
-        "status": "saved",
-        "config": config.model_dump(),
-    }
+    return {"status": "saved", "config": config.model_dump()}
 
 
 @router.post("/auto-start")
 async def start_auto_outreach(project_id: str):
-    """Auto-draft and queue RFQ emails for suppliers above the verification threshold.
-
-    Requires:
-    - Pipeline must be complete (recommendation_result exists)
-    - Auto-config must be set (via /auto-config endpoint)
-    - Verification results must exist
-    """
+    """Auto-draft and queue RFQ emails for suppliers above the verification threshold."""
     project = _get_project(project_id)
 
     if not project.get("recommendation_result"):
@@ -375,27 +449,25 @@ async def start_auto_outreach(project_id: str):
             auto_config=outreach.auto_config,
         )
 
-        # Merge auto-queued drafts into outreach state
         outreach.draft_emails.extend(result.drafts)
 
-        # Add supplier statuses for auto-queued suppliers
         existing_indices = {s.supplier_index for s in outreach.supplier_statuses}
         for draft in result.drafts:
             if draft.supplier_index not in existing_indices:
                 outreach.supplier_statuses.append(
-                    SupplierOutreachStatus(
-                        supplier_name=draft.supplier_name,
-                        supplier_index=draft.supplier_index,
-                    )
+                    SupplierOutreachStatus(supplier_name=draft.supplier_name, supplier_index=draft.supplier_index)
                 )
+            if draft.supplier_index not in outreach.selected_suppliers:
+                outreach.selected_suppliers.append(draft.supplier_index)
 
+            if 0 <= draft.supplier_index < len(discovery.suppliers):
+                plan = _build_supplier_plan(discovery.suppliers[draft.supplier_index], draft.supplier_index, reqs, None)
+                _upsert_plan(outreach, plan)
+
+        _append_event(outreach, "auto_queue_created", queued=len(result.drafts))
         project["outreach_state"] = outreach.model_dump(mode="json")
 
-        return {
-            "status": "queued",
-            "drafts_queued": len(result.drafts),
-            "summary": result.summary,
-        }
+        return {"status": "queued", "drafts_queued": len(result.drafts), "summary": result.summary}
 
     except HTTPException:
         raise
@@ -428,47 +500,35 @@ async def get_auto_outreach_status(project_id: str):
     }
 
 
-# ── Delivery Tracking & Inbox Monitoring ──────────────────────────
-
-
 @router.get("/delivery-status")
 async def get_delivery_status(project_id: str):
-    """Get email delivery status for all sent emails in this project.
-
-    Returns delivery tracking info from Resend webhooks for each supplier.
-    """
+    """Get email delivery status for all sent emails in this project."""
     project = _get_project(project_id)
     outreach = _get_outreach_state(project)
 
     delivery_info = []
     for status in outreach.supplier_statuses:
         if status.email_sent:
-            delivery_info.append({
-                "supplier_name": status.supplier_name,
-                "supplier_index": status.supplier_index,
-                "email_id": status.email_id,
-                "delivery_status": status.delivery_status,
-                "sent_at": status.sent_at,
-                "events": [e.model_dump() for e in status.delivery_events],
-            })
+            delivery_info.append(
+                {
+                    "supplier_name": status.supplier_name,
+                    "supplier_index": status.supplier_index,
+                    "email_id": status.email_id,
+                    "delivery_status": status.delivery_status,
+                    "sent_at": status.sent_at,
+                    "events": [e.model_dump() for e in status.delivery_events],
+                }
+            )
 
-    return {
-        "total_sent": len(delivery_info),
-        "deliveries": delivery_info,
-    }
+    return {"total_sent": len(delivery_info), "deliveries": delivery_info}
 
 
 @router.post("/check-inbox")
 async def check_inbox(project_id: str):
-    """Check email inbox for supplier responses.
-
-    Triggers a one-shot check using the configured inbox monitor (Gmail).
-    Returns raw messages that match RFQ response patterns.
-    """
+    """Check email inbox for supplier responses."""
     project = _get_project(project_id)
     outreach = _get_outreach_state(project)
 
-    # Collect known supplier emails and domains
     discovery = DiscoveryResults(**project["discovery_results"])
     supplier_emails = []
     supplier_domains = []
@@ -478,8 +538,8 @@ async def check_inbox(project_id: str):
             if supplier.email:
                 supplier_emails.append(supplier.email)
             if supplier.website:
-                # Extract domain from website URL
                 from urllib.parse import urlparse
+
                 try:
                     domain = urlparse(supplier.website).netloc.replace("www.", "")
                     if domain:
@@ -492,13 +552,12 @@ async def check_inbox(project_id: str):
 
         monitor = get_monitor("gmail")
         messages = await monitor.check_once(
-            config={
-                "supplier_emails": supplier_emails,
-                "supplier_domains": supplier_domains,
-                "max_results": 20,
-            },
+            config={"supplier_emails": supplier_emails, "supplier_domains": supplier_domains, "max_results": 20},
             project_id=project_id,
         )
+
+        _append_event(outreach, "inbox_checked", messages_found=len(messages))
+        project["outreach_state"] = outreach.model_dump(mode="json")
 
         return {
             "messages_found": len(messages),

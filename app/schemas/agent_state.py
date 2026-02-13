@@ -424,6 +424,32 @@ class SupplierOutreachStatus(BaseModel):
     phone_transcript: str | None = None
 
 
+class OutreachPlanStep(BaseModel):
+    """A concrete outreach step for a supplier."""
+    stage: str
+    objective: str
+    owner: str = "system"
+    due_in_hours: int = 0
+
+
+class SupplierOutreachPlan(BaseModel):
+    """Execution plan that drives a supplier from intent to quoted offer."""
+    supplier_name: str
+    supplier_index: int
+    channel: str = "email"
+    friction_risks: list[str] = Field(default_factory=list)
+    steps: list[OutreachPlanStep] = Field(default_factory=list)
+
+
+class OutreachEvent(BaseModel):
+    """Immutable event log entry for outreach lifecycle analytics."""
+    event_type: str
+    supplier_index: int | None = None
+    supplier_name: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    timestamp: float = Field(default_factory=time.time)
+
+
 class OutreachState(BaseModel):
     """Full outreach tracking state for a project."""
     selected_suppliers: list[int] = Field(default_factory=list)
@@ -436,3 +462,5 @@ class OutreachState(BaseModel):
     phone_calls: list[PhoneCallStatus] = Field(default_factory=list)
     parsed_call_results: list[ParsedCallResult] = Field(default_factory=list)
     phone_config: PhoneCallConfig | None = None
+    supplier_plans: list[SupplierOutreachPlan] = Field(default_factory=list)
+    events: list[OutreachEvent] = Field(default_factory=list)
