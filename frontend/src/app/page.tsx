@@ -12,7 +12,7 @@ import ChatPanel from '@/components/ChatPanel'
 import OutreachPanel from '@/components/OutreachPanel'
 import LogViewer from '@/components/LogViewer'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface ProgressEvent {
   stage: string
