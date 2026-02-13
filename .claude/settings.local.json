@@ -19,7 +19,8 @@
       "Bash(git -C /Users/youss/Development/procurement-ai status frontend/)",
       "Bash(git pull:*)",
       "Bash(alembic upgrade:*)",
-      "Bash(PYTHONPATH=. alembic upgrade:*)"
+      "Bash(PYTHONPATH=. alembic upgrade:*)",
+      "Bash(git status:*)"
     ]
   }
 }
