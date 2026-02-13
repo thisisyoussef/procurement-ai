@@ -508,7 +508,7 @@ export default function HomePage() {
             <input
               type="text"
               className="fi"
-              style={{ marginTop: 10, width: '100%' }}
+              style={{ marginTop: 10, width: '100%', maxWidth: 440, marginLeft: 'auto', marginRight: 'auto', display: 'block' }}
               placeholder="What are you sourcing? (optional)"
               value={leadNote}
               onChange={(e) => setLeadNote(e.target.value)}
