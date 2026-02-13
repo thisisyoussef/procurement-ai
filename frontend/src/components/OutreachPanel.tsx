@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface DraftEmail {
   supplier_name: string
