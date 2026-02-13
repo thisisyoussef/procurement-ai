@@ -12,7 +12,8 @@ from typing import Any
 from sqlalchemy import text
 
 from app.core.config import get_settings
-from app.core.database import async_session_factory
+from app.core.database import async_session_factory, engine
+from app.models.runtime import AnalyticsEvent, LandingLead, RuntimeProject
 from app.repositories import runtime_repository as repo
 
 logger = logging.getLogger(__name__)
@@ -166,42 +167,65 @@ class InMemoryProjectStore(BaseProjectStore):
 
 
 class DatabaseProjectStore(BaseProjectStore):
+    _runtime_schema_ready: bool = False
+
+    async def _ensure_runtime_schema(self) -> None:
+        if self.__class__._runtime_schema_ready:
+            return
+
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda sync_conn: RuntimeProject.__table__.create(sync_conn, checkfirst=True))
+            await conn.run_sync(lambda sync_conn: LandingLead.__table__.create(sync_conn, checkfirst=True))
+            await conn.run_sync(lambda sync_conn: AnalyticsEvent.__table__.create(sync_conn, checkfirst=True))
+
+        self.__class__._runtime_schema_ready = True
+        logger.info("Ensured runtime persistence tables exist")
+
     async def _ping(self) -> None:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             await session.execute(text("SELECT 1"))
 
     async def create_project(self, project: dict[str, Any]) -> None:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             await repo.upsert_runtime_project(session, project)
             await session.commit()
 
     async def get_project(self, project_id: str) -> dict[str, Any] | None:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             return await repo.get_runtime_project(session, project_id)
 
     async def save_project(self, project: dict[str, Any]) -> None:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             await repo.upsert_runtime_project(session, project)
             await session.commit()
 
     async def list_projects(self) -> list[dict[str, Any]]:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             return await repo.list_runtime_projects(session)
 
     async def append_progress_event(self, project_id: str, event: dict[str, Any]) -> None:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             await repo.append_progress_event(session, project_id, event)
             await session.commit()
 
     async def find_project_by_email_id(self, email_id: str) -> tuple[dict[str, Any] | None, int | None]:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             return await repo.find_project_by_email_id(session, email_id)
 
     async def find_project_by_call_id(self, call_id: str) -> tuple[dict[str, Any] | None, int | None]:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             return await repo.find_project_by_call_id(session, call_id)
 
     async def upsert_lead(self, email: str, sourcing_note: str | None, source: str) -> tuple[str, bool]:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             lead_id, deduped = await repo.upsert_landing_lead(session, email, sourcing_note, source)
             await session.commit()
@@ -215,6 +239,7 @@ class DatabaseProjectStore(BaseProjectStore):
         project_id: str | None,
         payload: dict[str, Any] | None = None,
     ) -> str:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             event_id = await repo.create_analytics_event(
                 session=session,
@@ -228,6 +253,7 @@ class DatabaseProjectStore(BaseProjectStore):
             return event_id
 
     async def recover_stale_runs(self) -> int:
+        await self._ensure_runtime_schema()
         async with async_session_factory() as session:
             recovered = await repo.recover_stale_running_projects(session)
             await session.commit()
