@@ -1,6 +1,7 @@
 """Outreach API endpoints — manage RFQ emails, responses, and follow-ups."""
 
 import logging
+import re
 import time
 import traceback
 from collections import Counter
@@ -24,7 +25,12 @@ from app.schemas.agent_state import (
     SupplierOutreachStatus,
     VerificationResults,
 )
-from app.schemas.project import EmailApprovalRequest, OutreachStartRequest, QuoteParseRequest
+from app.schemas.project import (
+    EmailApprovalRequest,
+    OutreachQuickApprovalRequest,
+    OutreachStartRequest,
+    QuoteParseRequest,
+)
 from app.core.auth import AuthUser, get_current_auth_user
 from app.services.project_store import StoreUnavailableError, get_project_store
 from app.services.supplier_memory import (
@@ -35,6 +41,18 @@ from app.services.supplier_memory import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/outreach", tags=["outreach"])
+
+UNFULFILLMENT_PATTERNS = [
+    r"\bcannot\b",
+    r"\bcan't\b",
+    r"\bunable to\b",
+    r"\bdo not manufacture\b",
+    r"\bdo not produce\b",
+    r"\boutside our capability\b",
+    r"\bnot able to\b",
+    r"\bwe don't offer\b",
+    r"\bcan't meet\b",
+]
 
 
 async def _get_project(project_id: str, current_user: AuthUser) -> dict:
@@ -80,6 +98,96 @@ def _append_event(
             details=details,
         )
     )
+
+
+def _response_indicates_cannot_fulfill(quote_text: str | None, response_text: str) -> bool:
+    text = f"{quote_text or ''}\n{response_text}".lower()
+    return any(re.search(pattern, text) for pattern in UNFULFILLMENT_PATTERNS)
+
+
+def _apply_supplier_exclusion(
+    project: dict,
+    outreach: OutreachState,
+    supplier_index: int,
+    supplier_name: str,
+    reason: str,
+) -> None:
+    already_excluded = supplier_index in outreach.excluded_suppliers
+    if not already_excluded:
+        outreach.excluded_suppliers.append(supplier_index)
+
+    for status in outreach.supplier_statuses:
+        if status.supplier_index == supplier_index:
+            status.excluded = True
+            status.exclusion_reason = reason
+            break
+
+    discovery_data = project.get("discovery_results")
+    if discovery_data and 0 <= supplier_index < len(discovery_data.get("suppliers", [])):
+        supplier = discovery_data["suppliers"][supplier_index]
+        supplier["filtered_reason"] = "unable_to_fulfill"
+
+    comparison = project.get("comparison_result")
+    if comparison and comparison.get("comparisons"):
+        comparison["comparisons"] = [
+            c
+            for c in comparison["comparisons"]
+            if c.get("supplier_index") != supplier_index
+        ]
+        project["comparison_result"] = comparison
+
+    recommendation = project.get("recommendation_result")
+    if recommendation and recommendation.get("recommendations"):
+        kept = [
+            r
+            for r in recommendation["recommendations"]
+            if r.get("supplier_index") != supplier_index
+        ]
+        for rank, item in enumerate(kept, start=1):
+            item["rank"] = rank
+        recommendation["recommendations"] = kept
+        project["recommendation_result"] = recommendation
+
+    if not already_excluded:
+        _append_event(
+            outreach,
+            "supplier_excluded",
+            supplier_index=supplier_index,
+            supplier_name=supplier_name,
+            reason=reason,
+        )
+
+
+def _normalize_draft_supplier_indices(drafts, selected_indices: list[int]) -> None:
+    for draft in drafts:
+        local_idx = draft.supplier_index
+        if 0 <= local_idx < len(selected_indices):
+            draft.supplier_index = selected_indices[local_idx]
+
+
+def _get_selected_suppliers_for_quick_approval(
+    recs: RecommendationResult,
+    discovery: DiscoveryResults,
+    outreach: OutreachState,
+    max_suppliers: int,
+) -> tuple[list[int], list[DiscoveredSupplier]]:
+    selected_indices: list[int] = []
+    selected_suppliers: list[DiscoveredSupplier] = []
+
+    for rec in sorted(recs.recommendations, key=lambda r: r.rank):
+        idx = rec.supplier_index
+        if idx in outreach.excluded_suppliers:
+            continue
+        if not (0 <= idx < len(discovery.suppliers)):
+            continue
+        if idx in selected_indices:
+            continue
+        selected_indices.append(idx)
+        selected_suppliers.append(discovery.suppliers[idx])
+        if len(selected_indices) >= max_suppliers:
+            break
+
+    return selected_indices, selected_suppliers
 
 
 def _build_supplier_plan(
@@ -186,6 +294,145 @@ async def start_outreach(
     except Exception as e:
         logger.error("Outreach start failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/quick-approval")
+async def quick_outreach_approval(
+    project_id: str,
+    request: OutreachQuickApprovalRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Single yes/no outreach flow: approve and auto-send, or decline."""
+    project = await _get_project(project_id, current_user)
+
+    if not project.get("recommendation_result"):
+        raise HTTPException(status_code=400, detail="Comparison must complete before outreach")
+
+    raw = project.get("outreach_state")
+    outreach = OutreachState(**raw) if isinstance(raw, dict) else (raw or OutreachState())
+
+    if not request.approve:
+        outreach.quick_approval_decision = "declined"
+        _append_event(outreach, "quick_outreach_declined")
+        project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
+        return {"status": "declined"}
+
+    reqs = ParsedRequirements(**project["parsed_requirements"])
+    discovery = DiscoveryResults(**project["discovery_results"])
+    recs = RecommendationResult(**project["recommendation_result"])
+
+    selected_indices, selected_suppliers = _get_selected_suppliers_for_quick_approval(
+        recs=recs,
+        discovery=discovery,
+        outreach=outreach,
+        max_suppliers=request.max_suppliers,
+    )
+    if not selected_suppliers:
+        raise HTTPException(status_code=400, detail="No eligible suppliers available for outreach")
+
+    draft_result = await draft_outreach_emails(selected_suppliers, reqs, recs)
+    _normalize_draft_supplier_indices(draft_result.drafts, selected_indices)
+
+    existing_statuses = {s.supplier_index: s for s in outreach.supplier_statuses}
+    for idx, supplier in zip(selected_indices, selected_suppliers):
+        if idx not in outreach.selected_suppliers:
+            outreach.selected_suppliers.append(idx)
+        if idx not in existing_statuses:
+            outreach.supplier_statuses.append(
+                SupplierOutreachStatus(supplier_name=supplier.name, supplier_index=idx)
+            )
+        plan = _build_supplier_plan(supplier, idx, reqs, None)
+        _upsert_plan(outreach, plan)
+
+    existing_drafts_by_index = {d.supplier_index: d for d in outreach.draft_emails}
+    for draft in draft_result.drafts:
+        existing_drafts_by_index[draft.supplier_index] = draft
+    outreach.draft_emails = list(existing_drafts_by_index.values())
+
+    sent_count = 0
+    failed_count = 0
+    for draft in outreach.draft_emails:
+        if draft.supplier_index not in selected_indices:
+            continue
+        if draft.status == "sent":
+            continue
+
+        recipient = draft.recipient_email
+        if not recipient and 0 <= draft.supplier_index < len(discovery.suppliers):
+            recipient = discovery.suppliers[draft.supplier_index].email
+
+        if not recipient:
+            draft.status = "failed"
+            failed_count += 1
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason="missing_email",
+            )
+            continue
+
+        result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
+        status = next(
+            (s for s in outreach.supplier_statuses if s.supplier_index == draft.supplier_index),
+            None,
+        )
+
+        if result.get("sent"):
+            draft.status = "sent"
+            sent_count += 1
+            if status:
+                status.email_sent = True
+                status.sent_at = time.time()
+                status.email_id = result.get("id", "")
+                status.delivery_status = "sent"
+            _append_event(
+                outreach,
+                "email_sent",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                email_id=result.get("id", ""),
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=draft.supplier_index,
+                interaction_type="rfq_sent",
+                source="outreach",
+                details={"email_id": result.get("id", ""), "recipient": recipient},
+            )
+        else:
+            draft.status = "failed"
+            failed_count += 1
+            if status:
+                status.email_sent = False
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason=result.get("error", "unknown"),
+            )
+
+    outreach.quick_approval_decision = "approved"
+    _append_event(
+        outreach,
+        "quick_outreach_approved",
+        sent_count=sent_count,
+        failed_count=failed_count,
+        selected_suppliers=len(selected_indices),
+    )
+
+    project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
+
+    return {
+        "status": "approved",
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "selected_suppliers": selected_indices,
+    }
 
 
 @router.post("/approve/{draft_index}")
@@ -304,6 +551,29 @@ async def parse_response(
                 status.response_text = request.response_text
                 status.parsed_quote = quote
                 break
+
+        if quote.can_fulfill is False or _response_indicates_cannot_fulfill(
+            quote.fulfillment_note or quote.notes,
+            request.response_text,
+        ):
+            _apply_supplier_exclusion(
+                project=project,
+                outreach=outreach,
+                supplier_index=request.supplier_index,
+                supplier_name=supplier.name,
+                reason=quote.fulfillment_note
+                or "Supplier indicated they cannot fulfill this request",
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=request.supplier_index,
+                interaction_type="supplier_excluded",
+                source="outreach",
+                details={
+                    "reason": quote.fulfillment_note
+                    or "Supplier indicated they cannot fulfill this request",
+                },
+            )
 
         _append_event(
             outreach,
@@ -499,8 +769,14 @@ async def recompare_with_quotes(
         from app.agents.orchestrator import rerun_from_stage
 
         modified = {}
+        active_quotes = [
+            q for q in outreach.parsed_quotes if q.supplier_index not in outreach.excluded_suppliers
+        ]
+        if not active_quotes:
+            raise HTTPException(status_code=400, detail="All quoted suppliers are excluded")
+
         comp = project.get("comparison_result", {})
-        comp["_real_quotes"] = [q.model_dump(mode="json") for q in outreach.parsed_quotes]
+        comp["_real_quotes"] = [q.model_dump(mode="json") for q in active_quotes]
         modified["comparison_result"] = comp
 
         state = await rerun_from_stage(project, "compare", modified)
@@ -509,6 +785,15 @@ async def recompare_with_quotes(
             project["comparison_result"] = state["comparison_result"]
         if state.get("recommendation_result"):
             project["recommendation_result"] = state["recommendation_result"]
+
+        for idx in outreach.excluded_suppliers:
+            _apply_supplier_exclusion(
+                project=project,
+                outreach=outreach,
+                supplier_index=idx,
+                supplier_name="Excluded supplier",
+                reason="Excluded from outreach responses",
+            )
         project["current_stage"] = "complete"
         project["status"] = "complete"
 

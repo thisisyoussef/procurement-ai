@@ -83,6 +83,8 @@ Return JSON matching the output format in your instructions."""
         shipping_terms=data.get("shipping_terms"),
         validity_period=data.get("validity_period"),
         notes=data.get("notes"),
+        can_fulfill=data.get("can_fulfill"),
+        fulfillment_note=data.get("fulfillment_note"),
         confidence_score=data.get("confidence_score", 50.0),
         raw_text=response_text,
     )

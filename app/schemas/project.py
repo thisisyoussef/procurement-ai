@@ -87,6 +87,11 @@ class QuoteParseRequest(BaseModel):
     response_text: str = Field(min_length=10, max_length=20000)
 
 
+class OutreachQuickApprovalRequest(BaseModel):
+    approve: bool = True
+    max_suppliers: int = Field(default=3, ge=1, le=10)
+
+
 class ClarifyingAnswerRequest(BaseModel):
     """User's answers to clarifying questions."""
     answers: dict[str, str] = Field(description="Mapping of field name to answer text")

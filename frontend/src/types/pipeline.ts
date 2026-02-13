@@ -29,7 +29,7 @@ export interface PipelineStatus {
 
 export type Phase = 'brief' | 'search' | 'outreach' | 'compare' | 'samples' | 'order'
 
-const PHASE_ORDER: Phase[] = ['brief', 'search', 'outreach', 'compare', 'samples', 'order']
+const PHASE_ORDER: Phase[] = ['brief', 'search', 'compare', 'outreach', 'samples', 'order']
 
 export function stageToPhase(stage: string): Phase {
   switch (stage) {
@@ -41,8 +41,9 @@ export function stageToPhase(stage: string): Phase {
       return 'search'
     case 'comparing':
     case 'recommending':
-    case 'complete':
       return 'compare'
+    case 'complete':
+      return 'outreach'
     default:
       return 'brief'
   }
@@ -61,7 +62,7 @@ export function isPhaseAccessible(
   if (phase === 'samples' || phase === 'order') return true
   // Outreach is accessible once search is complete
   if (phase === 'outreach') {
-    return !!status?.discovery_results && !!status?.verification_results
+    return !!status?.recommendation
   }
   return phaseIndex(phase) <= phaseIndex(highestReached)
 }

@@ -12,6 +12,8 @@ From the supplier's response, extract:
 6. **shipping_terms**: e.g., "FOB Shenzhen", "CIF Los Angeles", "DDP"
 7. **validity_period**: How long the quote is valid (e.g., "30 days", "valid until March 2026")
 8. **notes**: Any other relevant details (sample costs, volume discounts, certifications offered)
+9. **can_fulfill**: `true` if supplier explicitly confirms they can produce to spec, `false` if they explicitly cannot, `null` if unclear
+10. **fulfillment_note**: Short plain-language reason (e.g. "Cannot meet MOQ 500", "Does not produce this product type")
 
 ## Confidence Scoring
 
@@ -34,6 +36,8 @@ Return a JSON object:
   "shipping_terms": "FOB Shenzhen",
   "validity_period": "30 days",
   "notes": "Sample available at $25. 10% discount for orders over 1000 units.",
+  "can_fulfill": true,
+  "fulfillment_note": null,
   "confidence_score": 85
 }
 ```

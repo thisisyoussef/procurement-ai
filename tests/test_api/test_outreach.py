@@ -154,3 +154,100 @@ def test_outreach_plan_and_timeline_tracking():
     event_types = [e["event_type"] for e in timeline.json()["events"]]
     assert "intent_registered" in event_types
     assert "email_sent" in event_types
+
+
+def test_quick_approval_sends_outreach():
+    _projects.clear()
+    project_id = "proj-outreach-quick-1"
+    _seed_project(project_id)
+
+    with patch("app.api.v1.outreach.draft_outreach_emails", new=AsyncMock()) as mock_draft, patch(
+        "app.api.v1.outreach.send_email", new=AsyncMock(return_value={"sent": True, "id": "email_quick_1"})
+    ):
+        from app.schemas.agent_state import DraftEmail, OutreachResult
+
+        mock_draft.return_value = OutreachResult(
+            drafts=[
+                DraftEmail(
+                    supplier_name="Acme Mills",
+                    supplier_index=0,
+                    recipient_email="sales@acme.example",
+                    subject="RFQ",
+                    body="Hello",
+                    status="draft",
+                )
+            ],
+            summary="done",
+        )
+
+        approve = client.post(
+            f"/api/v1/projects/{project_id}/outreach/quick-approval",
+            json={"approve": True, "max_suppliers": 3},
+            headers=_auth_headers(),
+        )
+        assert approve.status_code == 200
+        assert approve.json()["status"] == "approved"
+        assert approve.json()["sent_count"] == 1
+
+    status = client.get(
+        f"/api/v1/projects/{project_id}/outreach/status",
+        headers=_auth_headers(),
+    )
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["quick_approval_decision"] == "approved"
+    assert payload["supplier_statuses"][0]["email_sent"] is True
+
+
+def test_parse_response_excludes_supplier_when_unfulfillable():
+    _projects.clear()
+    project_id = "proj-outreach-quick-2"
+    _seed_project(project_id)
+
+    # Seed basic outreach state with one selected supplier.
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    from app.schemas.agent_state import ParsedQuote
+
+    with patch(
+        "app.api.v1.outreach.parse_supplier_response",
+        new=AsyncMock(
+            return_value=ParsedQuote(
+                supplier_name="Acme Mills",
+                supplier_index=0,
+                can_fulfill=False,
+                fulfillment_note="Cannot produce this product category",
+                confidence_score=95,
+                raw_text="",
+            )
+        ),
+    ):
+        parsed = client.post(
+            f"/api/v1/projects/{project_id}/outreach/parse-response",
+            json={
+                "supplier_index": 0,
+                "response_text": "Sorry, we cannot produce this product category.",
+            },
+            headers=_auth_headers(),
+        )
+        assert parsed.status_code == 200
+
+    updated = _projects[project_id]
+    assert updated["recommendation_result"]["recommendations"] == []
+    assert updated["outreach_state"]["excluded_suppliers"] == [0]

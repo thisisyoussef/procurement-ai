@@ -13,6 +13,7 @@ Loops:
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -21,6 +22,18 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+UNFULFILLMENT_PATTERNS = [
+    r"\bcannot\b",
+    r"\bcan't\b",
+    r"\bunable to\b",
+    r"\bdo not manufacture\b",
+    r"\bdo not produce\b",
+    r"\boutside our capability\b",
+    r"\bnot able to\b",
+    r"\bwe don't offer\b",
+    r"\bcan't meet\b",
+]
 
 # Singleton scheduler instance
 _scheduler: "OutreachScheduler | None" = None
@@ -144,6 +157,52 @@ class OutreachScheduler:
     def _save_outreach_state(self, project: dict, outreach) -> None:
         """Serialize OutreachState back to the project dict."""
         project["outreach_state"] = outreach.model_dump(mode="json")
+
+    def _response_indicates_cannot_fulfill(self, quote_text: str | None, response_text: str) -> bool:
+        text = f"{quote_text or ''}\n{response_text}".lower()
+        return any(re.search(pattern, text) for pattern in UNFULFILLMENT_PATTERNS)
+
+    def _exclude_supplier_from_project(
+        self,
+        project: dict,
+        outreach,
+        supplier_index: int,
+        supplier_name: str,
+        reason: str,
+    ) -> None:
+        if supplier_index not in outreach.excluded_suppliers:
+            outreach.excluded_suppliers.append(supplier_index)
+
+        for status in outreach.supplier_statuses:
+            if status.supplier_index == supplier_index:
+                status.excluded = True
+                status.exclusion_reason = reason
+                break
+
+        discovery = project.get("discovery_results")
+        if discovery and 0 <= supplier_index < len(discovery.get("suppliers", [])):
+            discovery["suppliers"][supplier_index]["filtered_reason"] = "unable_to_fulfill"
+
+        comparison = project.get("comparison_result")
+        if comparison and comparison.get("comparisons"):
+            comparison["comparisons"] = [
+                c
+                for c in comparison["comparisons"]
+                if c.get("supplier_index") != supplier_index
+            ]
+            project["comparison_result"] = comparison
+
+        recommendation = project.get("recommendation_result")
+        if recommendation and recommendation.get("recommendations"):
+            kept = [
+                r
+                for r in recommendation["recommendations"]
+                if r.get("supplier_index") != supplier_index
+            ]
+            for rank, item in enumerate(kept, start=1):
+                item["rank"] = rank
+            recommendation["recommendations"] = kept
+            project["recommendation_result"] = recommendation
 
     # ── Loop 1: Email Queue Processor ─────────────────────────────
 
@@ -437,6 +496,8 @@ class OutreachScheduler:
                     for s in outreach.supplier_statuses:
                         if s.response_received:
                             continue
+                        if s.excluded:
+                            continue
                         idx = s.supplier_index
                         if idx < len(dr.suppliers):
                             sup = dr.suppliers[idx]
@@ -478,6 +539,19 @@ class OutreachScheduler:
                                 s.response_text = body
                                 s.parsed_quote = quote
                                 break
+
+                        if quote.can_fulfill is False or self._response_indicates_cannot_fulfill(
+                            quote.fulfillment_note or quote.notes,
+                            body,
+                        ):
+                            self._exclude_supplier_from_project(
+                                project=project,
+                                outreach=outreach,
+                                supplier_index=supplier_idx,
+                                supplier_name=supplier_name,
+                                reason=quote.fulfillment_note
+                                or "Supplier indicated they cannot fulfill this request",
+                            )
 
                         outreach.events.append(OutreachEvent(
                             event_type="auto_response_parsed",

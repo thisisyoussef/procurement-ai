@@ -406,6 +406,8 @@ class ParsedQuote(BaseModel):
     shipping_terms: str | None = None
     validity_period: str | None = None
     notes: str | None = None
+    can_fulfill: bool | None = None
+    fulfillment_note: str | None = None
     confidence_score: float = 0.0  # 0-100
     raw_text: str = ""
 
@@ -450,6 +452,8 @@ class SupplierOutreachStatus(BaseModel):
     parsed_quote: ParsedQuote | None = None
     follow_ups_sent: int = 0
     last_follow_up_at: float | None = None
+    excluded: bool = False
+    exclusion_reason: str | None = None
     # Phone outreach
     phone_call_id: str | None = None
     phone_status: str | None = None  # "pending", "in_progress", "completed", "failed", "no_answer"
@@ -486,6 +490,7 @@ class OutreachState(BaseModel):
     """Full outreach tracking state for a project."""
     selected_suppliers: list[int] = Field(default_factory=list)
     supplier_statuses: list[SupplierOutreachStatus] = Field(default_factory=list)
+    excluded_suppliers: list[int] = Field(default_factory=list)
     draft_emails: list[DraftEmail] = Field(default_factory=list)
     follow_up_emails: list[FollowUpEmail] = Field(default_factory=list)
     parsed_quotes: list[ParsedQuote] = Field(default_factory=list)
@@ -496,3 +501,4 @@ class OutreachState(BaseModel):
     phone_config: PhoneCallConfig | None = None
     supplier_plans: list[SupplierOutreachPlan] = Field(default_factory=list)
     events: list[OutreachEvent] = Field(default_factory=list)
+    quick_approval_decision: str | None = None  # "approved" | "declined"
