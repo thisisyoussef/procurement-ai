@@ -194,7 +194,7 @@ function ClarifyingQuestionsInline({
     setSubmitting(true)
     try {
       const { authFetch } = await import('@/lib/auth')
-      await authFetch(`${API_BASE}/api/v1/projects/${projectId}/clarify`, {
+      await authFetch(`${API_BASE}/api/v1/projects/${projectId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answers }),

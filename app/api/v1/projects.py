@@ -527,6 +527,22 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.post("/{project_id}/clarify")
+async def clarify_project_answers_compat(
+    project_id: str,
+    request: ClarifyingAnswerRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Backward-compatible alias for older frontend clients using /clarify."""
+    return await answer_clarifying_questions(
+        project_id=project_id,
+        request=request,
+        background_tasks=background_tasks,
+        current_user=current_user,
+    )
+
+
 @router.post("/{project_id}/skip-questions")
 async def skip_clarifying_questions(
     project_id: str,
