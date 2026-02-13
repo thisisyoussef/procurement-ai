@@ -20,6 +20,7 @@ interface SupplierOutreachStatus {
   email_sent: boolean
   response_received: boolean
   delivery_status?: string
+  send_error?: string | null
   excluded?: boolean
   exclusion_reason?: string | null
 }
@@ -229,11 +230,16 @@ export default function OutreachPhase() {
                   {supplier.excluded && supplier.exclusion_reason && (
                     <p className="text-[10px] text-red-500 truncate">{supplier.exclusion_reason}</p>
                   )}
+                  {!supplier.excluded && supplier.delivery_status === 'failed' && supplier.send_error && (
+                    <p className="text-[10px] text-red-500 truncate">{supplier.send_error}</p>
+                  )}
                 </div>
                 <span
                   className={`text-[10px] px-2 py-1 rounded-full ${
                     supplier.excluded
                       ? 'bg-red-50 text-red-600'
+                      : supplier.delivery_status === 'failed'
+                        ? 'bg-red-50 text-red-600'
                       : supplier.response_received
                         ? 'bg-teal/[0.1] text-teal'
                         : supplier.email_sent
@@ -243,6 +249,8 @@ export default function OutreachPhase() {
                 >
                   {supplier.excluded
                     ? 'Removed'
+                    : supplier.delivery_status === 'failed'
+                      ? 'Send failed'
                     : supplier.response_received
                       ? 'Responded'
                       : supplier.email_sent

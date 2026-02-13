@@ -446,6 +446,7 @@ class SupplierOutreachStatus(BaseModel):
     sent_at: float | None = None
     email_id: str | None = None  # Resend email ID for tracking
     delivery_status: str = "unknown"  # "unknown", "sent", "delivered", "bounced", "opened", "clicked"
+    send_error: str | None = None
     delivery_events: list[EmailDeliveryEvent] = Field(default_factory=list)
     response_received: bool = False
     response_text: str | None = None

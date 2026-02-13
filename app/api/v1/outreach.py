@@ -9,7 +9,7 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.agents.followup_agent import generate_follow_ups
-from app.agents.outreach_agent import auto_draft_and_queue, draft_outreach_emails
+from app.agents.outreach_agent import draft_outreach_emails
 from app.agents.response_parser import parse_supplier_response
 from app.core.email_service import send_email
 from app.schemas.agent_state import (
@@ -190,6 +190,162 @@ def _get_selected_suppliers_for_quick_approval(
     return selected_indices, selected_suppliers
 
 
+def _get_or_create_supplier_status(
+    outreach: OutreachState,
+    supplier_index: int,
+    supplier_name: str,
+) -> SupplierOutreachStatus:
+    for status in outreach.supplier_statuses:
+        if status.supplier_index == supplier_index:
+            return status
+    status = SupplierOutreachStatus(
+        supplier_name=supplier_name,
+        supplier_index=supplier_index,
+    )
+    outreach.supplier_statuses.append(status)
+    return status
+
+
+async def _draft_and_send_initial_outreach(
+    *,
+    project: dict,
+    outreach: OutreachState,
+    reqs: ParsedRequirements,
+    recs: RecommendationResult,
+    selected_indices: list[int],
+    selected_suppliers: list[DiscoveredSupplier],
+    source_label: str,
+) -> dict:
+    draft_result = await draft_outreach_emails(selected_suppliers, reqs, recs)
+    _normalize_draft_supplier_indices(draft_result.drafts, selected_indices)
+    drafts_by_index = {d.supplier_index: d for d in draft_result.drafts}
+
+    existing_drafts_by_index = {d.supplier_index: d for d in outreach.draft_emails}
+    existing_drafts_by_index.update(drafts_by_index)
+    outreach.draft_emails = list(existing_drafts_by_index.values())
+
+    sent_count = 0
+    failed_count = 0
+
+    for idx, supplier in zip(selected_indices, selected_suppliers):
+        if idx not in outreach.selected_suppliers:
+            outreach.selected_suppliers.append(idx)
+
+        status = _get_or_create_supplier_status(outreach, idx, supplier.name)
+        draft = drafts_by_index.get(idx)
+        plan = _build_supplier_plan(supplier, idx, reqs, None)
+        _upsert_plan(outreach, plan)
+
+        if not draft:
+            failed_count += 1
+            status.email_sent = False
+            status.delivery_status = "failed"
+            status.send_error = "Draft generation failed"
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=idx,
+                supplier_name=supplier.name,
+                reason="draft_missing",
+                source=source_label,
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=idx,
+                interaction_type="rfq_send_failed",
+                source="outreach",
+                details={"reason": "draft_missing", "entrypoint": source_label},
+            )
+            continue
+
+        if draft.status == "sent" and status.email_sent:
+            continue
+
+        recipient = draft.recipient_email or supplier.email
+        if not recipient:
+            draft.status = "failed"
+            failed_count += 1
+            status.email_sent = False
+            status.delivery_status = "failed"
+            status.send_error = "No supplier email found"
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=idx,
+                supplier_name=draft.supplier_name,
+                reason="missing_email",
+                source=source_label,
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=idx,
+                interaction_type="rfq_send_failed",
+                source="outreach",
+                details={"reason": "missing_email", "entrypoint": source_label},
+            )
+            continue
+
+        result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
+        if result.get("sent"):
+            draft.status = "sent"
+            sent_count += 1
+            status.email_sent = True
+            status.sent_at = time.time()
+            status.email_id = result.get("id", "")
+            status.delivery_status = "sent"
+            status.send_error = None
+            _append_event(
+                outreach,
+                "email_sent",
+                supplier_index=idx,
+                supplier_name=draft.supplier_name,
+                email_id=result.get("id", ""),
+                source=source_label,
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=idx,
+                interaction_type="rfq_sent",
+                source="outreach",
+                details={
+                    "email_id": result.get("id", ""),
+                    "recipient": recipient,
+                    "entrypoint": source_label,
+                },
+            )
+        else:
+            draft.status = "failed"
+            failed_count += 1
+            status.email_sent = False
+            status.delivery_status = "failed"
+            status.send_error = result.get("error", "unknown")
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=idx,
+                supplier_name=draft.supplier_name,
+                reason=result.get("error", "unknown"),
+                source=source_label,
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=idx,
+                interaction_type="rfq_send_failed",
+                source="outreach",
+                details={
+                    "reason": result.get("error", "unknown"),
+                    "recipient": recipient,
+                    "entrypoint": source_label,
+                },
+            )
+
+    return {
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "selected_count": len(selected_indices),
+    }
+
+
 def _build_supplier_plan(
     supplier: DiscoveredSupplier,
     supplier_index: int,
@@ -262,6 +418,7 @@ async def start_outreach(
             raise HTTPException(status_code=400, detail="No valid supplier indices provided")
 
         result = await draft_outreach_emails(selected, reqs, recs)
+        _normalize_draft_supplier_indices(result.drafts, selected_indices)
 
         supplier_statuses = [SupplierOutreachStatus(supplier_name=s.name, supplier_index=idx) for idx, s in zip(selected_indices, selected)]
 
@@ -331,97 +488,23 @@ async def quick_outreach_approval(
     if not selected_suppliers:
         raise HTTPException(status_code=400, detail="No eligible suppliers available for outreach")
 
-    draft_result = await draft_outreach_emails(selected_suppliers, reqs, recs)
-    _normalize_draft_supplier_indices(draft_result.drafts, selected_indices)
-
-    existing_statuses = {s.supplier_index: s for s in outreach.supplier_statuses}
-    for idx, supplier in zip(selected_indices, selected_suppliers):
-        if idx not in outreach.selected_suppliers:
-            outreach.selected_suppliers.append(idx)
-        if idx not in existing_statuses:
-            outreach.supplier_statuses.append(
-                SupplierOutreachStatus(supplier_name=supplier.name, supplier_index=idx)
-            )
-        plan = _build_supplier_plan(supplier, idx, reqs, None)
-        _upsert_plan(outreach, plan)
-
-    existing_drafts_by_index = {d.supplier_index: d for d in outreach.draft_emails}
-    for draft in draft_result.drafts:
-        existing_drafts_by_index[draft.supplier_index] = draft
-    outreach.draft_emails = list(existing_drafts_by_index.values())
-
-    sent_count = 0
-    failed_count = 0
-    for draft in outreach.draft_emails:
-        if draft.supplier_index not in selected_indices:
-            continue
-        if draft.status == "sent":
-            continue
-
-        recipient = draft.recipient_email
-        if not recipient and 0 <= draft.supplier_index < len(discovery.suppliers):
-            recipient = discovery.suppliers[draft.supplier_index].email
-
-        if not recipient:
-            draft.status = "failed"
-            failed_count += 1
-            _append_event(
-                outreach,
-                "send_failed",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                reason="missing_email",
-            )
-            continue
-
-        result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
-        status = next(
-            (s for s in outreach.supplier_statuses if s.supplier_index == draft.supplier_index),
-            None,
-        )
-
-        if result.get("sent"):
-            draft.status = "sent"
-            sent_count += 1
-            if status:
-                status.email_sent = True
-                status.sent_at = time.time()
-                status.email_id = result.get("id", "")
-                status.delivery_status = "sent"
-            _append_event(
-                outreach,
-                "email_sent",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                email_id=result.get("id", ""),
-            )
-            await record_supplier_interaction(
-                project=project,
-                supplier_index=draft.supplier_index,
-                interaction_type="rfq_sent",
-                source="outreach",
-                details={"email_id": result.get("id", ""), "recipient": recipient},
-            )
-        else:
-            draft.status = "failed"
-            failed_count += 1
-            if status:
-                status.email_sent = False
-            _append_event(
-                outreach,
-                "send_failed",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                reason=result.get("error", "unknown"),
-            )
+    batch_result = await _draft_and_send_initial_outreach(
+        project=project,
+        outreach=outreach,
+        reqs=reqs,
+        recs=recs,
+        selected_indices=selected_indices,
+        selected_suppliers=selected_suppliers,
+        source_label="quick_approval",
+    )
 
     outreach.quick_approval_decision = "approved"
     _append_event(
         outreach,
         "quick_outreach_approved",
-        sent_count=sent_count,
-        failed_count=failed_count,
-        selected_suppliers=len(selected_indices),
+        sent_count=batch_result["sent_count"],
+        failed_count=batch_result["failed_count"],
+        selected_suppliers=batch_result["selected_count"],
     )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
@@ -429,8 +512,8 @@ async def quick_outreach_approval(
 
     return {
         "status": "approved",
-        "sent_count": sent_count,
-        "failed_count": failed_count,
+        "sent_count": batch_result["sent_count"],
+        "failed_count": batch_result["failed_count"],
         "selected_suppliers": selected_indices,
     }
 
@@ -450,6 +533,14 @@ async def approve_and_send(
         raise HTTPException(status_code=400, detail="Invalid draft index")
 
     draft = outreach.draft_emails[draft_index]
+    supplier_status = _get_or_create_supplier_status(
+        outreach=outreach,
+        supplier_index=draft.supplier_index,
+        supplier_name=draft.supplier_name,
+    )
+
+    if supplier_status.excluded:
+        raise HTTPException(status_code=400, detail="Supplier was removed from outreach")
 
     if request.edited_subject:
         draft.subject = request.edited_subject
@@ -466,6 +557,9 @@ async def approve_and_send(
 
     if not recipient:
         draft.status = "failed"
+        supplier_status.email_sent = False
+        supplier_status.delivery_status = "failed"
+        supplier_status.send_error = "No supplier email found"
         _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason="missing_email")
         await record_supplier_interaction(
             project=project,
@@ -484,13 +578,11 @@ async def approve_and_send(
     if result.get("sent"):
         draft.status = "sent"
         email_id = result.get("id", "")
-        for status in outreach.supplier_statuses:
-            if status.supplier_index == draft.supplier_index:
-                status.email_sent = True
-                status.sent_at = time.time()
-                status.email_id = email_id
-                status.delivery_status = "sent"
-                break
+        supplier_status.email_sent = True
+        supplier_status.sent_at = time.time()
+        supplier_status.email_id = email_id
+        supplier_status.delivery_status = "sent"
+        supplier_status.send_error = None
         _append_event(outreach, "email_sent", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, email_id=email_id)
         await record_supplier_interaction(
             project=project,
@@ -501,6 +593,9 @@ async def approve_and_send(
         )
     else:
         draft.status = "failed"
+        supplier_status.email_sent = False
+        supplier_status.delivery_status = "failed"
+        supplier_status.send_error = result.get("error", "unknown")
         _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason=result.get("error", "unknown"))
         await record_supplier_interaction(
             project=project,
@@ -809,25 +904,115 @@ async def recompare_with_quotes(
 
 
 @router.post("/auto-send")
-async def trigger_auto_send(project_id: str):
-    """Immediately process the auto-queue for this project (bypass scheduler wait)."""
-    project = _get_project(project_id)
+async def trigger_auto_send(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Immediately send any queued drafts for this project."""
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
     if not queued:
         return {"status": "nothing_to_send", "queued_count": 0}
 
-    from app.core.scheduler import get_scheduler
-    scheduler = get_scheduler()
-    result = await scheduler.process_project_now(project_id)
-    return {"status": "processed", **result}
+    discovery = DiscoveryResults(**project["discovery_results"])
+
+    sent = 0
+    failed = 0
+    for draft in queued:
+        status = _get_or_create_supplier_status(
+            outreach=outreach,
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+        )
+
+        if status.excluded or draft.supplier_index in outreach.excluded_suppliers:
+            draft.status = "failed"
+            failed += 1
+            status.email_sent = False
+            status.delivery_status = "failed"
+            status.send_error = status.exclusion_reason or "Supplier excluded from outreach"
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason="supplier_excluded",
+                source="auto_send_endpoint",
+            )
+            continue
+
+        recipient = draft.recipient_email
+        if not recipient and 0 <= draft.supplier_index < len(discovery.suppliers):
+            recipient = discovery.suppliers[draft.supplier_index].email
+
+        if not recipient:
+            draft.status = "failed"
+            failed += 1
+            status.email_sent = False
+            status.delivery_status = "failed"
+            status.send_error = "No supplier email found"
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason="missing_email",
+                source="auto_send_endpoint",
+            )
+            continue
+
+        result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
+        if result.get("sent"):
+            draft.status = "sent"
+            sent += 1
+            status.email_sent = True
+            status.sent_at = time.time()
+            status.email_id = result.get("id", "")
+            status.delivery_status = "sent"
+            status.send_error = None
+            _append_event(
+                outreach,
+                "email_sent",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                email_id=result.get("id", ""),
+                source="auto_send_endpoint",
+            )
+        else:
+            draft.status = "failed"
+            failed += 1
+            status.email_sent = False
+            status.delivery_status = "failed"
+            status.send_error = result.get("error", "unknown")
+            _append_event(
+                outreach,
+                "send_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason=result.get("error", "unknown"),
+                source="auto_send_endpoint",
+            )
+
+    project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
+    remaining_queued = len([d for d in outreach.draft_emails if d.status == "auto_queued"])
+    return {
+        "status": "processed",
+        "emails_sent": sent,
+        "failed_count": failed,
+        "remaining_queued": remaining_queued,
+    }
 
 
 @router.get("/scheduler-status")
-async def get_scheduler_status(project_id: str):
+async def get_scheduler_status(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Return scheduler health, loop counts, and last-run timestamps."""
-    _get_project(project_id)  # Validate project exists
+    await _get_project(project_id, current_user)  # Validate ownership and project
 
     from app.core.scheduler import get_scheduler
     scheduler = get_scheduler()
@@ -862,7 +1047,7 @@ async def start_auto_outreach(
     project_id: str,
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
-    """Auto-draft and queue RFQ emails for suppliers above the verification threshold."""
+    """Auto-select eligible suppliers and send RFQ emails immediately."""
     project = await _get_project(project_id, current_user)
 
     if not project.get("recommendation_result"):
@@ -884,41 +1069,73 @@ async def start_auto_outreach(
         verifications = VerificationResults(**project["verification_results"])
         recs = RecommendationResult(**project["recommendation_result"])
 
-        result = await auto_draft_and_queue(
-            verified_suppliers=discovery.suppliers,
-            verifications=verifications,
-            requirements=reqs,
-            recommendations=recs,
-            auto_config=outreach.auto_config,
+        score_by_index = {
+            v.supplier_index: v.composite_score
+            for v in verifications.verifications
+        }
+        threshold = outreach.auto_config.auto_send_threshold
+        max_count = outreach.auto_config.max_concurrent_outreach
+
+        selected_indices: list[int] = []
+        selected_suppliers: list[DiscoveredSupplier] = []
+        for rec in sorted(recs.recommendations, key=lambda r: r.rank):
+            idx = rec.supplier_index
+            if idx in outreach.excluded_suppliers:
+                continue
+            if score_by_index.get(idx, 0) < threshold:
+                continue
+            if not (0 <= idx < len(discovery.suppliers)):
+                continue
+            selected_indices.append(idx)
+            selected_suppliers.append(discovery.suppliers[idx])
+            if len(selected_indices) >= max_count:
+                break
+
+        if not selected_suppliers:
+            return {
+                "status": "no_eligible_suppliers",
+                "sent_count": 0,
+                "failed_count": 0,
+                "selected_suppliers": [],
+            }
+
+        batch_result = await _draft_and_send_initial_outreach(
+            project=project,
+            outreach=outreach,
+            reqs=reqs,
+            recs=recs,
+            selected_indices=selected_indices,
+            selected_suppliers=selected_suppliers,
+            source_label="auto_start",
         )
 
-        outreach.draft_emails.extend(result.drafts)
-
-        existing_indices = {s.supplier_index for s in outreach.supplier_statuses}
-        for draft in result.drafts:
-            if draft.supplier_index not in existing_indices:
-                outreach.supplier_statuses.append(
-                    SupplierOutreachStatus(supplier_name=draft.supplier_name, supplier_index=draft.supplier_index)
-                )
-            if draft.supplier_index not in outreach.selected_suppliers:
-                outreach.selected_suppliers.append(draft.supplier_index)
-
-            if 0 <= draft.supplier_index < len(discovery.suppliers):
-                plan = _build_supplier_plan(discovery.suppliers[draft.supplier_index], draft.supplier_index, reqs, None)
-                _upsert_plan(outreach, plan)
-
-        _append_event(outreach, "auto_queue_created", queued=len(result.drafts))
+        _append_event(
+            outreach,
+            "auto_send_completed",
+            selected_suppliers=batch_result["selected_count"],
+            sent_count=batch_result["sent_count"],
+            failed_count=batch_result["failed_count"],
+        )
         await record_supplier_interactions(
             project=project,
-            supplier_indices=[d.supplier_index for d in result.drafts],
-            interaction_type="auto_outreach_queued",
+            supplier_indices=selected_indices,
+            interaction_type="auto_outreach_started",
             source="outreach",
-            details={"queued_count": len(result.drafts)},
+            details={
+                "selected_count": batch_result["selected_count"],
+                "sent_count": batch_result["sent_count"],
+                "failed_count": batch_result["failed_count"],
+            },
         )
         project["outreach_state"] = outreach.model_dump(mode="json")
         await _save_project(project)
 
-        return {"status": "queued", "drafts_queued": len(result.drafts), "summary": result.summary}
+        return {
+            "status": "sent",
+            "selected_suppliers": selected_indices,
+            "sent_count": batch_result["sent_count"],
+            "failed_count": batch_result["failed_count"],
+        }
 
     except HTTPException:
         raise
@@ -943,14 +1160,17 @@ async def get_auto_outreach_status(
 
     auto_queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
     auto_sent = [d for d in outreach.draft_emails if d.status == "sent"]
+    auto_failed = [d for d in outreach.draft_emails if d.status == "failed"]
 
     return {
         "enabled": outreach.auto_config is not None,
         "config": outreach.auto_config.model_dump() if outreach.auto_config else None,
         "queued_count": len(auto_queued),
         "sent_count": len(auto_sent),
+        "failed_count": len(auto_failed),
         "queued_suppliers": [d.supplier_name for d in auto_queued],
         "sent_suppliers": [d.supplier_name for d in auto_sent],
+        "failed_suppliers": [d.supplier_name for d in auto_failed],
     }
 
 

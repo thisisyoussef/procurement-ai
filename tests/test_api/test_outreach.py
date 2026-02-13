@@ -70,6 +70,29 @@ def _seed_project(project_id: str) -> None:
                     "resolved_manufacturer_website": None,
                     "resolution_notes": None,
                     "filter_reasons": [],
+                },
+                {
+                    "name": "Beta Textiles",
+                    "website": "https://beta.example",
+                    "email": "sales@beta.example",
+                    "phone": None,
+                    "city": "Izmir",
+                    "country": "Turkey",
+                    "description": "Textile supplier",
+                    "categories": ["textiles"],
+                    "certifications": ["ISO9001"],
+                    "google_rating": 4.4,
+                    "source": "web",
+                    "confidence_score": 86,
+                    "contact_person": None,
+                    "address": None,
+                    "intermediary_detection": None,
+                    "is_intermediary": False,
+                    "intermediary_type": None,
+                    "resolved_manufacturer_name": None,
+                    "resolved_manufacturer_website": None,
+                    "resolution_notes": None,
+                    "filter_reasons": [],
                 }
             ],
             "search_summary": "ok",
@@ -154,6 +177,50 @@ def test_outreach_plan_and_timeline_tracking():
     event_types = [e["event_type"] for e in timeline.json()["events"]]
     assert "intent_registered" in event_types
     assert "email_sent" in event_types
+
+
+def test_outreach_start_normalizes_supplier_indices():
+    _projects.clear()
+    project_id = "proj-outreach-index-map"
+    _seed_project(project_id)
+
+    with patch("app.api.v1.outreach.draft_outreach_emails", new=AsyncMock()) as mock_draft, patch(
+        "app.api.v1.outreach.send_email", new=AsyncMock(return_value={"sent": True, "id": "email_idx_1"})
+    ) as mock_send:
+        from app.schemas.agent_state import DraftEmail, OutreachResult
+
+        # Agent returns local index 0 for selected supplier list; API should map it to global index 1.
+        mock_draft.return_value = OutreachResult(
+            drafts=[
+                DraftEmail(
+                    supplier_name="Beta Textiles",
+                    supplier_index=0,
+                    recipient_email=None,
+                    subject="RFQ",
+                    body="Hello",
+                    status="draft",
+                )
+            ],
+            summary="done",
+        )
+
+        start = client.post(
+            f"/api/v1/projects/{project_id}/outreach/start",
+            json={"supplier_indices": [1]},
+            headers=_auth_headers(),
+        )
+        assert start.status_code == 200
+        start_payload = start.json()
+        assert start_payload["drafts"][0]["supplier_index"] == 1
+
+        send = client.post(
+            f"/api/v1/projects/{project_id}/outreach/approve/0",
+            json={"draft_index": 0},
+            headers=_auth_headers(),
+        )
+        assert send.status_code == 200
+        assert send.json()["sent"] is True
+        assert mock_send.await_args.kwargs["to"] == "sales@beta.example"
 
 
 def test_quick_approval_sends_outreach():

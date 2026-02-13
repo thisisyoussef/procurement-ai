@@ -3,7 +3,6 @@
 import PhaseTabBar from './PhaseTabBar'
 import LeftRail from './LeftRail'
 import CenterStage from './CenterStage'
-import InputBar from './InputBar'
 
 export default function WorkspaceShell() {
   return (
@@ -13,15 +12,13 @@ export default function WorkspaceShell() {
         <LeftRail />
       </aside>
 
-      {/* Main: tabs + stage + input */}
+      {/* Main: tabs + stage */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <PhaseTabBar />
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
           <CenterStage />
         </main>
-
-        <InputBar />
       </div>
     </div>
   )

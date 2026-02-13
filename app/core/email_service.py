@@ -1,5 +1,6 @@
 """Email service — Resend SDK wrapper with webhook verification and HTML templates."""
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -12,6 +13,32 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _extract_resend_email_id(result: Any) -> str:
+    """Extract an email ID from common Resend SDK response shapes."""
+    if isinstance(result, dict):
+        email_id = result.get("id")
+        if email_id:
+            return str(email_id)
+        data = result.get("data")
+        if isinstance(data, dict) and data.get("id"):
+            return str(data["id"])
+        return ""
+    email_id = getattr(result, "id", None)
+    if email_id:
+        return str(email_id)
+    data = getattr(result, "data", None)
+    if isinstance(data, dict) and data.get("id"):
+        return str(data["id"])
+    return ""
+
+
+def _send_with_resend(api_key: str, payload: dict[str, Any]) -> Any:
+    import resend
+
+    resend.api_key = api_key
+    return resend.Emails.send(payload)
+
+
 async def send_email(to: str, subject: str, body_html: str) -> dict:
     """Send an email via Resend API.
 
@@ -22,20 +49,25 @@ async def send_email(to: str, subject: str, body_html: str) -> dict:
     if not settings.resend_api_key:
         logger.warning("Resend API key not configured — email not sent to %s", to)
         return {"error": "Resend API key not configured", "sent": False}
+    if settings.from_email == "sourcing@yourdomain.com":
+        logger.warning("FROM_EMAIL is still placeholder value; refusing to send to %s", to)
+        return {
+            "error": "FROM_EMAIL is not configured (still sourcing@yourdomain.com)",
+            "sent": False,
+        }
 
     try:
-        import resend
-
-        resend.api_key = settings.resend_api_key
-        result = resend.Emails.send(
-            {
-                "from": settings.from_email,
-                "to": [to],
-                "subject": subject,
-                "html": body_html,
-            }
-        )
-        email_id = result.get("id", "")
+        payload = {
+            "from": settings.from_email,
+            "to": [to],
+            "subject": subject,
+            "html": body_html,
+        }
+        result = await asyncio.to_thread(_send_with_resend, settings.resend_api_key, payload)
+        email_id = _extract_resend_email_id(result)
+        if not email_id:
+            logger.error("Resend returned no email id for %s: %r", to, result)
+            return {"error": "Resend response missing email id", "sent": False}
         logger.info("Email sent to %s: subject=%s, id=%s", to, subject[:60], email_id)
         return {"id": email_id, "sent": True}
 

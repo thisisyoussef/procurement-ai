@@ -1,8 +1,8 @@
 """Background scheduler for autonomous outreach operations.
 
 Uses asyncio tasks managed by FastAPI's lifespan events.
-Runs in the same process as the FastAPI app so it can directly
-access the in-memory _projects dict.
+Runs in the same process as the FastAPI app and persists updates
+through the configured project store backend.
 
 Loops:
   - Email queue processor (30s) — sends auto_queued drafts
@@ -141,10 +141,39 @@ class OutreachScheduler:
 
     # ── Helpers ──────────────────────────────────────────────────
 
-    def _get_projects(self) -> dict[str, dict]:
-        """Import and return the in-memory projects store."""
-        from app.api.v1.projects import _projects
-        return _projects
+    async def _list_projects(self) -> list[dict[str, Any]]:
+        """Load projects from the configured store."""
+        from app.services.project_store import StoreUnavailableError, get_project_store
+
+        store = get_project_store()
+        try:
+            return await store.list_projects()
+        except StoreUnavailableError as exc:
+            logger.warning("Scheduler: project store unavailable while listing projects: %s", exc)
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Scheduler: failed to list projects: %s", exc)
+            return []
+
+    async def _save_project(self, project: dict[str, Any]) -> None:
+        """Persist a project through the configured store."""
+        from app.services.project_store import StoreUnavailableError, get_project_store
+
+        store = get_project_store()
+        try:
+            await store.save_project(project)
+        except StoreUnavailableError as exc:
+            logger.warning(
+                "Scheduler: project store unavailable while saving project %s: %s",
+                project.get("id"),
+                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Scheduler: failed to save project %s: %s",
+                project.get("id"),
+                exc,
+            )
 
     def _get_outreach_state(self, project: dict):
         """Parse OutreachState from a project dict."""
@@ -154,9 +183,10 @@ class OutreachScheduler:
             return None
         return OutreachState(**raw) if isinstance(raw, dict) else raw
 
-    def _save_outreach_state(self, project: dict, outreach) -> None:
+    async def _save_outreach_state(self, project: dict, outreach) -> None:
         """Serialize OutreachState back to the project dict."""
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await self._save_project(project)
 
     def _response_indicates_cannot_fulfill(self, quote_text: str | None, response_text: str) -> bool:
         text = f"{quote_text or ''}\n{response_text}".lower()
@@ -211,16 +241,21 @@ class OutreachScheduler:
         from app.core.email_service import send_email
         from app.schemas.agent_state import OutreachEvent
 
-        projects = self._get_projects()
+        projects = await self._list_projects()
 
-        for project_id, project in projects.items():
+        for project in projects:
+            project_id = str(project.get("id", ""))
             outreach = self._get_outreach_state(project)
             if not outreach or not outreach.auto_config:
                 continue
             if outreach.auto_config.mode not in ("auto", "semi_auto"):
                 continue
 
-            queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
+            queued = [
+                d
+                for d in outreach.draft_emails
+                if d.status == "auto_queued" and d.supplier_index not in outreach.excluded_suppliers
+            ]
             if not queued:
                 continue
 
@@ -238,12 +273,25 @@ class OutreachScheduler:
                 suppliers_list = dr.suppliers
 
             for draft in queued:
+                if draft.supplier_index in outreach.excluded_suppliers:
+                    continue
+
+                supplier_status = None
+                for status in outreach.supplier_statuses:
+                    if status.supplier_index == draft.supplier_index:
+                        supplier_status = status
+                        break
+
                 recipient = draft.recipient_email
                 if not recipient and draft.supplier_index < len(suppliers_list):
                     recipient = suppliers_list[draft.supplier_index].email
 
                 if not recipient:
                     draft.status = "failed"
+                    if supplier_status:
+                        supplier_status.email_sent = False
+                        supplier_status.delivery_status = "failed"
+                        supplier_status.send_error = "No supplier email found"
                     logger.warning(
                         "Scheduler: No email for %s — marking failed",
                         draft.supplier_name,
@@ -268,6 +316,7 @@ class OutreachScheduler:
                             status.sent_at = time.time()
                             status.email_id = email_id
                             status.delivery_status = "sent"
+                            status.send_error = None
                             break
 
                     outreach.events.append(OutreachEvent(
@@ -283,6 +332,10 @@ class OutreachScheduler:
                     )
                 else:
                     draft.status = "failed"
+                    if supplier_status:
+                        supplier_status.email_sent = False
+                        supplier_status.delivery_status = "failed"
+                        supplier_status.send_error = result.get("error", "unknown")
                     outreach.events.append(OutreachEvent(
                         event_type="auto_email_failed",
                         supplier_index=draft.supplier_index,
@@ -293,7 +346,7 @@ class OutreachScheduler:
                 # Rate limit: 2 seconds between sends
                 await asyncio.sleep(2.0)
 
-            self._save_outreach_state(project, outreach)
+            await self._save_outreach_state(project, outreach)
 
     # ── Loop 2: Follow-up Checker ────────────────────────────────
 
@@ -303,14 +356,14 @@ class OutreachScheduler:
         from app.core.email_service import send_email
         from app.schemas.agent_state import (
             OutreachEvent,
-            OutreachState,
             ParsedRequirements,
         )
 
-        projects = self._get_projects()
+        projects = await self._list_projects()
         now = time.time()
 
-        for project_id, project in projects.items():
+        for project in projects:
+            project_id = str(project.get("id", ""))
             outreach = self._get_outreach_state(project)
             if not outreach or not outreach.auto_config:
                 continue
@@ -321,6 +374,8 @@ class OutreachScheduler:
             needs_follow_up = False
 
             for status in outreach.supplier_statuses:
+                if status.excluded:
+                    continue
                 if not status.email_sent or status.response_received:
                     continue
                 if status.follow_ups_sent >= len(schedule):
@@ -361,6 +416,10 @@ class OutreachScheduler:
                     suppliers_list = dr.suppliers
 
                 for fu in result.follow_ups:
+                    if fu.supplier_index in outreach.excluded_suppliers:
+                        fu.status = "failed"
+                        continue
+
                     recipient = fu.recipient_email
                     if not recipient and fu.supplier_index < len(suppliers_list):
                         recipient = suppliers_list[fu.supplier_index].email
@@ -401,7 +460,7 @@ class OutreachScheduler:
 
                     await asyncio.sleep(2.0)
 
-                self._save_outreach_state(project, outreach)
+                await self._save_outreach_state(project, outreach)
 
             except Exception as e:
                 logger.error("Scheduler: Follow-up generation failed for %s: %s", project_id, e)
@@ -418,9 +477,10 @@ class OutreachScheduler:
             ParsedRequirements,
         )
 
-        projects = self._get_projects()
+        projects = await self._list_projects()
 
-        for project_id, project in projects.items():
+        for project in projects:
+            project_id = str(project.get("id", ""))
             outreach = self._get_outreach_state(project)
             if not outreach or not outreach.auto_config:
                 continue
@@ -428,7 +488,11 @@ class OutreachScheduler:
                 continue
 
             # Need at least one email sent
-            sent_suppliers = [s for s in outreach.supplier_statuses if s.email_sent]
+            sent_suppliers = [
+                s
+                for s in outreach.supplier_statuses
+                if s.email_sent and not s.excluded
+            ]
             if not sent_suppliers:
                 continue
 
@@ -442,6 +506,8 @@ class OutreachScheduler:
             supplier_domains = []
 
             for idx in outreach.selected_suppliers:
+                if idx in outreach.excluded_suppliers:
+                    continue
                 if idx < len(dr.suppliers):
                     supplier = dr.suppliers[idx]
                     if supplier.email:
@@ -568,7 +634,7 @@ class OutreachScheduler:
                     except Exception as e:
                         logger.error("Scheduler: Failed to parse response from %s: %s", supplier_name, e)
 
-                self._save_outreach_state(project, outreach)
+                await self._save_outreach_state(project, outreach)
 
             except Exception as e:
                 logger.error("Scheduler: Inbox check failed for %s: %s", project_id, e)
@@ -584,10 +650,11 @@ class OutreachScheduler:
             ParsedRequirements,
         )
 
-        projects = self._get_projects()
+        projects = await self._list_projects()
         now = time.time()
 
-        for project_id, project in projects.items():
+        for project in projects:
+            project_id = str(project.get("id", ""))
             outreach = self._get_outreach_state(project)
             if not outreach or not outreach.auto_config:
                 continue
@@ -605,6 +672,8 @@ class OutreachScheduler:
             for status in outreach.supplier_statuses:
                 # Skip if already responded or already called
                 if status.response_received:
+                    continue
+                if status.excluded:
                     continue
                 if status.phone_call_id:
                     continue
@@ -668,7 +737,7 @@ class OutreachScheduler:
                 except Exception as e:
                     logger.error("Scheduler: Phone escalation failed for %s: %s", supplier.name, e)
 
-            self._save_outreach_state(project, outreach)
+            await self._save_outreach_state(project, outreach)
 
     # ── Manual trigger ──────────────────────────────────────────
 
@@ -677,8 +746,16 @@ class OutreachScheduler:
 
         Returns a summary dict of what was sent.
         """
-        projects = self._get_projects()
-        project = projects.get(project_id)
+        from app.services.project_store import StoreUnavailableError, get_project_store
+
+        store = get_project_store()
+        try:
+            project = await store.get_project(project_id)
+        except StoreUnavailableError as exc:
+            return {"error": f"Project store unavailable: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to load project: {exc}"}
+
         if not project:
             return {"error": "Project not found"}
 
@@ -691,10 +768,19 @@ class OutreachScheduler:
         # Temporarily run the email queue processor just for this project
         await self._process_email_queues()
 
-        queued_after = len([d for d in outreach.draft_emails if d.status == "auto_queued"])
+        refreshed = await store.get_project(project_id)
+        if not refreshed:
+            return {"error": "Project disappeared during processing"}
+        refreshed_outreach = self._get_outreach_state(refreshed)
+        if not refreshed_outreach:
+            return {"error": "Outreach state missing after processing"}
+
+        queued_after = len([d for d in refreshed_outreach.draft_emails if d.status == "auto_queued"])
+        failed = len([d for d in refreshed_outreach.draft_emails if d.status == "failed"])
         sent = queued_before - queued_after
 
         return {
             "emails_sent": sent,
+            "failed_count": failed,
             "remaining_queued": queued_after,
         }
