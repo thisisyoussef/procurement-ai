@@ -314,6 +314,11 @@ export default function OutreachPanel({
     } catch {}
   }
 
+  const refreshOutreachState = async () => {
+    await fetchOutreachStatus()
+    await fetchAutoStatus()
+  }
+
   const configureAutoOutreach = async () => {
     setLoading(true)
     setError(null)
