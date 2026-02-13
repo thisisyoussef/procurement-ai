@@ -93,9 +93,27 @@ class OutreachQuickApprovalRequest(BaseModel):
     supplier_indices: list[int] | None = None
 
 
+class OutreachRetryFailedRequest(BaseModel):
+    supplier_indices: list[int] | None = None
+
+
+class OutreachCancelPendingRequest(BaseModel):
+    supplier_indices: list[int] | None = None
+
+
 class ClarifyingAnswerRequest(BaseModel):
     """User's answers to clarifying questions."""
     answers: dict[str, str] = Field(description="Mapping of field name to answer text")
+
+
+class ProjectRestartRequest(BaseModel):
+    """Restart a project pipeline from parsing or discovery."""
+    from_stage: str = Field(default="discovering", description="parsing or discovering")
+    additional_context: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="Optional extra context to append before restarting",
+    )
 
 
 class PhoneCallStartRequest(BaseModel):

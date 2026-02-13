@@ -11,6 +11,7 @@ from app.core.auth import AuthUser, create_access_token
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.main import app
+from app.api.v1.projects import _projects
 
 client = TestClient(app)
 
@@ -110,3 +111,121 @@ def test_cancel_project():
     cancel_data = cancel_response.json()
     assert cancel_data["project_id"] == project_id
     assert cancel_data["status"] in {"canceled", "failed", "complete"}
+
+
+def test_restart_project_from_discovering_resets_downstream_state():
+    _projects.clear()
+    project_id = "proj-restart-discover"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Restart Test",
+        "product_description": "Need precision machined brackets",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": {
+            "product_type": "Bracket",
+            "material": "Steel",
+            "dimensions": None,
+            "quantity": 500,
+            "customization": None,
+            "delivery_location": "Detroit, MI",
+            "deadline": None,
+            "certifications_needed": [],
+            "budget_range": None,
+            "missing_fields": [],
+            "search_queries": [],
+            "regional_searches": [],
+            "clarifying_questions": [],
+            "sourcing_strategy": None,
+            "sourcing_preference": None,
+        },
+        "discovery_results": {"suppliers": []},
+        "verification_results": {"verifications": []},
+        "comparison_result": {"comparisons": []},
+        "recommendation_result": {"recommendations": []},
+        "chat_messages": [],
+        "outreach_state": {"selected_suppliers": [], "supplier_statuses": [], "draft_emails": []},
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+    }
+
+    with patch("app.api.v1.projects._resume_pipeline_task", new=AsyncMock()):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/restart",
+            json={"from_stage": "discovering"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "restarted"
+        assert payload["from_stage"] == "discovering"
+
+    updated = _projects[project_id]
+    assert updated["status"] == "discovering"
+    assert updated["discovery_results"] is None
+    assert updated["verification_results"] is None
+    assert updated["comparison_result"] is None
+    assert updated["recommendation_result"] is None
+    assert updated["outreach_state"] is None
+
+
+def test_restart_with_additional_context_forces_parsing():
+    _projects.clear()
+    project_id = "proj-restart-parse"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Restart Parsing Test",
+        "product_description": "Need stamped aluminum parts",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": {
+            "product_type": "Stamped Part",
+            "material": "Aluminum",
+            "dimensions": None,
+            "quantity": 10000,
+            "customization": None,
+            "delivery_location": "Flint, MI",
+            "deadline": None,
+            "certifications_needed": [],
+            "budget_range": None,
+            "missing_fields": [],
+            "search_queries": [],
+            "regional_searches": [],
+            "clarifying_questions": [],
+            "sourcing_strategy": None,
+            "sourcing_preference": None,
+        },
+        "discovery_results": {"suppliers": []},
+        "verification_results": {"verifications": []},
+        "comparison_result": {"comparisons": []},
+        "recommendation_result": {"recommendations": []},
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+    }
+
+    with patch("app.api.v1.projects._run_pipeline_task", new=AsyncMock()):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/restart",
+            json={
+                "from_stage": "discovering",
+                "additional_context": "Prioritize suppliers with in-house anodizing and PPAP support.",
+            },
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "restarted"
+        assert payload["from_stage"] == "parsing"
+
+    updated = _projects[project_id]
+    assert updated["status"] == "parsing"
+    assert "Additional context" in updated["product_description"]
+    assert updated["parsed_requirements"] is None

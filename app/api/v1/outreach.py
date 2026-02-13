@@ -27,8 +27,10 @@ from app.schemas.agent_state import (
     VerificationResults,
 )
 from app.schemas.project import (
+    OutreachCancelPendingRequest,
     EmailApprovalRequest,
     OutreachQuickApprovalRequest,
+    OutreachRetryFailedRequest,
     OutreachStartRequest,
     QuoteParseRequest,
 )
@@ -290,6 +292,19 @@ def _normalize_draft_supplier_indices(drafts, selected_indices: list[int]) -> No
         local_idx = draft.supplier_index
         if 0 <= local_idx < len(selected_indices):
             draft.supplier_index = selected_indices[local_idx]
+
+
+def _resolve_draft_recipient(
+    draft,
+    discovery: DiscoveryResults,
+) -> str | None:
+    recipient = draft.recipient_email
+    if recipient:
+        return recipient
+    idx = draft.supplier_index
+    if 0 <= idx < len(discovery.suppliers):
+        return discovery.suppliers[idx].email
+    return None
 
 
 def _get_selected_suppliers_for_quick_approval(
@@ -707,6 +722,232 @@ async def quick_outreach_approval(
         "sent_count": batch_result["sent_count"],
         "failed_count": batch_result["failed_count"],
         "selected_suppliers": selected_indices,
+    }
+
+
+@router.post("/retry-failed")
+async def retry_failed_outreach(
+    project_id: str,
+    request: OutreachRetryFailedRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Retry failed outreach sends for selected or all suppliers."""
+    project = await _get_project(project_id, current_user)
+    outreach = _get_outreach_state(project)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
+
+    discovery = DiscoveryResults(**project["discovery_results"])
+    requested_indices = set(request.supplier_indices or [])
+    retry_targets = []
+    for draft in outreach.draft_emails:
+        if requested_indices and draft.supplier_index not in requested_indices:
+            continue
+        if draft.status != "failed":
+            continue
+        supplier_status = _get_or_create_supplier_status(
+            outreach=outreach,
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+        )
+        if supplier_status.excluded:
+            continue
+        retry_targets.append((draft, supplier_status))
+
+    if not retry_targets:
+        return {
+            "status": "nothing_to_retry",
+            "retried_count": 0,
+            "sent_count": 0,
+            "failed_count": 0,
+        }
+
+    sent_count = 0
+    failed_count = 0
+    skipped_count = 0
+
+    for draft, supplier_status in retry_targets:
+        recipient = _resolve_draft_recipient(draft, discovery)
+        if not recipient:
+            failed_count += 1
+            _set_supplier_delivery_failure(supplier_status, "No supplier email found")
+            _append_event(
+                outreach,
+                "retry_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason="missing_email",
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=draft.supplier_index,
+                interaction_type="rfq_retry_failed",
+                source="outreach",
+                details={"reason": "missing_email"},
+            )
+            continue
+
+        _append_event(
+            outreach,
+            "retry_attempted",
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+            recipient=recipient,
+        )
+        result = await _send_and_track_email(
+            project=project,
+            outreach=outreach,
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+            recipient=recipient,
+            subject=draft.subject,
+            body=draft.body,
+            source_label="retry_failed",
+            owner_email=owner_email,
+        )
+        if result.get("sent"):
+            draft.status = "sent"
+            sent_count += 1
+            _set_supplier_delivery_success(supplier_status, result.get("id", ""))
+            _append_event(
+                outreach,
+                "email_sent",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                email_id=result.get("id", ""),
+                source="retry_failed",
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=draft.supplier_index,
+                interaction_type="rfq_retried_sent",
+                source="outreach",
+                details={
+                    "email_id": result.get("id", ""),
+                    "recipient": recipient,
+                    "cc_owner_email": owner_email,
+                },
+            )
+        else:
+            failed_count += 1
+            draft.status = "failed"
+            _set_supplier_delivery_failure(supplier_status, result.get("error", "unknown"))
+            _append_event(
+                outreach,
+                "retry_failed",
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                reason=result.get("error", "unknown"),
+            )
+            await record_supplier_interaction(
+                project=project,
+                supplier_index=draft.supplier_index,
+                interaction_type="rfq_retry_failed",
+                source="outreach",
+                details={
+                    "reason": result.get("error", "unknown"),
+                    "recipient": recipient,
+                },
+            )
+
+    project["outreach_state"] = outreach.model_dump(mode="json")
+    await record_project_event(
+        project,
+        event_type="outreach_retry_attempted",
+        title="Retried failed outreach sends",
+        description=(
+            f"Retried {len(retry_targets)} failed draft(s): "
+            f"{sent_count} sent, {failed_count} still failed."
+        ),
+        priority="medium",
+        phase="outreach",
+        payload={
+            "retried_count": len(retry_targets),
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+        },
+    )
+    await _save_project(project)
+    return {
+        "status": "processed",
+        "retried_count": len(retry_targets),
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+    }
+
+
+@router.post("/cancel-pending")
+async def cancel_pending_outreach(
+    project_id: str,
+    request: OutreachCancelPendingRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Cancel pending or queued outreach sends before they are sent."""
+    project = await _get_project(project_id, current_user)
+    outreach = _get_outreach_state(project)
+    requested_indices = set(request.supplier_indices or [])
+
+    cancelable_statuses = {"draft", "auto_queued"}
+    canceled = 0
+    skipped = 0
+    canceled_indices: list[int] = []
+
+    for draft in outreach.draft_emails:
+        if requested_indices and draft.supplier_index not in requested_indices:
+            continue
+        if draft.status not in cancelable_statuses:
+            skipped += 1
+            continue
+
+        supplier_status = _get_or_create_supplier_status(
+            outreach=outreach,
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+        )
+        draft.status = "canceled"
+        supplier_status.delivery_status = "canceled"
+        supplier_status.send_error = "Canceled by user"
+        canceled += 1
+        canceled_indices.append(draft.supplier_index)
+        _append_event(
+            outreach,
+            "send_canceled",
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+            reason="canceled_by_user",
+        )
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=draft.supplier_index,
+            interaction_type="rfq_canceled",
+            source="outreach",
+            details={"reason": "canceled_by_user"},
+        )
+
+    if canceled:
+        project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_project_event(
+            project,
+            event_type="outreach_pending_canceled",
+            title="Pending outreach canceled",
+            description=f"Canceled {canceled} pending outreach draft(s).",
+            priority="medium",
+            phase="outreach",
+            payload={"canceled": canceled, "skipped": skipped, "supplier_indices": canceled_indices},
+        )
+        await _save_project(project)
+
+    return {
+        "status": "processed" if canceled else "nothing_to_cancel",
+        "canceled_count": canceled,
+        "skipped_count": skipped,
+        "supplier_indices": canceled_indices,
     }
 
 

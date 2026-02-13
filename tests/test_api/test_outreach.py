@@ -318,3 +318,121 @@ def test_parse_response_excludes_supplier_when_unfulfillable():
     updated = _projects[project_id]
     assert updated["recommendation_result"]["recommendations"] == []
     assert updated["outreach_state"]["excluded_suppliers"] == [0]
+
+
+def test_retry_failed_outreach_resends_failed_drafts():
+    _projects.clear()
+    project_id = "proj-outreach-retry-1"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": False,
+                "delivery_status": "failed",
+                "send_error": "smtp_timeout",
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "recipient_email": "sales@acme.example",
+                "subject": "RFQ Retry",
+                "body": "Retrying outreach",
+                "status": "failed",
+            }
+        ],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.send_email",
+        new=AsyncMock(return_value={"sent": True, "id": "email_retry_1", "from": "ops@asmbl.app"}),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/retry-failed",
+            json={},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "processed"
+        assert payload["retried_count"] == 1
+        assert payload["sent_count"] == 1
+        assert payload["failed_count"] == 0
+
+    updated = _projects[project_id]["outreach_state"]
+    assert updated["draft_emails"][0]["status"] == "sent"
+    assert updated["supplier_statuses"][0]["delivery_status"] == "sent"
+
+
+def test_cancel_pending_outreach_only_cancels_unsent_drafts():
+    _projects.clear()
+    project_id = "proj-outreach-cancel-1"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0, 1],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": False,
+                "delivery_status": "unknown",
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            },
+            {
+                "supplier_name": "Beta Textiles",
+                "supplier_index": 1,
+                "email_sent": True,
+                "delivery_status": "sent",
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            },
+        ],
+        "draft_emails": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "recipient_email": "sales@acme.example",
+                "subject": "Queued",
+                "body": "Queued draft",
+                "status": "auto_queued",
+            },
+            {
+                "supplier_name": "Beta Textiles",
+                "supplier_index": 1,
+                "recipient_email": "sales@beta.example",
+                "subject": "Sent already",
+                "body": "Already sent draft",
+                "status": "sent",
+            },
+        ],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/outreach/cancel-pending",
+        json={},
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "processed"
+    assert payload["canceled_count"] == 1
+
+    updated = _projects[project_id]["outreach_state"]
+    assert updated["draft_emails"][0]["status"] == "canceled"
+    assert updated["draft_emails"][1]["status"] == "sent"

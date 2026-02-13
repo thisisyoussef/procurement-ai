@@ -17,10 +17,13 @@ export default function BriefPhase() {
     loading,
     errorMessage,
     handleSearch,
+    restartCurrentProject,
     handleClarifyingAnswered,
   } = useWorkspace()
 
   const [input, setInput] = useState('')
+  const [restartContext, setRestartContext] = useState('')
+  const [restarting, setRestarting] = useState(false)
   const currentStage = status?.current_stage || 'idle'
   const isClarifying = currentStage === 'clarifying'
   const hasClarifyingQuestions = !!(
@@ -32,6 +35,18 @@ export default function BriefPhase() {
     if (!text.trim()) return
     handleSearch(text.trim())
     setInput('')
+  }
+
+  const onRestartWithContext = async () => {
+    const context = restartContext.trim()
+    if (!projectId || !context || restarting) return
+    setRestarting(true)
+    const ok = await restartCurrentProject({
+      fromStage: 'parsing',
+      additionalContext: context,
+    })
+    if (ok) setRestartContext('')
+    setRestarting(false)
   }
 
   // ─── State 1: Empty — no project yet ─────────────────
@@ -159,6 +174,36 @@ export default function BriefPhase() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {projectId && (
+        <div className="card p-6 space-y-3">
+          <div>
+            <h3 className="font-heading text-base text-ink">Add context and restart</h3>
+            <p className="text-[11px] text-ink-4 mt-1">
+              Add missing details and rerun from the brief without creating a new project.
+            </p>
+          </div>
+          <textarea
+            value={restartContext}
+            onChange={(e) => setRestartContext(e.target.value)}
+            rows={3}
+            placeholder="Example: prioritize suppliers with in-house embroidery and sample lead times under 10 days."
+            className="w-full resize-none bg-cream/50 border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink placeholder:text-ink-4 focus:outline-none focus:ring-1 focus:ring-teal/30 focus:border-teal/50"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void onRestartWithContext()}
+              disabled={!restartContext.trim() || restarting}
+              className="px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {restarting ? 'Restarting…' : 'Restart with this context'}
+            </button>
+            <span className="text-[10px] text-ink-4">
+              Tamkin will run parsing and supplier search again.
+            </span>
           </div>
         </div>
       )}

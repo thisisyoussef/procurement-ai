@@ -7,6 +7,7 @@ import OutreachPhase from './phases/OutreachPhase'
 import ComparePhase from './phases/ComparePhase'
 import SamplesPhase from './phases/SamplesPhase'
 import OrderPhase from './phases/OrderPhase'
+import LiveProgressFeed from './LiveProgressFeed'
 
 export default function CenterStage() {
   const { activePhase, backendOk } = useWorkspace()
@@ -24,6 +25,7 @@ export default function CenterStage() {
       )}
 
       {/* Phase content */}
+      <LiveProgressFeed />
       {activePhase === 'brief' && <BriefPhase />}
       {activePhase === 'search' && <SearchPhase />}
       {activePhase === 'outreach' && <OutreachPhase />}

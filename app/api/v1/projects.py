@@ -28,6 +28,7 @@ from app.core.auth import AuthUser, get_current_auth_user
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
 from app.core.log_stream import current_project_id, get_project_logs, subscribe_to_logs
+from app.core.progress import emit_progress
 from app.schemas.agent_state import (
     ChatMessage,
     ComparisonResult,
@@ -42,6 +43,7 @@ from app.schemas.project import (
     ClarifyingAnswerRequest,
     PipelineStatusResponse,
     ProjectCreateRequest,
+    ProjectRestartRequest,
 )
 from app.services.project_store import (
     StoreUnavailableError,
@@ -72,6 +74,8 @@ ACTIVE_PIPELINE_STATUSES = {
     "outreaching",
 }
 
+RESTARTABLE_STAGES = {"parsing", "discovering"}
+
 _STAGE_PHASE = {
     "parsing": "brief",
     "clarifying": "brief",
@@ -96,6 +100,18 @@ def _stage_title(stage_name: str) -> str:
         "outreaching": "Running outreach",
     }
     return titles.get(stage_name, stage_name.replace("_", " ").title())
+
+
+def _stage_progress_message(stage_name: str) -> str:
+    messages = {
+        "parsing": "Reading your brief and setting up the sourcing plan.",
+        "discovering": "Searching for suppliers that match your requirements.",
+        "verifying": "Checking supplier legitimacy, contact data, and fit.",
+        "comparing": "Comparing top suppliers across cost, quality, and speed.",
+        "recommending": "Preparing a clear shortlist with next best actions.",
+        "outreaching": "Drafting and sending supplier outreach on your behalf.",
+    }
+    return messages.get(stage_name, f"Working on {stage_name.replace('_', ' ')}.")
 
 
 async def _get_project_or_404(project_id: str) -> dict:
@@ -298,6 +314,7 @@ async def _run_pipeline_task(project_id: str, description: str):
 
             project["current_stage"] = stage_name
             project["status"] = stage_name
+            emit_progress(stage_name, "stage_started", _stage_progress_message(stage_name))
             await record_project_event(
                 project,
                 event_type="stage_started",
@@ -340,10 +357,12 @@ async def _run_pipeline_task(project_id: str, description: str):
                 phase=_STAGE_PHASE.get(stage_name),
                 payload={"stage": stage_name},
             )
+            emit_progress(stage_name, "stage_complete", f"{_stage_title(stage_name)} complete.")
             await store.save_project(project)
 
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
+                emit_progress("failed", "pipeline_failed", "The run failed. You can retry with updated context.")
                 await record_project_event(
                     project,
                     event_type="project_failed",
@@ -363,6 +382,11 @@ async def _run_pipeline_task(project_id: str, description: str):
                     project["status"] = "clarifying"
                     project["current_stage"] = "clarifying"
                     project["clarifying_questions"] = questions
+                    emit_progress(
+                        "clarifying",
+                        "awaiting_answers",
+                        "Need a few details from you before continuing the supplier search.",
+                    )
                     await record_project_event(
                         project,
                         event_type="clarifying_required",
@@ -388,6 +412,7 @@ async def _run_pipeline_task(project_id: str, description: str):
             priority="info",
             phase=_STAGE_PHASE.get(project.get("current_stage")),
         )
+        emit_progress("complete", "ready", "Your shortlist is ready. Review suppliers and approve outreach.")
         await store.save_project(project)
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
@@ -396,6 +421,7 @@ async def _run_pipeline_task(project_id: str, description: str):
         project["status"] = "failed"
         project["current_stage"] = "failed"
         project["error"] = f"{str(e)}\n{traceback.format_exc()}"
+        emit_progress("failed", "pipeline_crash", "The run stopped unexpectedly. Try restarting from the brief.")
         try:
             await record_project_event(
                 project,
@@ -459,6 +485,7 @@ async def _resume_pipeline_task(project_id: str):
 
             project["current_stage"] = stage_name
             project["status"] = stage_name
+            emit_progress(stage_name, "stage_started", _stage_progress_message(stage_name))
             await record_project_event(
                 project,
                 event_type="stage_started",
@@ -501,10 +528,12 @@ async def _resume_pipeline_task(project_id: str):
                 phase=_STAGE_PHASE.get(stage_name),
                 payload={"stage": stage_name, "resume": True},
             )
+            emit_progress(stage_name, "stage_complete", f"{_stage_title(stage_name)} complete.")
             await store.save_project(project)
 
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
+                emit_progress("failed", "pipeline_failed", "The run failed. You can retry with updated context.")
                 await record_project_event(
                     project,
                     event_type="project_failed",
@@ -525,6 +554,7 @@ async def _resume_pipeline_task(project_id: str):
             priority="info",
             phase=_STAGE_PHASE.get(project.get("current_stage")),
         )
+        emit_progress("complete", "ready", "Your shortlist is ready. Review suppliers and approve outreach.")
         await store.save_project(project)
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
@@ -533,6 +563,7 @@ async def _resume_pipeline_task(project_id: str):
         project["status"] = "failed"
         project["current_stage"] = "failed"
         project["error"] = f"{str(e)}\n{traceback.format_exc()}"
+        emit_progress("failed", "pipeline_crash", "The run stopped unexpectedly. Try restarting from the brief.")
         try:
             await record_project_event(
                 project,
@@ -645,6 +676,115 @@ async def cancel_project(
 
     await _save_project(project)
     return {"project_id": project_id, "status": "canceled"}
+
+
+@router.post("/{project_id}/restart")
+async def restart_project(
+    project_id: str,
+    request: ProjectRestartRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Restart the pipeline from parsing or discovery, optionally with added context."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    project_status = str(project.get("status") or "")
+    if project_status in ACTIVE_PIPELINE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Project is currently running. Cancel the run before restarting.",
+        )
+
+    requested_stage = (request.from_stage or "discovering").strip().lower()
+    if requested_stage not in RESTARTABLE_STAGES:
+        raise HTTPException(status_code=400, detail="from_stage must be 'parsing' or 'discovering'")
+
+    additional_context = (request.additional_context or "").strip()
+    restart_stage = requested_stage
+    if additional_context and restart_stage != "parsing":
+        # Any new context should re-run parsing to avoid stale requirement assumptions.
+        restart_stage = "parsing"
+
+    if restart_stage == "discovering" and not project.get("parsed_requirements"):
+        restart_stage = "parsing"
+
+    if additional_context:
+        base_description = (project.get("product_description") or "").strip()
+        project["product_description"] = (
+            f"{base_description}\n\nAdditional context:\n{additional_context}"
+            if base_description
+            else additional_context
+        )
+
+    project["status"] = restart_stage
+    project["current_stage"] = restart_stage
+    project["error"] = None
+    project["discovery_results"] = None
+    project["verification_results"] = None
+    project["comparison_result"] = None
+    project["recommendation_result"] = None
+    project["outreach_state"] = None
+
+    if restart_stage == "parsing":
+        project["parsed_requirements"] = None
+        project["clarifying_questions"] = None
+        project["user_answers"] = None
+    else:
+        project["clarifying_questions"] = None
+
+    project.setdefault("progress_events", []).append(
+        {
+            "stage": restart_stage,
+            "substep": "restart_requested",
+            "detail": (
+                "Restarting from brief with your new context."
+                if additional_context
+                else "Restarting supplier search with your current brief."
+            ),
+            "progress_pct": None,
+            "timestamp": time.time(),
+        }
+    )
+
+    await record_project_event(
+        project,
+        event_type="project_restarted",
+        title="Pipeline restarted",
+        description=(
+            "Restarted from brief with extra context."
+            if additional_context
+            else "Restarted supplier search from current brief."
+        ),
+        priority="medium",
+        phase="brief" if restart_stage == "parsing" else "search",
+        payload={
+            "from_stage": restart_stage,
+            "has_additional_context": bool(additional_context),
+        },
+    )
+    await _save_project(project)
+
+    emit_progress(
+        restart_stage,
+        "restart_requested",
+        "Got it. Restarting the sourcing flow now.",
+    )
+    if restart_stage == "parsing":
+        background_tasks.add_task(_run_pipeline_task, project_id, project.get("product_description", ""))
+    else:
+        background_tasks.add_task(_resume_pipeline_task, project_id)
+
+    return {
+        "project_id": project_id,
+        "status": "restarted",
+        "from_stage": restart_stage,
+        "message": (
+            "Restarted from brief with added context."
+            if additional_context
+            else "Restarted supplier search."
+        ),
+    }
 
 
 @router.get("/{project_id}/run-sync")

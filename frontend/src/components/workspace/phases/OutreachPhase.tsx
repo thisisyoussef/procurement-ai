@@ -69,6 +69,7 @@ interface CommunicationMonitorState {
 interface OutreachState {
   selected_suppliers: number[]
   supplier_statuses: SupplierOutreachStatus[]
+  draft_emails?: { supplier_index: number; supplier_name: string; status: string }[]
   excluded_suppliers?: number[]
   quick_approval_decision?: 'approved' | 'declined' | null
   events?: OutreachEvent[]
@@ -100,6 +101,12 @@ function eventLabel(eventType: string) {
       return 'Email sent'
     case 'send_failed':
       return 'Send failed'
+    case 'retry_attempted':
+      return 'Retry attempted'
+    case 'retry_failed':
+      return 'Retry failed'
+    case 'send_canceled':
+      return 'Pending send canceled'
     case 'quote_parsed':
     case 'auto_response_parsed':
       return 'Response parsed'
@@ -109,10 +116,12 @@ function eventLabel(eventType: string) {
 }
 
 export default function OutreachPhase() {
-  const { projectId, status, refreshStatus } = useWorkspace()
+  const { projectId, status, refreshStatus, setActivePhase, restartCurrentProject } = useWorkspace()
   const [outreachState, setOutreachState] = useState<OutreachState | null>(null)
   const [loading, setLoading] = useState(false)
   const [checkingInbox, setCheckingInbox] = useState(false)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [restartContext, setRestartContext] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const fetchOutreachStatus = useCallback(async () => {
@@ -156,8 +165,14 @@ export default function OutreachPhase() {
     const responded = statuses.filter((s) => s.response_received).length
     const excluded = statuses.filter((s) => s.excluded).length
     const awaiting = statuses.filter((s) => s.email_sent && !s.response_received && !s.excluded).length
-    return { sent, responded, excluded, awaiting }
+    const failed = statuses.filter((s) => s.delivery_status === 'failed').length
+    return { sent, responded, excluded, awaiting, failed }
   }, [outreachState])
+
+  const pendingDraftCount = useMemo(() => {
+    const drafts = outreachState?.draft_emails || []
+    return drafts.filter((draft) => ['draft', 'auto_queued'].includes(String(draft.status || '').toLowerCase())).length
+  }, [outreachState?.draft_emails])
 
   const topRecommended = useMemo(() => {
     const recs = status?.recommendation?.recommendations || []
@@ -287,6 +302,128 @@ export default function OutreachPhase() {
     }
   }, [projectId, fetchOutreachStatus, refreshCommunicationMonitor, refreshStatus])
 
+  const runRetryFailed = useCallback(async () => {
+    if (!projectId) return
+    setActionLoading('retry')
+    setError(null)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/retry-failed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try {
+          const payload = await res.json()
+          detail = payload.detail || JSON.stringify(payload)
+        } catch {
+          // Keep HTTP detail.
+        }
+        throw new Error(detail)
+      }
+      const payload = await res.json().catch(() => ({}))
+      trackTraceEvent(
+        'outreach_retry_failed_processed',
+        {
+          project_id: projectId,
+          retried_count: payload?.retried_count,
+          sent_count: payload?.sent_count,
+          failed_count: payload?.failed_count,
+        },
+        { projectId }
+      )
+      await fetchOutreachStatus()
+      await refreshCommunicationMonitor()
+      refreshStatus()
+    } catch (err: any) {
+      setError(err?.message || 'Could not retry failed emails.')
+    } finally {
+      setActionLoading(null)
+    }
+  }, [projectId, fetchOutreachStatus, refreshCommunicationMonitor, refreshStatus])
+
+  const runCancelPending = useCallback(async () => {
+    if (!projectId) return
+    setActionLoading('cancel_pending')
+    setError(null)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/cancel-pending`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try {
+          const payload = await res.json()
+          detail = payload.detail || JSON.stringify(payload)
+        } catch {
+          // Keep HTTP detail.
+        }
+        throw new Error(detail)
+      }
+      const payload = await res.json().catch(() => ({}))
+      trackTraceEvent(
+        'outreach_cancel_pending_processed',
+        {
+          project_id: projectId,
+          canceled_count: payload?.canceled_count,
+          skipped_count: payload?.skipped_count,
+        },
+        { projectId }
+      )
+      await fetchOutreachStatus()
+      refreshStatus()
+    } catch (err: any) {
+      setError(err?.message || 'Could not cancel pending outreach.')
+    } finally {
+      setActionLoading(null)
+    }
+  }, [projectId, fetchOutreachStatus, refreshStatus])
+
+  const runResearchSuppliers = useCallback(async () => {
+    if (!projectId) return
+    setActionLoading('research')
+    setError(null)
+    const ok = await restartCurrentProject({ fromStage: 'discovering' })
+    if (ok) {
+      setActivePhase('search')
+      await fetchOutreachStatus()
+      refreshStatus()
+    } else {
+      setError('Could not restart supplier search.')
+    }
+    setActionLoading(null)
+  }, [projectId, fetchOutreachStatus, refreshStatus, restartCurrentProject, setActivePhase])
+
+  const runRestartWithContext = useCallback(async () => {
+    const context = restartContext.trim()
+    if (!projectId || !context) return
+    setActionLoading('restart_context')
+    setError(null)
+    const ok = await restartCurrentProject({
+      fromStage: 'parsing',
+      additionalContext: context,
+    })
+    if (ok) {
+      setRestartContext('')
+      setActivePhase('brief')
+      await fetchOutreachStatus()
+      refreshStatus()
+    } else {
+      setError('Could not restart with additional context.')
+    }
+    setActionLoading(null)
+  }, [
+    projectId,
+    restartContext,
+    fetchOutreachStatus,
+    refreshStatus,
+    restartCurrentProject,
+    setActivePhase,
+  ])
+
   useEffect(() => {
     if (!projectId) return
     void refreshCommunicationMonitor()
@@ -350,11 +487,34 @@ export default function OutreachPhase() {
         )}
 
         {decision === 'approved' && (
-          <div className="rounded-lg bg-teal/[0.05] border border-teal/20 px-4 py-3">
+          <div className="rounded-lg bg-teal/[0.05] border border-teal/20 px-4 py-3 space-y-3">
             <p className="text-[12px] font-medium text-teal">Outreach is active.</p>
             <p className="text-[11px] text-ink-3 mt-1">
-              Sent: {summary.sent} · Awaiting: {summary.awaiting} · Responded: {summary.responded} · Removed: {summary.excluded}
+              Sent: {summary.sent} · Awaiting: {summary.awaiting} · Responded: {summary.responded} · Failed: {summary.failed} · Removed: {summary.excluded}
             </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => void runRetryFailed()}
+                disabled={actionLoading !== null || summary.failed === 0}
+                className="px-3 py-1.5 border border-surface-3 rounded-lg text-[11px] text-ink-3 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {actionLoading === 'retry' ? 'Retrying…' : 'Retry failed emails'}
+              </button>
+              <button
+                onClick={() => void runCancelPending()}
+                disabled={actionLoading !== null || pendingDraftCount === 0}
+                className="px-3 py-1.5 border border-surface-3 rounded-lg text-[11px] text-ink-3 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {actionLoading === 'cancel_pending' ? 'Canceling…' : 'Cancel pending sends'}
+              </button>
+              <button
+                onClick={() => void runResearchSuppliers()}
+                disabled={actionLoading !== null}
+                className="px-3 py-1.5 border border-surface-3 rounded-lg text-[11px] text-ink-3 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {actionLoading === 'research' ? 'Restarting search…' : 'Search for more suppliers'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -376,6 +536,32 @@ export default function OutreachPhase() {
             <p className="text-[11px] text-red-700">{error}</p>
           </div>
         )}
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div>
+          <p className="text-[11px] font-semibold text-ink-2">Add context and restart sourcing</p>
+          <p className="text-[11px] text-ink-4 mt-1">
+            If outreach quality is off, add more detail and rerun from the brief.
+          </p>
+        </div>
+        <textarea
+          value={restartContext}
+          onChange={(e) => setRestartContext(e.target.value)}
+          rows={3}
+          placeholder="Example: only include suppliers with in-house embroidery and full garment manufacturing."
+          className="w-full resize-none bg-cream/50 border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink placeholder:text-ink-4 focus:outline-none focus:ring-1 focus:ring-teal/30 focus:border-teal/50"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void runRestartWithContext()}
+            disabled={actionLoading !== null || !restartContext.trim()}
+            className="px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {actionLoading === 'restart_context' ? 'Restarting…' : 'Restart with context'}
+          </button>
+          <p className="text-[10px] text-ink-4">Tamkin will restart parsing and supplier search.</p>
+        </div>
       </div>
 
       {decision === 'approved' && (

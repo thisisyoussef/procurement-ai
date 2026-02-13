@@ -53,6 +53,10 @@ interface WorkspaceContextValue {
   startNewProject: () => void
   openProject: (id: string) => void
   cancelCurrentProject: () => Promise<boolean>
+  restartCurrentProject: (opts?: {
+    fromStage?: 'parsing' | 'discovering'
+    additionalContext?: string
+  }) => Promise<boolean>
   handleClarifyingAnswered: () => void
   refreshStatus: () => void
   refreshProjectList: () => Promise<void>
@@ -538,6 +542,84 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
     stopPollingUi,
   ])
 
+  const restartCurrentProject = useCallback(
+    async (opts?: { fromStage?: 'parsing' | 'discovering'; additionalContext?: string }): Promise<boolean> => {
+      if (!state.projectId) return false
+      const projectId = state.projectId
+      const fromStage = opts?.fromStage || 'discovering'
+      const additionalContext = opts?.additionalContext?.trim() || undefined
+
+      trackTraceEvent(
+        'workspace_restart_attempt',
+        {
+          project_id: projectId,
+          from_stage: fromStage,
+          has_additional_context: Boolean(additionalContext),
+        },
+        { projectId }
+      )
+
+      dispatch({ type: 'SET_ERROR', value: null })
+      dispatch({ type: 'SET_LOADING', value: true })
+
+      try {
+        const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/restart`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from_stage: fromStage,
+            additional_context: additionalContext,
+          }),
+        })
+
+        if (res.status === 401) {
+          handleUnauthorized()
+          return false
+        }
+
+        if (!res.ok) {
+          let detail = `HTTP ${res.status}`
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            detail = payload.detail || detail
+          } catch {
+            // Keep HTTP detail.
+          }
+          throw new Error(detail)
+        }
+
+        const payload = (await res.json()) as { from_stage?: string; message?: string }
+        dispatch({ type: 'SET_ERROR', value: null })
+        startPollingForProject(projectId, 'restart')
+        await refreshProjectList()
+        trackTraceEvent(
+          'workspace_restart_success',
+          {
+            project_id: projectId,
+            from_stage: payload.from_stage || fromStage,
+          },
+          { projectId }
+        )
+        return true
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        dispatch({
+          type: 'SET_ERROR',
+          value: detail || 'Could not restart this run.',
+        })
+        dispatch({ type: 'SET_LOADING', value: false })
+        dispatch({ type: 'SET_POLLING', value: false })
+        trackTraceEvent(
+          'workspace_restart_error',
+          { project_id: projectId, detail },
+          { projectId, level: 'warn' }
+        )
+        return false
+      }
+    },
+    [handleUnauthorized, refreshProjectList, startPollingForProject, state.projectId]
+  )
+
   const handleSetActivePhase = useCallback(
     (phase: Phase) => {
       if (phase === state.activePhase) return
@@ -730,6 +812,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       startNewProject,
       openProject,
       cancelCurrentProject,
+      restartCurrentProject,
       handleClarifyingAnswered,
       refreshStatus,
       refreshProjectList,
@@ -742,6 +825,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       handleSignOut,
       handleClarifyingAnswered,
       openProject,
+      restartCurrentProject,
       refreshProjectList,
       refreshStatus,
       setErrorMessage,
