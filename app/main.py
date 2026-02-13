@@ -1,9 +1,8 @@
 """FastAPI application entry point."""
 
 import logging
-from contextlib import asynccontextmanager
 import os
-from typing import List
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,21 +27,7 @@ install_project_log_handler()
 settings = get_settings()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Start the autonomous outreach scheduler on startup, stop on shutdown."""
-    scheduler = get_scheduler()
-    await scheduler.start()
-    yield
-    await scheduler.stop()
-
-
-app = FastAPI(
-    title=settings.app_title,
-    version=settings.app_version,
-    description="AI-powered supplier discovery and comparison for small businesses",
-    lifespan=lifespan,
-def _parse_cors_origins(raw_origins: str) -> List[str]:
+def _parse_cors_origins(raw_origins: str) -> list[str]:
     return [
         origin.strip()
         for origin in (raw_origins or "").split(",")
@@ -61,10 +46,33 @@ cors_origin_regex = os.getenv(
     r"https://.*\.up\.railway\.app",
 )
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Recover stale runs, then start scheduler on startup and stop on shutdown."""
+    try:
+        store = get_project_store()
+        recovered = await store.recover_stale_runs()
+        if recovered:
+            logger.info("Recovered %d stale project run(s) after startup", recovered)
+    except StoreUnavailableError as exc:
+        logger.warning("Project store unavailable during startup recovery: %s", exc)
+    except Exception:
+        logger.exception("Unexpected failure during startup stale-run recovery")
+
+    scheduler = get_scheduler()
+    await scheduler.start()
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+
+
 app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
     description="Find the right people to make your stuff. Manage them like a pro.",
+    lifespan=lifespan,
 )
 
 # CORS — allow frontend origins
@@ -105,22 +113,3 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
-
-
-@app.on_event("startup")
-async def recover_stale_project_runs():
-    """
-    Mark any in-flight project runs as recoverable failures after process restart.
-
-    This prevents projects from being stuck in a running stage if the API restarts
-    while background tasks were executing.
-    """
-    try:
-        store = get_project_store()
-        recovered = await store.recover_stale_runs()
-        if recovered:
-            logger.info("Recovered %d stale project run(s) after startup", recovered)
-    except StoreUnavailableError as exc:
-        logger.warning("Project store unavailable during startup recovery: %s", exc)
-    except Exception:
-        logger.exception("Unexpected failure during startup stale-run recovery")
