@@ -68,3 +68,19 @@ async def test_parse_requirements_handles_markdown_wrapped_json(mock_llm):
 
     assert isinstance(result, ParsedRequirements)
     assert result.product_type == "tote bag"
+
+
+@pytest.mark.asyncio
+@patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
+async def test_parse_requirements_rebuilds_when_category_is_not_in_user_input(mock_llm):
+    """If the model leaks a mismatched category, parser should rebuild from raw user intent."""
+    mock_llm.return_value = MOCK_LLM_RESPONSE
+
+    result = await parse_requirements(
+        "Need 200 injection molded ABS enclosures for an electronics controller."
+    )
+
+    assert isinstance(result, ParsedRequirements)
+    assert "tote" not in result.product_type.lower()
+    assert result.search_queries
+    assert all("tote" not in q.lower() for q in result.search_queries)

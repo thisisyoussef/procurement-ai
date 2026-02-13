@@ -9,6 +9,7 @@ Enhanced with:
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -98,6 +99,44 @@ CONSUMER_MERCH_INDICATORS = {
     "e-commerce store",
 }
 
+GENERIC_QUERY_TERMS = {
+    "manufacturer",
+    "manufacturers",
+    "factory",
+    "factories",
+    "supplier",
+    "suppliers",
+    "oem",
+    "wholesale",
+    "bulk",
+    "custom",
+    "production",
+    "producer",
+    "makers",
+    "maker",
+}
+
+TOKEN_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "need",
+    "needs",
+    "looking",
+    "source",
+    "find",
+    "made",
+    "make",
+    "unit",
+    "units",
+    "piece",
+    "pieces",
+    "pcs",
+    "per",
+}
+
 
 def _select_b2b_marketplaces(product_type: str, max_count: int = 3) -> list[dict]:
     """Pick the most relevant B2B marketplaces for the product type."""
@@ -124,6 +163,48 @@ def _is_industrial_oem_requirements(requirements: ParsedRequirements) -> bool:
         ]
     ).lower()
     return any(signal in blob for signal in INDUSTRIAL_SIGNALS)
+
+
+def _tokenize_product_terms(text: str) -> list[str]:
+    terms: list[str] = []
+    for token in re.split(r"[^a-zA-Z0-9]+", text.lower()):
+        cleaned = token.strip()
+        if len(cleaned) < 3:
+            continue
+        if cleaned in TOKEN_STOPWORDS:
+            continue
+        if cleaned in GENERIC_QUERY_TERMS:
+            continue
+        terms.append(cleaned)
+    return terms
+
+
+def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for phrase in [requirements.product_type or "", requirements.material or "", *requirements.search_queries[:2]]:
+        for token in _tokenize_product_terms(phrase):
+            if token in seen:
+                continue
+            seen.add(token)
+            anchors.append(token)
+    return anchors[:8]
+
+
+def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) -> bool:
+    if not anchors:
+        return True
+    blob = " ".join(
+        [
+            supplier.name or "",
+            supplier.description or "",
+            " ".join(supplier.categories or []),
+            str((supplier.raw_data or {}).get("snippet") or ""),
+        ]
+    ).lower()
+    if not blob.strip():
+        return True
+    return any(anchor in blob for anchor in anchors)
 
 
 # ── Product Page URL Validation ──────────────────────────────────
@@ -607,8 +688,8 @@ async def _score_and_deduplicate(
     industrial_guardrail = """
 
 INDUSTRIAL/OEM GUARDRAIL:
-- This request is industrial/OEM sourcing. Strongly penalize consumer merch and retail results.
-- Tote bags, hoodies, streetwear, gift shops, boutiques, and generic e-commerce sellers should score below 20 unless they clearly manufacture the exact industrial part.
+- This request is industrial/OEM sourcing. Strongly penalize consumer-merch and retail results.
+- Consumer storefronts, promotional-merch sellers, and generic e-commerce listings should score below 20 unless they clearly manufacture the exact requested part.
 - Prefer suppliers mentioning OEM, manufacturing, factory, tooling, stamping, machining, APQP/PPAP/IATF readiness.
 """ if industrial_mode else ""
 
@@ -634,8 +715,6 @@ Return ALL qualifying suppliers (relevance_score >= 20) as a JSON array — do N
 
 CRITICAL SCORING RULES:
 1. PRODUCT TYPE is king — a supplier MUST make the actual product requested to score above 50. Material match alone is NOT enough.
-   - "Egyptian cotton hoodies" → must be a HOODIE manufacturer. A pajama store using Egyptian cotton scores below 25.
-   - "Italian leather bags" → must be a BAG manufacturer. A leather tannery alone scores below 35.
 2. PENALIZE retail stores — shops, boutiques, e-commerce stores that sell to consumers (not B2B) get -30 to -40 points.
 3. PRIORITIZE factories — actual manufacturers, factories, OEM producers get a +10-15 bonus.
 4. Geographic material signals — if the product references a material origin (Egyptian cotton, Italian leather), prefer manufacturers FROM that region.
@@ -891,6 +970,7 @@ async def discover_suppliers(
         "shopping mall", "department store", "gift shop",
         "appears to be retail", "sells to consumers",
     ]
+    product_anchors = _product_anchor_terms(requirements)
 
     main_suppliers = []
     filtered_suppliers = []
@@ -920,6 +1000,9 @@ async def discover_suppliers(
             desc_lower = s.description.lower()
             if any(ind in desc_lower for ind in RETAIL_INDICATORS):
                 reason = "retail_store"
+        # Require lexical product-anchor match to avoid cross-category leakage
+        elif not _matches_product_anchor(s, product_anchors):
+            reason = "wrong_product_type"
         # Check wrong product type at low-moderate relevance
         elif s.relevance_score < 40 and s.description:
             desc_lower = s.description.lower()

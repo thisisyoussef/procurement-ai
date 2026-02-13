@@ -20,6 +20,14 @@ Think like an experienced procurement professional with 20+ years of sourcing ex
 6. **Product pages**: If a search result points to a specific product page (not just the homepage), capture that URL in `product_page_url`
 7. **Shipping estimates**: For overseas suppliers, provide rough shipping cost estimates based on typical freight costs from that region to the buyer's delivery location
 
+## Neutrality Guardrails
+
+Treat the current product requirements as the sole category target.
+
+1. Do not anchor on common examples from prior requests (apparel, packaging, automotive, etc.).
+2. Penalize cross-category matches even when they are highly reviewed or familiar.
+3. If a result lacks evidence it makes the requested product category, keep score low.
+
 ## Scoring Weights
 
 - Product TYPE match (the actual product, not just the material): 35%

@@ -13,10 +13,62 @@ from app.schemas.agent_state import DiscoveredSupplier, ParsedRequirements
 
 logger = logging.getLogger(__name__)
 
+GENERIC_QUERY_TERMS = {
+    "manufacturer",
+    "manufacturers",
+    "factory",
+    "factories",
+    "supplier",
+    "suppliers",
+    "oem",
+    "wholesale",
+    "bulk",
+    "custom",
+    "production",
+    "producer",
+    "makers",
+    "maker",
+}
+
+TOKEN_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "need",
+    "needs",
+    "looking",
+    "source",
+    "find",
+    "made",
+    "make",
+    "unit",
+    "units",
+    "piece",
+    "pieces",
+    "pcs",
+    "per",
+}
+
 
 def _database_memory_enabled() -> bool:
     settings = get_settings()
     return (settings.project_store_backend or "database").lower() == "database"
+
+
+def _tokenize_terms(text: str, allow_generic: bool = False) -> list[str]:
+    terms: list[str] = []
+    for token in re.split(r"[^a-zA-Z0-9]+", text.lower()):
+        cleaned = token.strip()
+        if len(cleaned) < 3:
+            continue
+        if cleaned in TOKEN_STOPWORDS:
+            continue
+        if not allow_generic and cleaned in GENERIC_QUERY_TERMS:
+            continue
+        terms.append(cleaned)
+    return terms
 
 
 def _terms_from_requirements(requirements: ParsedRequirements) -> list[str]:
@@ -30,11 +82,32 @@ def _terms_from_requirements(requirements: ParsedRequirements) -> list[str]:
 
     terms: list[str] = []
     for phrase in raw_terms:
-        for token in re.split(r"[^a-zA-Z0-9]+", phrase.lower()):
-            token = token.strip()
-            if len(token) >= 3:
-                terms.append(token)
+        terms.extend(_tokenize_terms(phrase, allow_generic=False))
     return terms
+
+
+def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
+    raw_terms = [
+        requirements.product_type or "",
+        requirements.material or "",
+    ]
+    raw_terms.extend(requirements.search_queries[:2])
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for phrase in raw_terms:
+        for token in _tokenize_terms(phrase, allow_generic=False):
+            if token in seen:
+                continue
+            seen.add(token)
+            anchors.append(token)
+    return anchors[:8]
+
+
+def _matches_product_anchors(supplier_text: str, anchors: list[str]) -> bool:
+    if not anchors:
+        return True
+    blob = supplier_text.lower()
+    return any(anchor in blob for anchor in anchors)
 
 
 def _memory_relevance_score(
@@ -43,6 +116,7 @@ def _memory_relevance_score(
     interaction_count: int,
     is_verified: bool,
     terms: list[str],
+    anchor_terms: list[str],
 ) -> float:
     score = 35.0 + max(0.0, min(base_verification_score, 100.0)) * 0.45
     if is_verified:
@@ -50,9 +124,15 @@ def _memory_relevance_score(
     score += min(15.0, interaction_count * 1.5)
 
     text = supplier_text.lower()
+    anchor_hits = 0
+    for term in anchor_terms:
+        if term in text:
+            anchor_hits += 1
+    score += min(20.0, anchor_hits * 5.0)
+
     for term in terms:
         if term in text:
-            score += 3.5
+            score += 2.5
 
     return max(20.0, min(98.0, score))
 
@@ -66,6 +146,7 @@ async def search_supplier_memory_candidates(
         return []
 
     terms = _terms_from_requirements(requirements)
+    anchor_terms = _product_anchor_terms(requirements)
     try:
         async with async_session_factory() as session:
             rows = await repo.search_supplier_memory(session, requirements, limit=limit)
@@ -83,12 +164,15 @@ async def search_supplier_memory_candidates(
                 " ".join(supplier_row.certifications or []),
             ]
         )
+        if not _matches_product_anchors(text, anchor_terms):
+            continue
         relevance = _memory_relevance_score(
             supplier_text=text,
             base_verification_score=supplier_row.verification_score or 0.0,
             interaction_count=interaction_count,
             is_verified=bool(supplier_row.is_verified),
             terms=terms,
+            anchor_terms=anchor_terms,
         )
         suppliers.append(
             DiscoveredSupplier(

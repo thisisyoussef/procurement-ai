@@ -14,6 +14,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.supplier import Supplier, SupplierInteraction
 from app.schemas.agent_state import DiscoveredSupplier, ParsedRequirements
 
+GENERIC_QUERY_TERMS = {
+    "manufacturer",
+    "manufacturers",
+    "factory",
+    "factories",
+    "supplier",
+    "suppliers",
+    "oem",
+    "wholesale",
+    "bulk",
+    "custom",
+    "production",
+    "producer",
+    "makers",
+    "maker",
+}
+
+TOKEN_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "need",
+    "needs",
+    "looking",
+    "source",
+    "find",
+    "made",
+    "make",
+    "unit",
+    "units",
+    "piece",
+    "pieces",
+    "pcs",
+    "per",
+}
+
 
 def _normalize_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
     if value is None:
@@ -65,6 +103,20 @@ def _merge_list(existing: list[str] | None, incoming: list[str] | None) -> list[
     return merged or None
 
 
+def _tokenize(text: str, allow_generic: bool = False) -> list[str]:
+    tokens: list[str] = []
+    for token in re.split(r"[^a-zA-Z0-9]+", text.lower()):
+        cleaned = token.strip()
+        if len(cleaned) < 3:
+            continue
+        if cleaned in TOKEN_STOPWORDS:
+            continue
+        if not allow_generic and cleaned in GENERIC_QUERY_TERMS:
+            continue
+        tokens.append(cleaned)
+    return tokens
+
+
 def _build_terms(requirements: ParsedRequirements) -> list[str]:
     candidates: list[str] = [
         requirements.product_type or "",
@@ -76,10 +128,7 @@ def _build_terms(requirements: ParsedRequirements) -> list[str]:
 
     terms: list[str] = []
     for phrase in candidates:
-        for token in re.split(r"[^a-zA-Z0-9]+", phrase.lower()):
-            token = token.strip()
-            if len(token) >= 3:
-                terms.append(token)
+        terms.extend(_tokenize(phrase, allow_generic=False))
 
     unique_terms: list[str] = []
     seen: set[str] = set()
@@ -90,6 +139,24 @@ def _build_terms(requirements: ParsedRequirements) -> list[str]:
         unique_terms.append(term)
 
     return unique_terms[:12]
+
+
+def _build_product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
+    candidates: list[str] = [
+        requirements.product_type or "",
+        requirements.material or "",
+    ]
+    candidates.extend(requirements.search_queries[:2])
+
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for phrase in candidates:
+        for token in _tokenize(phrase, allow_generic=False):
+            if token in seen:
+                continue
+            seen.add(token)
+            anchors.append(token)
+    return anchors[:8]
 
 
 async def _find_existing_supplier(
@@ -287,6 +354,8 @@ async def search_supplier_memory(
     )
 
     terms = _build_terms(requirements)
+    product_terms = _build_product_anchor_terms(requirements)
+
     if terms:
         clauses = []
         for term in terms:
@@ -302,6 +371,19 @@ async def search_supplier_memory(
                 ]
             )
         stmt = stmt.where(or_(*clauses))
+
+    if product_terms:
+        anchor_clauses = []
+        for term in product_terms:
+            like = f"%{term}%"
+            anchor_clauses.extend(
+                [
+                    func.lower(Supplier.name).like(like),
+                    func.lower(func.coalesce(Supplier.description, "")).like(like),
+                    func.lower(cast(Supplier.categories, String)).like(like),
+                ]
+            )
+        stmt = stmt.where(or_(*anchor_clauses))
 
     stmt = stmt.order_by(
         interaction_count_col.desc(),
