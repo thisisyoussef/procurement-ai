@@ -714,11 +714,12 @@ async def discover_suppliers(
     Search multiple sources for suppliers matching requirements.
 
     Enhanced flow:
-    1. Parallel English searches (Google Places + Firecrawl)
-    2. Parallel regional/multilingual searches
-    3. LLM scoring and deduplication
-    4. Intermediary detection and resolution
-    5. Iterative expansion if results are insufficient (max 2 rounds)
+    1. Memory-first retrieval from internal supplier database
+    2. Parallel English searches (Google Places + Firecrawl + marketplaces)
+    3. Parallel regional/multilingual searches
+    4. LLM scoring and deduplication
+    5. Intermediary detection and resolution
+    6. Iterative expansion if results are insufficient (max 2 rounds)
     """
     logger.info("🏭 Starting supplier discovery with %d search queries, %d regional configs",
                 len(requirements.search_queries), len(requirements.regional_searches))
@@ -729,11 +730,28 @@ async def discover_suppliers(
     if not queries:
         queries = [f"{requirements.product_type} manufacturer"]
 
-    # ── Step 1: Parallel English + Regional searches ──────────
+    # ── Step 1: Memory-first retrieval ────────────────────────
     sources_searched = []
     sources_failed = []
+    memory_results: list[DiscoveredSupplier] = []
 
-    # Run English, marketplace, memory, and regional searches simultaneously
+    try:
+        memory_results = await _search_supplier_memory(requirements)
+        sources_searched.append("supplier_memory")
+        if memory_results:
+            emit_progress(
+                "discovering",
+                "memory_candidates_loaded",
+                f"Found {len(memory_results)} previously indexed supplier profiles in Tamkin memory.",
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("Supplier memory lookup failed in discovery", exc_info=True)
+        sources_failed.append("supplier_memory")
+        memory_results = []
+
+    # ── Step 2: Parallel English + Regional searches ──────────
+
+    # Run live external searches after memory retrieval.
     search_tasks = [
         _search_google(queries, location_hint=requirements.delivery_location),
         _search_web(queries),
@@ -742,7 +760,6 @@ async def discover_suppliers(
             material=requirements.material,
             industrial_mode=industrial_mode,
         ),
-        _search_supplier_memory(requirements),
     ]
     if requirements.regional_searches:
         search_tasks.append(_search_regional(requirements.regional_searches))
@@ -752,8 +769,7 @@ async def discover_suppliers(
     google_results = results[0]
     web_results = results[1]
     marketplace_results = results[2]
-    memory_results = results[3]
-    regional_results = results[4] if len(results) > 4 else []
+    regional_results = results[3] if len(results) > 3 else []
 
     all_raw = []
 
@@ -774,12 +790,6 @@ async def discover_suppliers(
         sources_searched.append("marketplace_search")
     else:
         sources_failed.append("marketplace_search")
-
-    if isinstance(memory_results, list):
-        sources_searched.append("supplier_memory")
-    else:
-        sources_failed.append("supplier_memory")
-        memory_results = []
 
     # Track regional results
     regional_counts: dict[str, int] = {}

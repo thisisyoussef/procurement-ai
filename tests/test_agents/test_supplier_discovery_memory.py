@@ -74,3 +74,53 @@ async def test_discovery_returns_memory_only_results_when_web_is_empty(monkeypat
     assert len(result.suppliers) == 1
     assert result.suppliers[0].name == "Atlas Packaging"
     assert result.sources_searched == ["supplier_memory"]
+
+
+@pytest.mark.asyncio
+async def test_discovery_checks_supplier_memory_before_external_search(monkeypatch):
+    requirements = ParsedRequirements(
+        product_type="automotive stamping supplier",
+        search_queries=["automotive stamping supplier"],
+    )
+    memory_supplier = DiscoveredSupplier(
+        supplier_id="33333333-3333-3333-3333-333333333333",
+        name="Memory Metals",
+        source="supplier_memory",
+        relevance_score=72,
+    )
+
+    call_order: list[str] = []
+
+    async def _memory_first(*_args, **_kwargs):
+        call_order.append("memory")
+        return [memory_supplier]
+
+    async def _google(*_args, **_kwargs):
+        call_order.append("google")
+        return []
+
+    async def _web(*_args, **_kwargs):
+        call_order.append("web")
+        return []
+
+    async def _marketplaces(*_args, **_kwargs):
+        call_order.append("marketplaces")
+        return []
+
+    monkeypatch.setattr(supplier_discovery, "_search_supplier_memory", _memory_first)
+    monkeypatch.setattr(supplier_discovery, "_search_google", _google)
+    monkeypatch.setattr(supplier_discovery, "_search_web", _web)
+    monkeypatch.setattr(supplier_discovery, "_search_marketplaces", _marketplaces)
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_filter_and_resolve_intermediaries",
+        AsyncMock(side_effect=lambda suppliers, _requirements: (suppliers, 0)),
+    )
+    monkeypatch.setattr(supplier_discovery, "_should_expand_search", lambda *_: (False, ""))
+
+    result = await supplier_discovery.discover_suppliers(requirements)
+
+    assert call_order
+    assert call_order[0] == "memory"
+    assert "supplier_memory" in result.sources_searched
+    assert result.suppliers and result.suppliers[0].name == "Memory Metals"
