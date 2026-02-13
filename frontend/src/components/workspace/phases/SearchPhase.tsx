@@ -93,20 +93,20 @@ export default function SearchPhase() {
   // ─── Dark searching state ────────────────────────────
   if (!status?.discovery_results) {
     return (
-      <div className="bg-search-bg min-h-[80vh] -mx-0 flex flex-col items-center justify-center relative overflow-hidden">
+      <div className="bg-white min-h-[80vh] -mx-0 flex flex-col items-center justify-center relative overflow-hidden">
         {/* Breathing glow */}
         <div
-          className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-teal/20 animate-breathe pointer-events-none"
+          className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-teal/10 animate-breathe pointer-events-none"
           style={{ filter: 'blur(80px)' }}
         />
 
         {loading ? (
           <div className="relative z-10 text-center px-6">
-            <p className="text-white/90 font-heading text-2xl mb-2">
+            <p className="text-ink font-heading text-2xl mb-2">
               Searching the world for{' '}
               <em className="text-teal">{productType}</em>
             </p>
-            <p className="text-white/40 text-[13px] mb-10">
+            <p className="text-ink-4 text-[13px] mb-10">
               This usually takes 1-3 minutes
             </p>
 
@@ -129,12 +129,12 @@ export default function SearchPhase() {
                           ? 'bg-teal/40'
                           : isActive
                           ? 'bg-teal animate-pulse-dot'
-                          : 'bg-white/20'
+                          : 'bg-surface-3'
                       }`}
                     />
                     <span
                       className={`text-[12px] ${
-                        isActive ? 'text-white' : isDone ? 'text-white/40' : 'text-white/20'
+                        isActive ? 'text-ink' : isDone ? 'text-ink-3' : 'text-ink-4'
                       }`}
                     >
                       {step.label}
@@ -150,13 +150,13 @@ export default function SearchPhase() {
                 <span className="text-5xl font-heading text-teal">
                   {suppliers.length}
                 </span>
-                <p className="text-white/40 text-[11px] mt-1">suppliers found</p>
+                <p className="text-ink-4 text-[11px] mt-1">suppliers found</p>
               </div>
             )}
           </div>
         ) : (
           <div className="relative z-10 text-center px-6">
-            <p className="text-white/50 text-[13px]">
+            <p className="text-ink-4 text-[13px]">
               No supplier results yet. Start a project in the Brief phase.
             </p>
           </div>
@@ -167,15 +167,15 @@ export default function SearchPhase() {
 
   // ─── Results with dark background ────────────────────
   return (
-    <div className="bg-search-bg min-h-[80vh] px-6 py-8">
+    <div className="bg-white min-h-[80vh] px-6 py-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-heading text-white">
+            <h2 className="text-xl font-heading text-ink">
               Discovered Suppliers
             </h2>
-            <div className="flex gap-3 text-[11px] text-white/40 mt-1">
+            <div className="flex gap-3 text-[11px] text-ink-4 mt-1">
               <span>{status.discovery_results.total_raw_results} raw</span>
               <span>{status.discovery_results.deduplicated_count} unique</span>
               <span>{suppliers.length} active</span>
@@ -198,14 +198,14 @@ export default function SearchPhase() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filter suppliers..."
-            className="flex-1 min-w-[160px] bg-search-surface border border-white/[0.06] rounded-lg px-3 py-2 text-[12px]
-                       text-white placeholder:text-white/30
+            className="flex-1 min-w-[160px] bg-white border border-surface-3 rounded-lg px-3 py-2 text-[12px]
+                       text-ink placeholder:text-ink-4
                        focus:outline-none focus:ring-1 focus:ring-teal/30 focus:border-teal/30"
           />
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-search-surface border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] text-white/60
+            className="bg-white border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink-3
                        focus:outline-none focus:ring-1 focus:ring-teal/30"
           >
             <option value="relevance">Relevance</option>
@@ -216,7 +216,7 @@ export default function SearchPhase() {
           <select
             value={filterCountry}
             onChange={(e) => setFilterCountry(e.target.value)}
-            className="bg-search-surface border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] text-white/60
+            className="bg-white border border-surface-3 rounded-lg px-3 py-2 text-[12px] text-ink-3
                        focus:outline-none focus:ring-1 focus:ring-teal/30"
           >
             <option value="all">All countries</option>
@@ -224,7 +224,7 @@ export default function SearchPhase() {
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
-          <label className="flex items-center gap-1.5 text-[11px] text-white/40 cursor-pointer">
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-4 cursor-pointer">
             <input
               type="checkbox"
               checked={showIntermediaries}
@@ -233,7 +233,7 @@ export default function SearchPhase() {
             />
             Intermediaries
           </label>
-          <span className="text-[11px] text-white/30">
+          <span className="text-[11px] text-ink-4">
             {filtered.length} of {suppliers.length}
           </span>
         </div>
@@ -245,7 +245,6 @@ export default function SearchPhase() {
               key={`${supplier.name}-${i}`}
               supplier={supplier}
               verification={verificationMap.get(supplier.name)}
-              dark
             />
           ))}
         </div>
@@ -265,7 +264,7 @@ export default function SearchPhase() {
             {visibleCount > 12 && (
               <button
                 onClick={() => setVisibleCount(12)}
-                className="px-4 py-2 text-[12px] text-white/40 hover:text-white/60 transition-colors"
+                className="px-4 py-2 text-[12px] text-ink-4 hover:text-ink-3 transition-colors"
               >
                 Show less
               </button>
@@ -275,7 +274,7 @@ export default function SearchPhase() {
 
         {filtered.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-white/40 text-[13px]">No suppliers match your filters.</p>
+            <p className="text-ink-4 text-[13px]">No suppliers match your filters.</p>
             <button
               onClick={() => {
                 setSearchQuery('')
