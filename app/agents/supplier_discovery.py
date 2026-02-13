@@ -9,8 +9,8 @@ Enhanced with:
 import asyncio
 import json
 import logging
-from collections import Counter
 from pathlib import Path
+from urllib.parse import urlparse
 
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
@@ -30,6 +30,7 @@ from app.schemas.agent_state import (
     ParsedRequirements,
     RegionalSearchConfig,
 )
+from app.services.supplier_memory import search_supplier_memory_candidates
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -220,6 +221,102 @@ async def _search_regional(
     return all_results
 
 
+async def _search_supplier_memory(requirements: ParsedRequirements, max_results: int = 20) -> list[DiscoveredSupplier]:
+    """Query internal supplier memory so discovery is hybrid, not web-only."""
+    emit_progress("discovering", "searching_supplier_memory", "Searching Tamkin supplier memory...")
+    return await search_supplier_memory_candidates(requirements, limit=max_results)
+
+
+def _supplier_key(supplier: DiscoveredSupplier) -> str:
+    if supplier.website:
+        candidate = supplier.website.strip().lower()
+        if "://" not in candidate:
+            candidate = f"https://{candidate}"
+        try:
+            host = urlparse(candidate).netloc
+            if host.startswith("www."):
+                host = host[4:]
+            if host:
+                return f"domain:{host}"
+        except Exception:  # noqa: BLE001
+            pass
+    if supplier.email:
+        return f"email:{supplier.email.strip().lower()}"
+    if supplier.supplier_id:
+        return f"id:{supplier.supplier_id}"
+    country = (supplier.country or "").strip().lower()
+    return f"name:{supplier.name.strip().lower()}|country:{country}"
+
+
+def _merge_supplier(existing: DiscoveredSupplier, incoming: DiscoveredSupplier) -> DiscoveredSupplier:
+    if incoming.supplier_id and not existing.supplier_id:
+        existing.supplier_id = incoming.supplier_id
+
+    if incoming.website and not existing.website:
+        existing.website = incoming.website
+    if incoming.product_page_url and not existing.product_page_url:
+        existing.product_page_url = incoming.product_page_url
+    if incoming.email and not existing.email:
+        existing.email = incoming.email
+    if incoming.phone and not existing.phone:
+        existing.phone = incoming.phone
+    if incoming.address and not existing.address:
+        existing.address = incoming.address
+    if incoming.city and not existing.city:
+        existing.city = incoming.city
+    if incoming.country and not existing.country:
+        existing.country = incoming.country
+    if incoming.description and (not existing.description or len(incoming.description) > len(existing.description)):
+        existing.description = incoming.description
+    if incoming.estimated_shipping_cost and not existing.estimated_shipping_cost:
+        existing.estimated_shipping_cost = incoming.estimated_shipping_cost
+    if incoming.google_rating is not None and (existing.google_rating is None or incoming.google_rating > existing.google_rating):
+        existing.google_rating = incoming.google_rating
+    if incoming.google_review_count is not None and (
+        existing.google_review_count is None or incoming.google_review_count > existing.google_review_count
+    ):
+        existing.google_review_count = incoming.google_review_count
+    if incoming.language_discovered and not existing.language_discovered:
+        existing.language_discovered = incoming.language_discovered
+
+    existing.categories = sorted({*(existing.categories or []), *(incoming.categories or [])})
+    existing.certifications = sorted({*(existing.certifications or []), *(incoming.certifications or [])})
+
+    if incoming.source == "supplier_memory" and existing.source != "supplier_memory":
+        existing.source = f"{existing.source}+supplier_memory"
+        existing.relevance_score = min(100.0, max(existing.relevance_score, incoming.relevance_score) + 4.0)
+    elif existing.source == "supplier_memory" and incoming.source != "supplier_memory":
+        existing.source = f"{incoming.source}+supplier_memory"
+        existing.relevance_score = min(100.0, max(existing.relevance_score, incoming.relevance_score) + 4.0)
+    else:
+        existing.relevance_score = max(existing.relevance_score, incoming.relevance_score)
+
+    existing.raw_data = {
+        **(existing.raw_data or {}),
+        **(incoming.raw_data or {}),
+        "hybrid_memory_match": existing.source.endswith("+supplier_memory") or existing.source == "supplier_memory",
+    }
+    return existing
+
+
+def _merge_supplier_lists(
+    primary: list[DiscoveredSupplier],
+    extra: list[DiscoveredSupplier],
+) -> list[DiscoveredSupplier]:
+    merged: dict[str, DiscoveredSupplier] = {}
+    for supplier in primary:
+        merged[_supplier_key(supplier)] = supplier
+
+    for supplier in extra:
+        key = _supplier_key(supplier)
+        if key in merged:
+            merged[key] = _merge_supplier(merged[key], supplier)
+        else:
+            merged[key] = supplier
+
+    return sorted(merged.values(), key=lambda s: s.relevance_score, reverse=True)
+
+
 # ── Intermediary Detection & Resolution ──────────────────────────
 
 async def _filter_and_resolve_intermediaries(
@@ -243,7 +340,11 @@ async def _filter_and_resolve_intermediaries(
 
     for supplier in suppliers:
         # Skip intermediary detection for marketplace product listings
-        if supplier.source and supplier.source.startswith("marketplace_"):
+        if supplier.source and (
+            supplier.source.startswith("marketplace_")
+            or supplier.source == "supplier_memory"
+            or supplier.source.endswith("+supplier_memory")
+        ):
             updated.append(supplier)
             continue
 
@@ -553,11 +654,12 @@ async def discover_suppliers(
     sources_searched = []
     sources_failed = []
 
-    # Run English, marketplace, and regional searches simultaneously
+    # Run English, marketplace, memory, and regional searches simultaneously
     search_tasks = [
         _search_google(queries, location_hint=requirements.delivery_location),
         _search_web(queries),
         _search_marketplaces(product_type=requirements.product_type, material=requirements.material),
+        _search_supplier_memory(requirements),
     ]
     if requirements.regional_searches:
         search_tasks.append(_search_regional(requirements.regional_searches))
@@ -567,7 +669,8 @@ async def discover_suppliers(
     google_results = results[0]
     web_results = results[1]
     marketplace_results = results[2]
-    regional_results = results[3] if len(results) > 3 else []
+    memory_results = results[3]
+    regional_results = results[4] if len(results) > 4 else []
 
     all_raw = []
 
@@ -589,6 +692,12 @@ async def discover_suppliers(
     else:
         sources_failed.append("marketplace_search")
 
+    if isinstance(memory_results, list):
+        sources_searched.append("supplier_memory")
+    else:
+        sources_failed.append("supplier_memory")
+        memory_results = []
+
     # Track regional results
     regional_counts: dict[str, int] = {}
     if isinstance(regional_results, list) and regional_results:
@@ -599,15 +708,16 @@ async def discover_suppliers(
             region = r.get("region", "unknown")
             regional_counts[region] = regional_counts.get(region, 0) + 1
 
-    logger.info("Raw results: %d total (%d Google, %d web, %d marketplace, %d regional)",
+    logger.info("Raw results: %d total (%d Google, %d web, %d marketplace, %d regional, %d memory)",
                 len(all_raw),
                 len(google_results) if isinstance(google_results, list) else 0,
                 len(web_results) if isinstance(web_results, list) else 0,
                 len(marketplace_results) if isinstance(marketplace_results, list) else 0,
-                len(regional_results) if isinstance(regional_results, list) else 0)
+                len(regional_results) if isinstance(regional_results, list) else 0,
+                len(memory_results))
 
-    if not all_raw:
-        logger.warning("⚠️ No raw results from any source")
+    if not all_raw and not memory_results:
+        logger.warning("⚠️ No raw or memory results from any source")
         return DiscoveryResults(
             suppliers=[],
             sources_searched=sources_searched,
@@ -617,10 +727,19 @@ async def discover_suppliers(
         )
 
     # ── Step 2: LLM scoring and deduplication ─────────────────
-    emit_progress("discovering", "scoring",
-                  f"Found {len(all_raw)} raw results. AI is scoring and ranking...")
+    if all_raw:
+        emit_progress("discovering", "scoring", f"Found {len(all_raw)} raw results. AI is scoring and ranking...")
+        suppliers = await _score_and_deduplicate(all_raw, requirements)
+    else:
+        suppliers = []
 
-    suppliers = await _score_and_deduplicate(all_raw, requirements)
+    if memory_results:
+        suppliers = _merge_supplier_lists(suppliers, memory_results)
+        emit_progress(
+            "discovering",
+            "merging_supplier_memory",
+            f"Merged {len(memory_results)} supplier-memory candidates with live search results.",
+        )
 
     # ── Step 3: Intermediary detection and resolution ─────────
     suppliers, intermediaries_resolved = await _filter_and_resolve_intermediaries(
@@ -665,6 +784,8 @@ async def discover_suppliers(
             all_raw.extend(new_raw)
             # Re-score combined results
             suppliers = await _score_and_deduplicate(all_raw, requirements)
+            if memory_results:
+                suppliers = _merge_supplier_lists(suppliers, memory_results)
             suppliers, extra_resolved = await _filter_and_resolve_intermediaries(
                 suppliers, requirements
             )

@@ -1,4 +1,4 @@
-# ProcureAI — AI-Powered Procurement for Small Businesses
+# Tamkin — AI-Powered Procurement for Small Businesses
 
 ## What This Is
 An AI agent system that finds, vets, and compares suppliers for small business founders.

@@ -105,3 +105,25 @@ class PhoneCallConfigRequest(BaseModel):
     voice_id: str = "11labs-Adrian"
     max_call_duration_seconds: int = 300
     default_questions: list[str] = Field(default_factory=list)
+
+
+# ── Tamkin landing + growth endpoints ───────────────────────
+
+class IntakeStartRequest(BaseModel):
+    message: str = Field(min_length=10, max_length=5000)
+    source: str = Field(default="landing_hero", max_length=120)
+    session_id: str | None = Field(default=None, max_length=120)
+
+
+class LeadCreateRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=500)
+    sourcing_note: str | None = Field(default=None, max_length=4000)
+    source: str = Field(default="landing_early_access", max_length=120)
+
+
+class AnalyticsEventRequest(BaseModel):
+    event_name: str = Field(min_length=2, max_length=120)
+    session_id: str | None = Field(default=None, max_length=120)
+    path: str | None = Field(default=None, max_length=500)
+    project_id: str | None = Field(default=None, max_length=120)
+    payload: dict[str, Any] = Field(default_factory=dict)

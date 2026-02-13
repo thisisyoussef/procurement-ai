@@ -7,6 +7,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
+    ForeignKey,
     Float,
     Integer,
     String,
@@ -26,13 +27,13 @@ class Supplier(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
-    website: Mapped[str | None] = mapped_column(String(1000))
-    email: Mapped[str | None] = mapped_column(String(500))
+    website: Mapped[str | None] = mapped_column(String(1000), index=True)
+    email: Mapped[str | None] = mapped_column(String(500), index=True)
     phone: Mapped[str | None] = mapped_column(String(100))
     address: Mapped[str | None] = mapped_column(Text)
     city: Mapped[str | None] = mapped_column(String(200))
     state: Mapped[str | None] = mapped_column(String(200))
-    country: Mapped[str | None] = mapped_column(String(200))
+    country: Mapped[str | None] = mapped_column(String(200), index=True)
     description: Mapped[str | None] = mapped_column(Text)
     categories: Mapped[list | None] = mapped_column(ARRAY(String(200)))
     certifications: Mapped[list | None] = mapped_column(ARRAY(String(200)))
@@ -59,3 +60,21 @@ class Supplier(Base):
 
     def __repr__(self) -> str:
         return f"<Supplier {self.name} ({self.source})>"
+
+
+class SupplierInteraction(Base):
+    __tablename__ = "supplier_interactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    interaction_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False, default="system")
+    details: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )

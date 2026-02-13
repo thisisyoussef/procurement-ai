@@ -3,7 +3,7 @@
 import logging
 import traceback
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.agents.phone_agent import (
     get_call_detail,
@@ -18,20 +18,35 @@ from app.schemas.agent_state import (
     PhoneCallStatus,
     SupplierOutreachStatus,
 )
+from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.project import PhoneCallConfigRequest, PhoneCallStartRequest
+from app.services.project_store import StoreUnavailableError, get_project_store
+from app.services.supplier_memory import record_supplier_interaction
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/phone", tags=["phone"])
 
 
-def _get_project(project_id: str) -> dict:
-    from app.api.v1.projects import _projects
-
-    project = _projects.get(project_id)
+async def _get_project(project_id: str, current_user: AuthUser) -> dict:
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if str(project.get("user_id")) != str(current_user.user_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
     return project
+
+
+async def _save_project(project: dict) -> None:
+    store = get_project_store()
+    try:
+        await store.save_project(project)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
 
 
 def _get_outreach_state(project: dict) -> OutreachState:
@@ -42,12 +57,16 @@ def _get_outreach_state(project: dict) -> OutreachState:
 
 
 @router.post("/configure")
-async def configure_phone(project_id: str, request: PhoneCallConfigRequest):
+async def configure_phone(
+    project_id: str,
+    request: PhoneCallConfigRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Configure AI phone calling for a project.
 
     Sets the voice, max duration, and default questions for calls.
     """
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     outreach.phone_config = PhoneCallConfig(
@@ -58,6 +77,7 @@ async def configure_phone(project_id: str, request: PhoneCallConfigRequest):
     )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
 
     return {
         "status": "configured",
@@ -66,14 +86,18 @@ async def configure_phone(project_id: str, request: PhoneCallConfigRequest):
 
 
 @router.post("/call")
-async def start_phone_call(project_id: str, request: PhoneCallStartRequest):
+async def start_phone_call(
+    project_id: str,
+    request: PhoneCallStartRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Initiate an AI phone call to a supplier.
 
     Creates a Retell AI agent with a customized script and initiates
     an outbound call. The call status can be tracked via webhooks
     or by polling the /calls/{call_id} endpoint.
     """
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
 
     if not project.get("parsed_requirements"):
         raise HTTPException(status_code=400, detail="Pipeline must complete before calling")
@@ -125,6 +149,14 @@ async def start_phone_call(project_id: str, request: PhoneCallStartRequest):
             )
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=request.supplier_index,
+            interaction_type="phone_call_initiated",
+            source="phone",
+            details={"call_id": call_status.call_id, "phone_number": request.phone_number},
+        )
+        await _save_project(project)
 
         return {
             "call_id": call_status.call_id,
@@ -141,9 +173,12 @@ async def start_phone_call(project_id: str, request: PhoneCallStartRequest):
 
 
 @router.get("/calls")
-async def list_phone_calls(project_id: str):
+async def list_phone_calls(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """List all phone calls for a project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     return {
@@ -154,9 +189,13 @@ async def list_phone_calls(project_id: str):
 
 
 @router.get("/calls/{call_id}")
-async def get_phone_call(project_id: str, call_id: str):
+async def get_phone_call(
+    project_id: str,
+    call_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get detailed status of a specific phone call, including transcript."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     # Find the call in our state
@@ -182,6 +221,7 @@ async def get_phone_call(project_id: str, call_id: str):
         local_call.ended_at = detail.get("ended_at", local_call.ended_at)
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return local_call.model_dump()
 
@@ -192,12 +232,16 @@ async def get_phone_call(project_id: str, call_id: str):
 
 
 @router.post("/calls/{call_id}/parse")
-async def parse_phone_call(project_id: str, call_id: str):
+async def parse_phone_call(
+    project_id: str,
+    call_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Parse a completed call's transcript into structured procurement data.
 
     Extracts pricing, MOQ, lead time, and key findings from the transcript.
     """
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     # Find the call
@@ -242,6 +286,18 @@ async def parse_phone_call(project_id: str, call_id: str):
                 break
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=local_call.supplier_index,
+            interaction_type="phone_call_parsed",
+            source="phone",
+            details={
+                "call_id": call_id,
+                "follow_up_needed": result.follow_up_needed,
+                "key_findings": result.key_findings,
+            },
+        )
+        await _save_project(project)
 
         return result.model_dump()
 

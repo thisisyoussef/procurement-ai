@@ -2,56 +2,71 @@
 
 import json
 import logging
-import time
 import traceback
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.chat_agent import chat_with_context, parse_action_from_response
 from app.agents.orchestrator import rerun_from_stage
-from app.schemas.agent_state import ChatMessage, OutreachState
+from app.core.auth import AuthUser, get_current_auth_user
+from app.schemas.agent_state import ChatMessage
 from app.schemas.project import ChatMessageRequest
+from app.services.project_store import StoreUnavailableError, get_project_store
+from app.services.supplier_memory import (
+    persist_discovered_suppliers,
+    persist_verification_feedback,
+    record_supplier_interactions,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/chat", tags=["chat"])
 
 
-def _get_project(project_id: str) -> dict:
-    """Get project from in-memory store, raise 404 if missing."""
-    from app.api.v1.projects import _projects
+async def _get_project(project_id: str, current_user: AuthUser) -> dict:
+    """Get project from project store, raise 404 if missing."""
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
 
-    project = _projects.get(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if str(project.get("user_id")) != str(current_user.user_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
     return project
 
 
+async def _save_project(project: dict) -> None:
+    store = get_project_store()
+    try:
+        await store.save_project(project)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+
+
 @router.post("")
-async def chat(project_id: str, request: ChatMessageRequest):
-    """Send a chat message and get a streaming SSE response.
+async def chat(
+    project_id: str,
+    request: ChatMessageRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Send a chat message and get a streaming SSE response."""
+    project = await _get_project(project_id, current_user)
 
-    The response is streamed as Server-Sent Events:
-    - data: {"type": "token", "content": "..."} — text chunks
-    - data: {"type": "done", "action": null | {...}} — stream complete
-    - data: {"type": "action_result", "result": "..."} — action executed
-    """
-    project = _get_project(project_id)
-
-    # Verify pipeline is complete
     if project.get("current_stage") not in ("complete", "failed"):
         raise HTTPException(
             status_code=400,
             detail="Pipeline must be complete before chatting",
         )
 
-    # Store user message
     user_msg = ChatMessage(role="user", content=request.message)
     project.setdefault("chat_messages", []).append(user_msg.model_dump(mode="json"))
+    await _save_project(project)
 
-    # Build conversation history (exclude current message, it's passed separately)
     history = [
         {"role": m["role"], "content": m["content"]}
         for m in project.get("chat_messages", [])[:-1]
@@ -68,26 +83,24 @@ async def chat(project_id: str, request: ChatMessageRequest):
                 full_text += chunk
                 yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
-            # Parse action from complete response
             clean_text, action = parse_action_from_response(full_text)
 
-            # Store assistant message (clean text without action markup)
             assistant_msg = ChatMessage(
                 role="assistant",
                 content=clean_text,
                 metadata={"action": action.model_dump() if action else None},
             )
-            project["chat_messages"].append(assistant_msg.model_dump(mode="json"))
+            project.setdefault("chat_messages", []).append(assistant_msg.model_dump(mode="json"))
+            await _save_project(project)
 
-            # Send completion event
             yield f"data: {json.dumps({'type': 'done', 'action': action.model_dump() if action else None})}\n\n"
 
-            # Execute action if present
             if action and action.action_type != "none":
                 result = await _execute_chat_action(project, action.action_type, action.parameters)
+                await _save_project(project)
                 yield f"data: {json.dumps({'type': 'action_result', 'result': result})}\n\n"
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Chat stream error: %s", traceback.format_exc())
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
@@ -103,9 +116,12 @@ async def chat(project_id: str, request: ChatMessageRequest):
 
 
 @router.get("/history")
-async def get_chat_history(project_id: str):
+async def get_chat_history(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get full chat history for a project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     return project.get("chat_messages", [])
 
 
@@ -119,11 +135,9 @@ async def _execute_chat_action(
 
     try:
         if action_type in ("rescore", "adjust_weights"):
-            # Re-run comparison + recommendation with adjusted weights
             weights = parameters.get("weights", {})
             modified = {}
             if weights:
-                # Inject weights hint into the comparison prompt via state
                 existing_comparison = project.get("comparison_result", {})
                 existing_comparison["_scoring_weights"] = weights
                 modified["comparison_result"] = existing_comparison
@@ -132,10 +146,8 @@ async def _execute_chat_action(
             _sync_rerun_results(project, state)
             return f"Re-scored suppliers with updated weights. {parameters.get('reason', '')}"
 
-        elif action_type == "research":
-            # Targeted research: search for MORE suppliers, merge with existing, then re-evaluate
+        if action_type == "research":
             additional_queries = parameters.get("additional_queries", [])
-            focus = parameters.get("focus", "")
             modified = {}
 
             if additional_queries:
@@ -144,17 +156,16 @@ async def _execute_chat_action(
                 reqs["search_queries"] = existing_queries + additional_queries
                 modified["parsed_requirements"] = reqs
 
-            # Re-run from discovery but keep existing data for merging
             state = await rerun_from_stage(project, "discover", modified)
             _sync_rerun_results(project, state)
+            await _persist_supplier_memory(project)
             new_count = len(state.get("discovery_results", {}).get("suppliers", []))
             return (
                 f"Research complete: found {new_count} suppliers after expanding search. "
                 f"Re-evaluated and re-ranked all results. {parameters.get('reason', '')}"
             )
 
-        elif action_type == "rediscover":
-            # Re-run from discovery with new queries (full re-discovery from scratch)
+        if action_type == "rediscover":
             additional_queries = parameters.get("additional_queries", [])
             modified = {}
             if additional_queries:
@@ -165,18 +176,13 @@ async def _execute_chat_action(
 
             state = await rerun_from_stage(project, "discover", modified)
             _sync_rerun_results(project, state)
+            await _persist_supplier_memory(project)
             return f"Re-ran supplier discovery. {parameters.get('reason', '')}"
 
-        elif action_type == "draft_outreach":
-            # Trigger outreach agent
+        if action_type == "draft_outreach":
             supplier_indices = parameters.get("supplier_indices", [])
             from app.agents.outreach_agent import draft_outreach_emails
-            from app.schemas.agent_state import (
-                DiscoveredSupplier,
-                DiscoveryResults,
-                ParsedRequirements,
-                RecommendationResult,
-            )
+            from app.schemas.agent_state import DiscoveryResults, ParsedRequirements, RecommendationResult
 
             reqs = ParsedRequirements(**project["parsed_requirements"])
             discovery = DiscoveryResults(**project["discovery_results"])
@@ -192,25 +198,54 @@ async def _execute_chat_action(
 
             result = await draft_outreach_emails(selected, reqs, recs)
 
-            # Initialize outreach state
             outreach = project.get("outreach_state") or {}
             outreach["selected_suppliers"] = supplier_indices
             outreach["draft_emails"] = [d.model_dump(mode="json") for d in result.drafts]
             if "supplier_statuses" not in outreach:
                 outreach["supplier_statuses"] = [
-                    {"supplier_name": s.name, "supplier_index": i, "email_sent": False,
-                     "response_received": False, "follow_ups_sent": 0}
+                    {
+                        "supplier_name": s.name,
+                        "supplier_index": i,
+                        "email_sent": False,
+                        "response_received": False,
+                        "follow_ups_sent": 0,
+                    }
                     for i, s in zip(supplier_indices, selected)
                 ]
             project["outreach_state"] = outreach
+            await record_supplier_interactions(
+                project=project,
+                supplier_indices=supplier_indices,
+                interaction_type="selected_for_outreach",
+                source="chat",
+                details={"entrypoint": "chat_action"},
+            )
             return f"Drafted {len(result.drafts)} RFQ emails. Review them in the Outreach panel."
 
-        else:
-            return f"Unknown action type: {action_type}"
+        return f"Unknown action type: {action_type}"
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Failed to execute chat action %s: %s", action_type, traceback.format_exc())
         return f"Action failed: {str(e)}"
+
+
+async def _persist_supplier_memory(project: dict) -> None:
+    project_id = project.get("id")
+    if not project_id:
+        return
+
+    if project.get("discovery_results"):
+        persisted = await persist_discovered_suppliers(str(project_id), project.get("discovery_results"))
+        if persisted:
+            project["discovery_results"] = persisted
+    if project.get("verification_results"):
+        persisted_discovery = await persist_verification_feedback(
+            project_id=str(project_id),
+            discovery_results=project.get("discovery_results"),
+            verification_results=project.get("verification_results"),
+        )
+        if persisted_discovery:
+            project["discovery_results"] = persisted_discovery
 
 
 def _sync_rerun_results(project: dict, state: dict) -> None:
@@ -223,7 +258,6 @@ def _sync_rerun_results(project: dict, state: dict) -> None:
         project["comparison_result"] = state["comparison_result"]
     if state.get("recommendation_result"):
         project["recommendation_result"] = state["recommendation_result"]
-    # Keep status as complete
     project["current_stage"] = "complete"
     project["status"] = "complete"
     project["error"] = state.get("error")

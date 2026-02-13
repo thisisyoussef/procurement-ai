@@ -164,6 +164,7 @@ class ParsedRequirements(BaseModel):
 
 class DiscoveredSupplier(BaseModel):
     """A supplier found during discovery, before verification."""
+    supplier_id: str | None = None
     name: str
     website: str | None = None
     product_page_url: str | None = Field(None, description="Direct link to the specific product page, if found")

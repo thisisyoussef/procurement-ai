@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 
+import { withAccessTokenQuery } from '@/lib/auth'
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface LogEntry {
@@ -49,7 +51,7 @@ export default function LogViewer({
     setLogs([]) // Clear on new project
 
     const eventSource = new EventSource(
-      `${API_BASE}/api/v1/projects/${projectId}/logs/stream`
+      withAccessTokenQuery(`${API_BASE}/api/v1/projects/${projectId}/logs/stream`)
     )
 
     eventSource.onmessage = (event) => {

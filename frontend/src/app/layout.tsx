@@ -1,9 +1,23 @@
 import type { Metadata } from 'next'
+import { DM_Serif_Text, Manrope } from 'next/font/google'
 import './globals.css'
 
+const dmSerif = DM_Serif_Text({
+  weight: '400',
+  subsets: ['latin'],
+  variable: '--font-heading',
+  display: 'swap',
+})
+
+const manrope = Manrope({
+  subsets: ['latin'],
+  variable: '--font-body',
+  display: 'swap',
+})
+
 export const metadata: Metadata = {
-  title: 'ProcureAI — Find Suppliers with AI',
-  description: 'AI-powered supplier discovery and comparison for small businesses',
+  title: 'Tamkin — Tell us what you need made',
+  description: 'Find the right people to make your stuff. Manage them like a pro.',
 }
 
 export default function RootLayout({
@@ -13,7 +27,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className={`${dmSerif.variable} ${manrope.variable} font-body antialiased`}>
+        {children}
+      </body>
     </html>
   )
 }

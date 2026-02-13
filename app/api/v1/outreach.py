@@ -5,7 +5,7 @@ import time
 import traceback
 from collections import Counter
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.agents.followup_agent import generate_follow_ups
 from app.agents.outreach_agent import auto_draft_and_queue, draft_outreach_emails
@@ -25,19 +25,37 @@ from app.schemas.agent_state import (
     VerificationResults,
 )
 from app.schemas.project import EmailApprovalRequest, OutreachStartRequest, QuoteParseRequest
+from app.core.auth import AuthUser, get_current_auth_user
+from app.services.project_store import StoreUnavailableError, get_project_store
+from app.services.supplier_memory import (
+    record_supplier_interaction,
+    record_supplier_interactions,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/outreach", tags=["outreach"])
 
 
-def _get_project(project_id: str) -> dict:
-    from app.api.v1.projects import _projects
-
-    project = _projects.get(project_id)
+async def _get_project(project_id: str, current_user: AuthUser) -> dict:
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if str(project.get("user_id")) != str(current_user.user_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
     return project
+
+
+async def _save_project(project: dict) -> None:
+    store = get_project_store()
+    try:
+        await store.save_project(project)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
 
 
 def _get_outreach_state(project: dict) -> OutreachState:
@@ -108,9 +126,13 @@ def _upsert_plan(outreach: OutreachState, plan: SupplierOutreachPlan) -> None:
 
 
 @router.post("/start")
-async def start_outreach(project_id: str, request: OutreachStartRequest):
+async def start_outreach(
+    project_id: str,
+    request: OutreachStartRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Select suppliers and draft personalized RFQ emails."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
 
     if not project.get("recommendation_result"):
         raise HTTPException(status_code=400, detail="Pipeline must complete before outreach")
@@ -148,6 +170,15 @@ async def start_outreach(project_id: str, request: OutreachStartRequest):
             _append_event(outreach, "outreach_planned", supplier_index=idx, supplier_name=supplier.name, friction_risks=plan.friction_risks)
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_supplier_interactions(
+            project=project,
+            supplier_indices=selected_indices,
+            interaction_type="selected_for_outreach",
+            source="outreach",
+            details={"entrypoint": "manual_start"},
+        )
+
+        await _save_project(project)
         return {"drafts": [d.model_dump() for d in result.drafts], "summary": result.summary}
 
     except HTTPException:
@@ -158,9 +189,14 @@ async def start_outreach(project_id: str, request: OutreachStartRequest):
 
 
 @router.post("/approve/{draft_index}")
-async def approve_and_send(project_id: str, draft_index: int, request: EmailApprovalRequest):
+async def approve_and_send(
+    project_id: str,
+    draft_index: int,
+    request: EmailApprovalRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Approve (optionally edit) and send a draft email."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     if draft_index < 0 or draft_index >= len(outreach.draft_emails):
@@ -184,7 +220,15 @@ async def approve_and_send(project_id: str, draft_index: int, request: EmailAppr
     if not recipient:
         draft.status = "failed"
         _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason="missing_email")
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=draft.supplier_index,
+            interaction_type="rfq_send_failed",
+            source="outreach",
+            details={"reason": "missing_email"},
+        )
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
         return {"sent": False, "error": f"No email address found for {draft.supplier_name}. You'll need to provide one."}
 
     _append_event(outreach, "send_attempted", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, recipient=recipient)
@@ -201,19 +245,39 @@ async def approve_and_send(project_id: str, draft_index: int, request: EmailAppr
                 status.delivery_status = "sent"
                 break
         _append_event(outreach, "email_sent", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, email_id=email_id)
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=draft.supplier_index,
+            interaction_type="rfq_sent",
+            source="outreach",
+            details={"email_id": email_id, "recipient": recipient},
+        )
     else:
         draft.status = "failed"
         _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason=result.get("error", "unknown"))
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=draft.supplier_index,
+            interaction_type="rfq_send_failed",
+            source="outreach",
+            details={"reason": result.get("error", "unknown"), "recipient": recipient},
+        )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+
+    await _save_project(project)
 
     return {"sent": result.get("sent", False), "error": result.get("error"), "supplier_name": draft.supplier_name}
 
 
 @router.post("/parse-response")
-async def parse_response(project_id: str, request: QuoteParseRequest):
+async def parse_response(
+    project_id: str,
+    request: QuoteParseRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Parse a pasted supplier response into structured quote data."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     reqs = ParsedRequirements(**project["parsed_requirements"])
@@ -248,8 +312,23 @@ async def parse_response(project_id: str, request: QuoteParseRequest):
             supplier_name=supplier.name,
             confidence=quote.confidence_score,
         )
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=request.supplier_index,
+            interaction_type="quote_parsed",
+            source="outreach",
+            details={
+                "confidence_score": quote.confidence_score,
+                "unit_price": quote.unit_price,
+                "currency": quote.currency,
+                "moq": quote.moq,
+                "lead_time": quote.lead_time,
+            },
+        )
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+
+        await _save_project(project)
 
         return quote.model_dump()
 
@@ -259,9 +338,12 @@ async def parse_response(project_id: str, request: QuoteParseRequest):
 
 
 @router.post("/follow-up")
-async def generate_follow_up_emails(project_id: str):
+async def generate_follow_up_emails(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Generate follow-up emails for non-responsive suppliers."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
     reqs = ParsedRequirements(**project["parsed_requirements"])
 
@@ -271,6 +353,7 @@ async def generate_follow_up_emails(project_id: str):
         outreach.follow_up_emails.extend(result.follow_ups)
         _append_event(outreach, "followup_drafted", count=len(result.follow_ups))
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return {"follow_ups": [fu.model_dump() for fu in result.follow_ups], "summary": result.summary}
 
@@ -280,9 +363,13 @@ async def generate_follow_up_emails(project_id: str):
 
 
 @router.post("/send-follow-up/{follow_up_index}")
-async def send_follow_up(project_id: str, follow_up_index: int):
+async def send_follow_up(
+    project_id: str,
+    follow_up_index: int,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Send an approved follow-up email."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     if follow_up_index < 0 or follow_up_index >= len(outreach.follow_up_emails):
@@ -299,7 +386,15 @@ async def send_follow_up(project_id: str, follow_up_index: int):
     if not recipient:
         fu.status = "failed"
         _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason="missing_email")
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=fu.supplier_index,
+            interaction_type="followup_send_failed",
+            source="outreach",
+            details={"reason": "missing_email"},
+        )
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
         return {"sent": False, "error": f"No email for {fu.supplier_name}"}
 
     result = await send_email(to=recipient, subject=fu.subject, body_html=fu.body)
@@ -312,26 +407,48 @@ async def send_follow_up(project_id: str, follow_up_index: int):
                 status.last_follow_up_at = time.time()
                 break
         _append_event(outreach, "followup_sent", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name)
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=fu.supplier_index,
+            interaction_type="followup_sent",
+            source="outreach",
+            details={"recipient": recipient, "follow_up_number": fu.follow_up_number},
+        )
     else:
         fu.status = "failed"
         _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason=result.get("error", "unknown"))
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=fu.supplier_index,
+            interaction_type="followup_send_failed",
+            source="outreach",
+            details={"reason": result.get("error", "unknown"), "recipient": recipient},
+        )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+
+    await _save_project(project)
 
     return {"sent": result.get("sent", False), "error": result.get("error"), "supplier_name": fu.supplier_name}
 
 
 @router.get("/status")
-async def get_outreach_status(project_id: str):
+async def get_outreach_status(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get full outreach state for a project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     return project.get("outreach_state") or {"error": "No outreach started"}
 
 
 @router.get("/plan")
-async def get_outreach_plan(project_id: str):
+async def get_outreach_plan(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Return intent-to-purchase execution plan and funnel metrics."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     sent = sum(1 for s in outreach.supplier_statuses if s.email_sent)
@@ -356,17 +473,23 @@ async def get_outreach_plan(project_id: str):
 
 
 @router.get("/timeline")
-async def get_outreach_timeline(project_id: str):
+async def get_outreach_timeline(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get immutable timeline events for outreach analytics."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
     return {"events": [event.model_dump() for event in outreach.events], "count": len(outreach.events)}
 
 
 @router.post("/recompare")
-async def recompare_with_quotes(project_id: str):
+async def recompare_with_quotes(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Re-run comparison and recommendation using real quote data."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     if not outreach.parsed_quotes:
@@ -391,6 +514,7 @@ async def recompare_with_quotes(project_id: str):
 
         _append_event(outreach, "recompare_completed", quote_count=len(outreach.parsed_quotes))
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return {"status": "success", "message": f"Re-compared with {len(outreach.parsed_quotes)} real quotes"}
 
@@ -426,9 +550,13 @@ async def get_scheduler_status(project_id: str):
 
 
 @router.post("/auto-config")
-async def set_auto_outreach_config(project_id: str, config: AutoOutreachConfig):
+async def set_auto_outreach_config(
+    project_id: str,
+    config: AutoOutreachConfig,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Save auto-outreach configuration for a project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
 
     raw = project.get("outreach_state")
     if raw:
@@ -439,14 +567,18 @@ async def set_auto_outreach_config(project_id: str, config: AutoOutreachConfig):
     outreach.auto_config = config
     _append_event(outreach, "auto_configured", mode=config.mode, threshold=config.auto_send_threshold)
     project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
 
     return {"status": "saved", "config": config.model_dump()}
 
 
 @router.post("/auto-start")
-async def start_auto_outreach(project_id: str):
+async def start_auto_outreach(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Auto-draft and queue RFQ emails for suppliers above the verification threshold."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
 
     if not project.get("recommendation_result"):
         raise HTTPException(status_code=400, detail="Pipeline must complete before auto-outreach")
@@ -491,7 +623,15 @@ async def start_auto_outreach(project_id: str):
                 _upsert_plan(outreach, plan)
 
         _append_event(outreach, "auto_queue_created", queued=len(result.drafts))
+        await record_supplier_interactions(
+            project=project,
+            supplier_indices=[d.supplier_index for d in result.drafts],
+            interaction_type="auto_outreach_queued",
+            source="outreach",
+            details={"queued_count": len(result.drafts)},
+        )
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return {"status": "queued", "drafts_queued": len(result.drafts), "summary": result.summary}
 
@@ -503,9 +643,12 @@ async def start_auto_outreach(project_id: str):
 
 
 @router.get("/auto-status")
-async def get_auto_outreach_status(project_id: str):
+async def get_auto_outreach_status(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get the status of auto-outreach queue for a project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     raw = project.get("outreach_state")
 
     if not raw:
@@ -527,9 +670,12 @@ async def get_auto_outreach_status(project_id: str):
 
 
 @router.get("/delivery-status")
-async def get_delivery_status(project_id: str):
+async def get_delivery_status(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get email delivery status for all sent emails in this project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     delivery_info = []
@@ -550,9 +696,12 @@ async def get_delivery_status(project_id: str):
 
 
 @router.post("/check-inbox")
-async def check_inbox(project_id: str):
+async def check_inbox(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Check email inbox for supplier responses."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
 
     discovery = DiscoveryResults(**project["discovery_results"])
@@ -584,6 +733,7 @@ async def check_inbox(project_id: str):
 
         _append_event(outreach, "inbox_checked", messages_found=len(messages))
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return {
             "messages_found": len(messages),
