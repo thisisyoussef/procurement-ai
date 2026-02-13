@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
 
 import logging
+import os
+from typing import List
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +25,26 @@ install_project_log_handler()
 
 settings = get_settings()
 
+
+def _parse_cors_origins(raw_origins: str) -> List[str]:
+    return [
+        origin.strip()
+        for origin in (raw_origins or "").split(",")
+        if origin.strip()
+    ]
+
+
+cors_origins = {
+    settings.frontend_url,
+    "http://localhost:3000",
+    "http://localhost:5173",
+}
+cors_origins.update(_parse_cors_origins(os.getenv("CORS_ALLOW_ORIGINS", "")))
+cors_origin_regex = os.getenv(
+    "CORS_ALLOW_ORIGIN_REGEX",
+    r"https://.*\.up\.railway\.app",
+)
+
 app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
@@ -32,11 +54,8 @@ app = FastAPI(
 # CORS — allow frontend origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.frontend_url,
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=sorted(cors_origins),
+    allow_origin_regex=cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
