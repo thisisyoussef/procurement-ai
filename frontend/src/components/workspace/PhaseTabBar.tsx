@@ -1,7 +1,7 @@
 'use client'
 
 import { useWorkspace } from '@/contexts/WorkspaceContext'
-import { Phase, isPhaseAccessible, isPhaseComplete } from '@/types/pipeline'
+import { Phase, phaseIndex, stageToPhase } from '@/types/pipeline'
 
 const PHASES: { key: Phase; label: string }[] = [
   { key: 'brief', label: 'Brief' },
@@ -12,37 +12,44 @@ const PHASES: { key: Phase; label: string }[] = [
   { key: 'order', label: 'Order' },
 ]
 
+const RUNNING_STATUSES = new Set<string>([
+  'parsing',
+  'clarifying',
+  'discovering',
+  'verifying',
+  'comparing',
+  'recommending',
+  'outreaching',
+])
+
 export default function PhaseTabBar() {
-  const { activePhase, setActivePhase, highestReachedPhase, status } = useWorkspace()
+  const { activePhase, setActivePhase, highestReachedPhase, status, projectId } = useWorkspace()
+
+  const pipelinePhase = status ? stageToPhase(status.current_stage) : null
+  const pipelineRunning = status ? RUNNING_STATUSES.has(status.status) : false
 
   return (
     <div className="flex gap-0 border-b border-surface-3 bg-white shrink-0 px-12">
       {PHASES.map((phase) => {
-        const accessible = isPhaseAccessible(phase.key, highestReachedPhase, status)
-        const complete = isPhaseComplete(phase.key, status)
+        const reached = phaseIndex(phase.key) <= phaseIndex(highestReachedPhase)
         const isActive = activePhase === phase.key
-        const isPipelinePhase =
-          status &&
-          !complete &&
-          isActive &&
-          status.status !== 'complete' &&
-          status.status !== 'failed' &&
-          status.status !== 'canceled'
+        const disabled = !projectId && phase.key !== 'brief'
+        const isPipelinePhase = pipelineRunning && pipelinePhase === phase.key
 
         return (
           <button
             key={phase.key}
-            onClick={() => accessible && setActivePhase(phase.key)}
-            disabled={!accessible}
+            onClick={() => !disabled && setActivePhase(phase.key)}
+            disabled={disabled}
             className={`
               relative px-5 py-4 text-[11px] font-medium tracking-[0.3px] transition-all
               ${isActive
                 ? 'text-ink'
-                : complete
+                : reached
                 ? 'text-ink-3 hover:text-ink-2'
-                : accessible
-                ? 'text-ink-4 hover:text-ink-3'
-                : 'text-ink-4/40 cursor-not-allowed'
+                : disabled
+                ? 'text-ink-4/40 cursor-not-allowed'
+                : 'text-ink-4 hover:text-ink-3'
               }
             `}
           >

@@ -42,6 +42,7 @@ export function stageToPhase(stage: string): Phase {
     case 'comparing':
     case 'recommending':
       return 'compare'
+    case 'outreaching':
     case 'complete':
       return 'outreach'
     default:
