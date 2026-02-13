@@ -28,8 +28,11 @@ class Settings(BaseSettings):
     app_title: str = "Tamkin"
     app_version: str = "0.1.0"
     frontend_url: str = "http://localhost:3000"
+    cors_allow_origins: str = ""
+    cors_allow_origin_regex: str = r"https://.*\.up\.railway\.app"
     project_store_backend: str = "database"
     project_store_fallback_inmemory: bool = True
+    auth_jwt_ttl_hours: int = 720
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/procurement"
@@ -59,6 +62,8 @@ class Settings(BaseSettings):
 
     # Google Places
     google_places_api_key: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
     # Firecrawl
     firecrawl_api_key: str = ""

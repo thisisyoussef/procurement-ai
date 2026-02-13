@@ -2,9 +2,10 @@
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.api.v1.projects import create_project
+from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.project import IntakeStartRequest, ProjectCreateRequest
 from app.services.project_store import StoreUnavailableError, get_project_store
 
@@ -14,7 +15,11 @@ router = APIRouter(prefix="/intake", tags=["intake"])
 
 
 @router.post("/start")
-async def start_intake(request: IntakeStartRequest, background_tasks: BackgroundTasks):
+async def start_intake(
+    request: IntakeStartRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Create a project from landing intake and return a product redirect path."""
     title = " ".join(request.message.strip().split())[:80] or "New sourcing mission"
     project_request = ProjectCreateRequest(
@@ -22,7 +27,7 @@ async def start_intake(request: IntakeStartRequest, background_tasks: Background
         product_description=request.message.strip(),
     )
 
-    result = await create_project(project_request, background_tasks)
+    result = await create_project(project_request, background_tasks, current_user)
     project_id = result["project_id"]
 
     store = get_project_store()
@@ -44,4 +49,3 @@ async def start_intake(request: IntakeStartRequest, background_tasks: Background
         "status": "started",
         "redirect_path": f"/product?projectId={project_id}&entry={request.source}",
     }
-

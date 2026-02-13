@@ -10,7 +10,7 @@ import logging
 import traceback
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.orchestrator import (
@@ -22,6 +22,7 @@ from app.agents.orchestrator import (
     verify_node,
     GraphState,
 )
+from app.core.auth import AuthUser, get_current_auth_user
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
 from app.core.log_stream import current_project_id, get_project_logs, subscribe_to_logs
@@ -45,6 +46,10 @@ from app.services.project_store import (
     get_legacy_project_dict,
     get_project_store,
 )
+from app.services.supplier_memory import (
+    persist_discovered_suppliers,
+    persist_verification_feedback,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -67,6 +72,11 @@ async def _get_project_or_404(project_id: str) -> dict:
     return project
 
 
+def _enforce_project_ownership(project: dict, current_user: AuthUser) -> None:
+    if str(project.get("user_id")) != str(current_user.user_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 async def _save_project(project: dict) -> None:
     store = get_project_store()
     try:
@@ -87,6 +97,7 @@ async def _create_project(project: dict) -> None:
 async def create_project(
     request: ProjectCreateRequest,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
 ):
     """
     Create a new sourcing project and start the AI pipeline.
@@ -96,7 +107,7 @@ async def create_project(
     """
     try:
         project_id = str(uuid.uuid4())
-        user_id = str(uuid.uuid4())  # TODO: extract from auth
+        user_id = str(current_user.user_id)
 
         project = {
             "id": project_id,
@@ -198,6 +209,20 @@ async def _run_pipeline_task(project_id: str, description: str):
 
             state = await step_fn(state)
             _sync_state_to_project(project, state)
+
+            if stage_name == "discovering" and project.get("discovery_results"):
+                persisted = await persist_discovered_suppliers(project_id, project.get("discovery_results"))
+                if persisted:
+                    project["discovery_results"] = persisted
+            if stage_name == "verifying" and project.get("verification_results"):
+                persisted_discovery = await persist_verification_feedback(
+                    project_id=project_id,
+                    discovery_results=project.get("discovery_results"),
+                    verification_results=project.get("verification_results"),
+                )
+                if persisted_discovery:
+                    project["discovery_results"] = persisted_discovery
+
             await store.save_project(project)
 
             if state.get("error"):
@@ -276,6 +301,20 @@ async def _resume_pipeline_task(project_id: str):
 
             state = await step_fn(state)
             _sync_state_to_project(project, state)
+
+            if stage_name == "discovering" and project.get("discovery_results"):
+                persisted = await persist_discovered_suppliers(project_id, project.get("discovery_results"))
+                if persisted:
+                    project["discovery_results"] = persisted
+            if stage_name == "verifying" and project.get("verification_results"):
+                persisted_discovery = await persist_verification_feedback(
+                    project_id=project_id,
+                    discovery_results=project.get("discovery_results"),
+                    verification_results=project.get("verification_results"),
+                )
+                if persisted_discovery:
+                    project["discovery_results"] = persisted_discovery
+
             await store.save_project(project)
 
             if state.get("error"):
@@ -296,9 +335,13 @@ async def _resume_pipeline_task(project_id: str):
 
 
 @router.get("/{project_id}/status", response_model=PipelineStatusResponse)
-async def get_project_status(project_id: str):
+async def get_project_status(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get the current status and results of a sourcing project pipeline."""
     project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
 
     return PipelineStatusResponse(
         project_id=uuid.UUID(project["id"]),
@@ -342,15 +385,22 @@ async def get_project_status(project_id: str):
 
 
 @router.get("/{project_id}/run-sync")
-async def run_project_sync(project_id: str):
+async def run_project_sync(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Run the pipeline synchronously (for testing / demo)."""
     project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
     await _run_pipeline_task(project_id, project["product_description"])
-    return await get_project_status(project_id)
+    return await get_project_status(project_id, current_user)
 
 
 @router.post("/search")
-async def quick_search(request: ProjectCreateRequest):
+async def quick_search(
+    request: ProjectCreateRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Quick synchronous search — runs the full pipeline and returns results."""
     result = await run_pipeline(request.product_description)
 
@@ -366,14 +416,24 @@ async def quick_search(request: ProjectCreateRequest):
 
 
 @router.get("/{project_id}/logs")
-async def get_logs(project_id: str):
+async def get_logs(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get all stored logs for a project."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
     return get_project_logs(project_id)
 
 
 @router.get("/{project_id}/logs/stream")
-async def stream_logs(project_id: str):
+async def stream_logs(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """SSE endpoint — streams live log entries as they happen."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
     return StreamingResponse(
         subscribe_to_logs(project_id),
         media_type="text/event-stream",
@@ -390,9 +450,11 @@ async def answer_clarifying_questions(
     project_id: str,
     request: ClarifyingAnswerRequest,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
 ):
     """Submit answers to clarifying questions and resume the pipeline."""
     project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
 
     if project.get("status") != "clarifying":
         raise HTTPException(status_code=400, detail="Project is not waiting for answers")
@@ -457,9 +519,11 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
 async def skip_clarifying_questions(
     project_id: str,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
 ):
     """Skip all clarifying questions and resume the pipeline with existing requirements."""
     project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
 
     if project.get("status") != "clarifying":
         raise HTTPException(status_code=400, detail="Project is not waiting for answers")
@@ -475,7 +539,9 @@ async def skip_clarifying_questions(
 
 
 @router.get("")
-async def list_projects():
+async def list_projects(
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """List all projects (for demo purposes)."""
     store = get_project_store()
     try:
@@ -491,4 +557,5 @@ async def list_projects():
             "current_stage": p.get("current_stage"),
         }
         for p in projects
+        if str(p.get("user_id")) == str(current_user.user_id)
     ]

@@ -4,9 +4,15 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
+from app.core.auth import AuthUser, create_access_token
 from app.main import app
 
 client = TestClient(app)
+
+
+def _auth_headers(user_id: str = "00000000-0000-0000-0000-000000000001") -> dict[str, str]:
+    token, _ = create_access_token(AuthUser(user_id=user_id, email="test@example.com"))
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_start_intake_creates_project_and_redirect_path():
@@ -18,6 +24,7 @@ def test_start_intake_creates_project_and_redirect_path():
                 "source": "landing_hero",
                 "session_id": "sess_test_1",
             },
+            headers=_auth_headers(),
         )
 
     assert response.status_code == 200
@@ -71,4 +78,3 @@ def test_events_endpoint_persists_event():
     data = response.json()
     assert data["ok"] is True
     assert "event_id" in data
-

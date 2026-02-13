@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 
+import { authFetch } from '@/lib/auth'
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface DraftEmail {
@@ -164,7 +166,7 @@ export default function OutreachPanel({
 
   const fetchOutreachStatus = async () => {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/status`
       )
       if (res.ok) {
@@ -189,7 +191,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/start`,
         {
           method: 'POST',
@@ -217,7 +219,7 @@ export default function OutreachPanel({
         body.edited_body = editBody
         setEditingDraft(null)
       }
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/approve/${draftIndex}`,
         {
           method: 'POST',
@@ -242,7 +244,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/parse-response`,
         {
           method: 'POST',
@@ -269,7 +271,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/follow-up`,
         { method: 'POST' }
       )
@@ -287,7 +289,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/recompare`,
         { method: 'POST' }
       )
@@ -302,7 +304,7 @@ export default function OutreachPanel({
 
   const fetchAutoStatus = async () => {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/auto-status`
       )
       if (res.ok) {
@@ -316,7 +318,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/auto-config`,
         {
           method: 'POST',
@@ -341,7 +343,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/outreach/auto-start`,
         { method: 'POST' }
       )
@@ -358,7 +360,7 @@ export default function OutreachPanel({
   // Phone calling functions
   const fetchPhoneCalls = async () => {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/phone/calls`
       )
       if (res.ok) {
@@ -373,7 +375,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/phone/configure`,
         {
           method: 'POST',
@@ -402,7 +404,7 @@ export default function OutreachPanel({
       const questions = callQuestions.trim()
         ? callQuestions.split('\n').filter((q) => q.trim())
         : []
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/phone/call`,
         {
           method: 'POST',
@@ -427,7 +429,7 @@ export default function OutreachPanel({
 
   const refreshCallStatus = async (callId: string) => {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/phone/calls/${callId}`
       )
       if (res.ok) {
@@ -440,7 +442,7 @@ export default function OutreachPanel({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/phone/calls/${callId}/parse`,
         { method: 'POST' }
       )

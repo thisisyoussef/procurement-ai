@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 
+import { authFetch } from '@/lib/auth'
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface ChatMessage {
@@ -45,7 +47,7 @@ export default function ChatPanel({ projectId, onResultsUpdated }: ChatPanelProp
     setActionStatus(null)
 
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/chat`,
         {
           method: 'POST',

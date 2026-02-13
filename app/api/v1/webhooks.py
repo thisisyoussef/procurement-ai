@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.email_service import verify_webhook_signature
 from app.schemas.agent_state import EmailDeliveryEvent, OutreachState
 from app.services.project_store import StoreUnavailableError, get_project_store
+from app.services.supplier_memory import record_supplier_interaction
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -101,6 +102,14 @@ async def resend_webhook(request: Request):
             break
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+    if supplier_index is not None:
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=supplier_index,
+            interaction_type="email_delivery_update",
+            source="webhook_resend",
+            details={"event_type": event_type, "delivery_status": delivery_status, "email_id": email_id},
+        )
     await _save_project(project)
 
     logger.info(
@@ -162,6 +171,17 @@ async def retell_webhook(request: Request):
                 break
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+    supplier_index = None
+    if call_index < len(outreach.phone_calls):
+        supplier_index = outreach.phone_calls[call_index].supplier_index
+    if isinstance(supplier_index, int):
+        await record_supplier_interaction(
+            project=project,
+            supplier_index=supplier_index,
+            interaction_type="phone_call_status_update",
+            source="webhook_retell",
+            details={"event_type": event_type, "call_id": call_id},
+        )
     await _save_project(project)
 
     logger.info("Retell webhook: %s for call %s", event_type, call_id)

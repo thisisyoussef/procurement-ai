@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 
+import { authFetch } from '@/lib/auth'
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface ClarifyingQuestion {
@@ -65,7 +67,7 @@ export default function ClarifyingQuestions({
     setError(null)
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/answer`,
         {
           method: 'POST',
@@ -92,7 +94,7 @@ export default function ClarifyingQuestions({
     setError(null)
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/v1/projects/${projectId}/skip-questions`,
         { method: 'POST' }
       )

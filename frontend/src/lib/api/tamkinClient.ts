@@ -6,11 +6,12 @@ import type {
   LeadCreateRequest,
   LeadCreateResponse,
 } from '@/lib/contracts/tamkin'
+import { authFetch } from '@/lib/auth'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

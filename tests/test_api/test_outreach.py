@@ -5,12 +5,19 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
+from app.core.auth import AuthUser, create_access_token
+
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.main import app
 
 client = TestClient(app)
+
+
+def _auth_headers(user_id: str = "00000000-0000-0000-0000-000000000001") -> dict[str, str]:
+    token, _ = create_access_token(AuthUser(user_id=user_id, email="test@example.com"))
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _seed_project(project_id: str) -> None:
@@ -124,22 +131,24 @@ def test_outreach_plan_and_timeline_tracking():
         start = client.post(
             f"/api/v1/projects/{project_id}/outreach/start",
             json={"supplier_indices": [0]},
+            headers=_auth_headers(),
         )
         assert start.status_code == 200
 
         send = client.post(
             f"/api/v1/projects/{project_id}/outreach/approve/0",
             json={"draft_index": 0},
+            headers=_auth_headers(),
         )
         assert send.status_code == 200
         assert send.json()["sent"] is True
 
-    plan = client.get(f"/api/v1/projects/{project_id}/outreach/plan")
+    plan = client.get(f"/api/v1/projects/{project_id}/outreach/plan", headers=_auth_headers())
     assert plan.status_code == 200
     assert plan.json()["funnel"]["rfq_sent"] == 1
     assert len(plan.json()["plans"]) == 1
 
-    timeline = client.get(f"/api/v1/projects/{project_id}/outreach/timeline")
+    timeline = client.get(f"/api/v1/projects/{project_id}/outreach/timeline", headers=_auth_headers())
     assert timeline.status_code == 200
     assert timeline.json()["count"] >= 3
     event_types = [e["event_type"] for e in timeline.json()["events"]]

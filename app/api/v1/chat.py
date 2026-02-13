@@ -5,21 +5,27 @@ import logging
 import traceback
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.chat_agent import chat_with_context, parse_action_from_response
 from app.agents.orchestrator import rerun_from_stage
+from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.agent_state import ChatMessage
 from app.schemas.project import ChatMessageRequest
 from app.services.project_store import StoreUnavailableError, get_project_store
+from app.services.supplier_memory import (
+    persist_discovered_suppliers,
+    persist_verification_feedback,
+    record_supplier_interactions,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/chat", tags=["chat"])
 
 
-async def _get_project(project_id: str) -> dict:
+async def _get_project(project_id: str, current_user: AuthUser) -> dict:
     """Get project from project store, raise 404 if missing."""
     store = get_project_store()
     try:
@@ -29,6 +35,8 @@ async def _get_project(project_id: str) -> dict:
 
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if str(project.get("user_id")) != str(current_user.user_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
     return project
 
 
@@ -41,9 +49,13 @@ async def _save_project(project: dict) -> None:
 
 
 @router.post("")
-async def chat(project_id: str, request: ChatMessageRequest):
+async def chat(
+    project_id: str,
+    request: ChatMessageRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Send a chat message and get a streaming SSE response."""
-    project = await _get_project(project_id)
+    project = await _get_project(project_id, current_user)
 
     if project.get("current_stage") not in ("complete", "failed"):
         raise HTTPException(
@@ -104,9 +116,12 @@ async def chat(project_id: str, request: ChatMessageRequest):
 
 
 @router.get("/history")
-async def get_chat_history(project_id: str):
+async def get_chat_history(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
     """Get full chat history for a project."""
-    project = await _get_project(project_id)
+    project = await _get_project(project_id, current_user)
     return project.get("chat_messages", [])
 
 
@@ -143,6 +158,7 @@ async def _execute_chat_action(
 
             state = await rerun_from_stage(project, "discover", modified)
             _sync_rerun_results(project, state)
+            await _persist_supplier_memory(project)
             new_count = len(state.get("discovery_results", {}).get("suppliers", []))
             return (
                 f"Research complete: found {new_count} suppliers after expanding search. "
@@ -160,6 +176,7 @@ async def _execute_chat_action(
 
             state = await rerun_from_stage(project, "discover", modified)
             _sync_rerun_results(project, state)
+            await _persist_supplier_memory(project)
             return f"Re-ran supplier discovery. {parameters.get('reason', '')}"
 
         if action_type == "draft_outreach":
@@ -196,6 +213,13 @@ async def _execute_chat_action(
                     for i, s in zip(supplier_indices, selected)
                 ]
             project["outreach_state"] = outreach
+            await record_supplier_interactions(
+                project=project,
+                supplier_indices=supplier_indices,
+                interaction_type="selected_for_outreach",
+                source="chat",
+                details={"entrypoint": "chat_action"},
+            )
             return f"Drafted {len(result.drafts)} RFQ emails. Review them in the Outreach panel."
 
         return f"Unknown action type: {action_type}"
@@ -203,6 +227,25 @@ async def _execute_chat_action(
     except Exception as e:  # noqa: BLE001
         logger.error("Failed to execute chat action %s: %s", action_type, traceback.format_exc())
         return f"Action failed: {str(e)}"
+
+
+async def _persist_supplier_memory(project: dict) -> None:
+    project_id = project.get("id")
+    if not project_id:
+        return
+
+    if project.get("discovery_results"):
+        persisted = await persist_discovered_suppliers(str(project_id), project.get("discovery_results"))
+        if persisted:
+            project["discovery_results"] = persisted
+    if project.get("verification_results"):
+        persisted_discovery = await persist_verification_feedback(
+            project_id=str(project_id),
+            discovery_results=project.get("discovery_results"),
+            verification_results=project.get("verification_results"),
+        )
+        if persisted_discovery:
+            project["discovery_results"] = persisted_discovery
 
 
 def _sync_rerun_results(project: dict, state: dict) -> None:
