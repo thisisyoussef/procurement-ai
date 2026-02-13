@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { authFetch } from '@/lib/auth'
+import { trackTraceEvent } from '@/lib/telemetry'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
@@ -113,6 +114,11 @@ export default function OutreachPhase() {
   const runQuickDecision = useCallback(
     async (approve: boolean) => {
       if (!projectId) return
+      trackTraceEvent(
+        'outreach_quick_decision_attempt',
+        { project_id: projectId, approve },
+        { projectId }
+      )
       setLoading(true)
       setError(null)
       try {
@@ -131,10 +137,31 @@ export default function OutreachPhase() {
           }
           throw new Error(detail)
         }
+        const payload = await res.json().catch(() => ({}))
+        trackTraceEvent(
+          'outreach_quick_decision_success',
+          {
+            project_id: projectId,
+            approve,
+            status: payload?.status,
+            sent_count: payload?.sent_count,
+            failed_count: payload?.failed_count,
+          },
+          { projectId }
+        )
         await fetchOutreachStatus()
         refreshStatus()
       } catch (err: any) {
         setError(err?.message || 'Failed to update outreach approval.')
+        trackTraceEvent(
+          'outreach_quick_decision_error',
+          {
+            project_id: projectId,
+            approve,
+            detail: err?.message || 'unknown',
+          },
+          { projectId, level: 'warn' }
+        )
       } finally {
         setLoading(false)
       }

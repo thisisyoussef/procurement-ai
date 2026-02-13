@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { tamkinClient } from '@/lib/api/tamkinClient'
 import { featureFlags } from '@/lib/featureFlags'
+import { getTraceSessionId, trackTraceEvent } from '@/lib/telemetry'
 
 import './tamkin-landing.css'
 
@@ -77,18 +78,11 @@ export default function HomePage() {
   const [leadError, setLeadError] = useState<string | null>(null)
   const [leadSuccess, setLeadSuccess] = useState<string | null>(null)
 
-  const [sessionId, setSessionId] = useState<string | null>(null)
-
   const convoRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (!sessionId) {
-      setSessionId(`sess_${Math.random().toString(36).slice(2)}`)
-    }
-  }, [sessionId])
-
-  useEffect(() => {
     if (featureFlags.tamkinLandingBypass) {
+      trackTraceEvent('landing_bypass_redirect', { to: '/product' })
       router.replace('/product')
     }
   }, [router])
@@ -115,16 +109,7 @@ export default function HomePage() {
   if (featureFlags.tamkinLandingBypass) return null
 
   const track = async (eventName: string, payload: Record<string, unknown> = {}) => {
-    try {
-      await tamkinClient.trackEvent({
-        event_name: eventName,
-        session_id: sessionId || undefined,
-        path: '/',
-        payload,
-      })
-    } catch {
-      // Non-blocking telemetry.
-    }
+    trackTraceEvent(eventName, payload, { path: '/' })
   }
 
   const startIntake = async () => {
@@ -150,10 +135,11 @@ export default function HomePage() {
     await track('hero_intake_submit', { location: 'scene_chat' })
 
     try {
+      const traceSessionId = getTraceSessionId() || undefined
       const result = await tamkinClient.startIntake({
         message,
         source: 'landing_hero',
-        session_id: sessionId || undefined,
+        session_id: traceSessionId,
       })
       router.push(result.redirect_path)
     } catch (err: any) {

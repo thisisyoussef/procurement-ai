@@ -15,3 +15,7 @@ Next.js application for Tamkin landing and product workspace.
 - Keep existing route paths (`/`, `/product`) unchanged.
 - Keep API contract usage aligned with backend payloads.
 - Run production build after any structural cleanup.
+
+## Tracing
+- Client tracing defaults to enabled and records page/user actions to console and `/api/v1/events`.
+- Disable by setting `NEXT_PUBLIC_TAMKIN_CLIENT_TRACING=false`.

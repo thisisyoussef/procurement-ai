@@ -7,10 +7,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   ReactNode,
 } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { AuthUser, authFetch, clearAuthSession } from '@/lib/auth'
+import { trackTraceEvent } from '@/lib/telemetry'
 import { Phase, PipelineStatus, stageToPhase, phaseIndex } from '@/types/pipeline'
 import { usePipelinePolling } from '@/hooks/usePipelinePolling'
 
@@ -85,6 +87,7 @@ export function WorkspaceProvider({
   const [activePhase, setActivePhase] = useState<Phase>('brief')
   const [highestReachedPhase, setHighestReachedPhase] = useState<Phase>('brief')
   const [userOverridePhase, setUserOverridePhase] = useState(false)
+  const backendHealthRef = useRef<boolean | null>(null)
 
   const handleUnauthorized = useCallback(() => {
     clearAuthSession()
@@ -139,6 +142,10 @@ export function WorkspaceProvider({
   const openProject = useCallback(
     (id: string) => {
       if (!id || id === projectId) return
+      trackTraceEvent('workspace_project_open_click', {
+        current_project_id: projectId,
+        target_project_id: id,
+      }, { projectId: id })
       setProjectId(id)
       setStatus(null)
       setErrorMessage(null)
@@ -149,11 +156,15 @@ export function WorkspaceProvider({
   )
 
   const startNewProject = useCallback(() => {
+    trackTraceEvent('workspace_project_new_click', {
+      previous_project_id: projectId,
+    })
     resetWorkspace()
-  }, [resetWorkspace])
+  }, [projectId, resetWorkspace])
 
   const cancelCurrentProject = useCallback(async (): Promise<boolean> => {
     if (!projectId) return false
+    trackTraceEvent('workspace_cancel_attempt', { project_id: projectId }, { projectId })
     try {
       const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/cancel`, {
         method: 'POST',
@@ -187,10 +198,16 @@ export function WorkspaceProvider({
       setPolling(false)
       setErrorMessage(null)
       await refreshProjectList()
+      trackTraceEvent('workspace_cancel_success', { project_id: projectId }, { projectId })
       return true
     } catch (err: any) {
       const msg = err?.message || 'Could not cancel this run.'
       setErrorMessage(msg)
+      trackTraceEvent(
+        'workspace_cancel_error',
+        { project_id: projectId, detail: msg },
+        { projectId, level: 'warn' }
+      )
       return false
     }
   }, [
@@ -205,6 +222,11 @@ export function WorkspaceProvider({
   useEffect(() => {
     const urlProjectId = searchParams.get('projectId')?.trim() || null
     if (urlProjectId && urlProjectId !== projectId) {
+      trackTraceEvent(
+        'workspace_project_loaded_from_url',
+        { project_id: urlProjectId },
+        { projectId: urlProjectId }
+      )
       setProjectId(urlProjectId)
       setStatus(null)
       setErrorMessage(null)
@@ -255,6 +277,20 @@ export function WorkspaceProvider({
   }, [])
 
   useEffect(() => {
+    if (backendOk == null) return
+    if (backendHealthRef.current == null) {
+      trackTraceEvent('backend_health_initial', { ok: backendOk })
+    } else if (backendHealthRef.current !== backendOk) {
+      trackTraceEvent(
+        'backend_health_changed',
+        { from: backendHealthRef.current, to: backendOk },
+        { level: backendOk ? 'info' : 'warn' }
+      )
+    }
+    backendHealthRef.current = backendOk
+  }, [backendOk])
+
+  useEffect(() => {
     if (!status || userOverridePhase) return
     const autoPhase = stageToPhase(status.current_stage)
     const autoIdx = phaseIndex(autoPhase)
@@ -273,12 +309,21 @@ export function WorkspaceProvider({
   }, [status?.current_stage])
 
   const handleSetActivePhase = useCallback((phase: Phase) => {
+    trackTraceEvent(
+      'workspace_phase_changed',
+      { from: activePhase, to: phase, project_id: projectId },
+      { projectId: projectId || undefined }
+    )
     setActivePhase(phase)
     setUserOverridePhase(true)
-  }, [])
+  }, [activePhase, projectId])
 
   const handleSearch = useCallback(
     async (description: string) => {
+      trackTraceEvent('workspace_search_submit', {
+        description_length: description.length,
+        description_preview: description.slice(0, 120),
+      })
       setLoading(true)
       setStatus(null)
       setErrorMessage(null)
@@ -315,10 +360,16 @@ export function WorkspaceProvider({
         const data = await res.json()
         setProjectId(data.project_id)
         setPolling(true)
+        trackTraceEvent(
+          'workspace_search_started',
+          { project_id: data.project_id },
+          { projectId: data.project_id }
+        )
         void refreshProjectList()
       } catch (err: any) {
         const msg = err?.message || 'Unknown error'
         console.error('Search error:', msg)
+        trackTraceEvent('workspace_search_error', { detail: msg }, { level: 'warn' })
         setErrorMessage(
           msg.includes('fetch') ||
             msg.includes('NetworkError') ||
@@ -333,8 +384,13 @@ export function WorkspaceProvider({
   )
 
   const handleClarifyingAnswered = useCallback(() => {
+    trackTraceEvent(
+      'workspace_clarifying_answered',
+      { project_id: projectId },
+      { projectId: projectId || undefined }
+    )
     setPolling(true)
-  }, [setPolling])
+  }, [projectId, setPolling])
 
   const handleSignOut = useCallback(() => {
     clearAuthSession()

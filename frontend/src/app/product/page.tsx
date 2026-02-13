@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState } from 'react'
 import GoogleSignIn from '@/components/GoogleSignIn'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import WorkspaceShell from '@/components/workspace/WorkspaceShell'
+import { trackTraceEvent } from '@/lib/telemetry'
 import {
   AuthUser,
   clearAuthSession,
@@ -22,6 +23,7 @@ function ProductPageContent() {
     const initAuth = async () => {
       const token = getStoredAccessToken()
       if (!token) {
+        trackTraceEvent('auth_required_for_product', { path: '/product' })
         setAuthReady(true)
         return
       }
@@ -32,9 +34,11 @@ function ProductPageContent() {
       try {
         const me = await fetchCurrentUser()
         setAuthUser(me)
+        trackTraceEvent('auth_session_restored', { user_id: me.id }, { path: '/product' })
       } catch {
         clearAuthSession()
         setAuthUser(null)
+        trackTraceEvent('auth_session_invalidated', {}, { path: '/product', level: 'warn' })
       } finally {
         setAuthReady(true)
       }
@@ -73,7 +77,10 @@ function ProductPageContent() {
     )
   }
 
-  const handleSignOut = () => setAuthUser(null)
+  const handleSignOut = () => {
+    trackTraceEvent('auth_sign_out', { user_id: authUser.id }, { path: '/product' })
+    setAuthUser(null)
+  }
 
   return (
     <WorkspaceProvider authUser={authUser} onSignOut={handleSignOut}>

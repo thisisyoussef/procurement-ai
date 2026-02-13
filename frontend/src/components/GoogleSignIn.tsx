@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { AuthUser, setAuthSession } from '@/lib/auth'
+import { trackTraceEvent } from '@/lib/telemetry'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''
@@ -57,6 +58,7 @@ export default function GoogleSignIn({ onAuthenticated }: GoogleSignInProps) {
     const setup = async () => {
       if (!GOOGLE_CLIENT_ID) {
         setError('Google sign-in is not configured in frontend env')
+        trackTraceEvent('google_signin_not_configured', {}, { level: 'warn' })
         return
       }
 
@@ -70,6 +72,7 @@ export default function GoogleSignIn({ onAuthenticated }: GoogleSignInProps) {
             if (!response?.credential) return
             setIsLoading(true)
             setError(null)
+            trackTraceEvent('google_signin_token_received')
             try {
               const authRes = await fetch(`${API_BASE}/api/v1/auth/google`, {
                 method: 'POST',
@@ -83,8 +86,17 @@ export default function GoogleSignIn({ onAuthenticated }: GoogleSignInProps) {
 
               setAuthSession(payload.access_token, payload.user)
               onAuthenticated(payload.user as AuthUser)
+              trackTraceEvent('google_signin_success', {
+                user_id: payload?.user?.id,
+                email: payload?.user?.email,
+              })
             } catch (err: any) {
               setError(err?.message || 'Failed to sign in with Google')
+              trackTraceEvent(
+                'google_signin_error',
+                { detail: err?.message || 'unknown' },
+                { level: 'warn' }
+              )
             } finally {
               setIsLoading(false)
             }
@@ -102,6 +114,11 @@ export default function GoogleSignIn({ onAuthenticated }: GoogleSignInProps) {
       } catch (err: any) {
         if (!cancelled) {
           setError(err?.message || 'Failed to initialize Google sign-in')
+          trackTraceEvent(
+            'google_signin_init_error',
+            { detail: err?.message || 'unknown' },
+            { level: 'warn' }
+          )
         }
       }
     }
