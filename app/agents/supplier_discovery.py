@@ -939,6 +939,43 @@ async def discover_suppliers(
         emit_progress("discovering", "filtering",
                       f"Filtered {len(filtered_suppliers)} low-quality results (retail stores, irrelevant matches)")
 
+    # ── Step 6: Lightweight contact enrichment for top suppliers ─
+    # Run cheap enrichment (Tiers 1 & 2 only) for top suppliers missing
+    # emails. This ensures the top-20 sent to verification already have
+    # the best available contact info — suppliers without emails won't be
+    # unfairly deprioritized or skipped during outreach.
+    top_no_email = [
+        s for s in sorted(main_suppliers, key=lambda x: x.relevance_score, reverse=True)[:25]
+        if not s.email and s.website
+    ]
+    if top_no_email:
+        emit_progress(
+            "discovering", "enriching_contacts",
+            f"Enriching contacts for {len(top_no_email)} top suppliers missing email addresses..."
+        )
+        from app.agents.tools.contact_enricher import enrich_supplier_contacts
+
+        enrich_sem = asyncio.Semaphore(5)
+
+        async def _enrich_light(supplier: DiscoveredSupplier) -> None:
+            async with enrich_sem:
+                try:
+                    await enrich_supplier_contacts(supplier, aggressive=False)
+                except Exception:  # noqa: BLE001
+                    logger.debug("Lightweight enrichment failed for %s", supplier.name, exc_info=True)
+
+        await asyncio.gather(
+            *[_enrich_light(s) for s in top_no_email],
+            return_exceptions=True,
+        )
+        enriched_count = sum(1 for s in top_no_email if s.email)
+        logger.info("  Lightweight enrichment: %d/%d suppliers got emails", enriched_count, len(top_no_email))
+        if enriched_count:
+            emit_progress(
+                "discovering", "enrichment_done",
+                f"Found email addresses for {enriched_count}/{len(top_no_email)} suppliers"
+            )
+
     # ── Finalize ──────────────────────────────────────────────
     emit_progress("discovering", "complete",
                   f"Discovery complete: {len(main_suppliers)} suppliers from {len(sources_searched)} sources"
