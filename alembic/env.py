@@ -22,7 +22,19 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
+def _normalize_async_database_url(url: str) -> str:
+    normalized = (url or "").strip()
+    if normalized.startswith("postgres://"):
+        return "postgresql+asyncpg://" + normalized[len("postgres://") :]
+    if normalized.startswith("postgresql+psycopg2://"):
+        return "postgresql+asyncpg://" + normalized[len("postgresql+psycopg2://") :]
+    if normalized.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + normalized[len("postgresql://") :]
+    return normalized
+
+
+config.set_main_option("sqlalchemy.url", _normalize_async_database_url(settings.database_url))
 
 
 def run_migrations_offline() -> None:
