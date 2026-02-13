@@ -90,6 +90,7 @@ class QuoteParseRequest(BaseModel):
 class OutreachQuickApprovalRequest(BaseModel):
     approve: bool = True
     max_suppliers: int = Field(default=3, ge=1, le=10)
+    supplier_indices: list[int] | None = None
 
 
 class ClarifyingAnswerRequest(BaseModel):

@@ -297,9 +297,25 @@ def _get_selected_suppliers_for_quick_approval(
     discovery: DiscoveryResults,
     outreach: OutreachState,
     max_suppliers: int,
+    requested_indices: list[int] | None = None,
 ) -> tuple[list[int], list[DiscoveredSupplier]]:
     selected_indices: list[int] = []
     selected_suppliers: list[DiscoveredSupplier] = []
+
+    if requested_indices:
+        for idx in requested_indices:
+            if idx in outreach.excluded_suppliers:
+                continue
+            if not (0 <= idx < len(discovery.suppliers)):
+                continue
+            if idx in selected_indices:
+                continue
+            selected_indices.append(idx)
+            selected_suppliers.append(discovery.suppliers[idx])
+            if len(selected_indices) >= max_suppliers:
+                break
+        if selected_suppliers:
+            return selected_indices, selected_suppliers
 
     for rec in sorted(recs.recommendations, key=lambda r: r.rank):
         idx = rec.supplier_index
@@ -646,6 +662,7 @@ async def quick_outreach_approval(
         discovery=discovery,
         outreach=outreach,
         max_suppliers=request.max_suppliers,
+        requested_indices=request.supplier_indices,
     )
     if not selected_suppliers:
         raise HTTPException(status_code=400, detail="No eligible suppliers available for outreach")

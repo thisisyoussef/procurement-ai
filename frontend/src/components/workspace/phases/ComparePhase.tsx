@@ -1,17 +1,71 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { authFetch } from '@/lib/auth'
+import { trackTraceEvent } from '@/lib/telemetry'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 
-function ScoreBar({ score, label, compact }: { score: number; label: string; compact?: boolean }) {
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
+
+function normalizeStarScore(score: number): number {
+  if (!Number.isFinite(score)) return 0
+  if (score <= 5) return Math.min(5, Math.max(0, score))
+  return Math.min(5, Math.max(0, score / 20))
+}
+
+function getSupplierImageUrl(supplier: any): string | null {
+  if (!supplier) return null
+
+  const direct = [
+    supplier.image_url,
+    supplier.product_image_url,
+    supplier.thumbnail,
+    supplier.photo_url,
+    supplier.logo_url,
+  ]
+  for (const candidate of direct) {
+    if (typeof candidate === 'string' && candidate.startsWith('http')) return candidate
+  }
+
+  const raw = supplier.raw_data || {}
+  const rawCandidates = [
+    raw.image_url,
+    raw.product_image,
+    raw.product_image_url,
+    raw.thumbnail,
+    raw.thumbnail_url,
+    raw.logo,
+    raw.logo_url,
+  ]
+  for (const candidate of rawCandidates) {
+    if (typeof candidate === 'string' && candidate.startsWith('http')) return candidate
+  }
+
+  if (Array.isArray(raw.images)) {
+    const first = raw.images.find((value: unknown) => typeof value === 'string' && value.startsWith('http'))
+    if (typeof first === 'string') return first
+  }
+
+  if (Array.isArray(raw.image_urls)) {
+    const first = raw.image_urls.find((value: unknown) => typeof value === 'string' && value.startsWith('http'))
+    if (typeof first === 'string') return first
+  }
+
+  return null
+}
+
+function ScoreBar({ score, label }: { score: number; label: string }) {
+  const stars = normalizeStarScore(score)
+  const widthPct = (stars / 5) * 100
+
   return (
     <div>
       <div className="flex justify-between text-[10px] mb-1">
         <span className="text-ink-4">{label}</span>
-        <span className="font-medium text-ink-2">{Math.round(score)}</span>
+        <span className="font-medium text-ink-2">{stars.toFixed(1)}/5</span>
       </div>
       <div className="score-bar">
-        <div className="score-bar-fill" style={{ width: `${Math.min(score, 100)}%` }} />
+        <div className="score-bar-fill" style={{ width: `${widthPct}%` }} />
       </div>
     </div>
   )
@@ -27,12 +81,17 @@ function getInitials(name: string): string {
 }
 
 export default function ComparePhase() {
-  const { status, loading } = useWorkspace()
+  const { status, loading, projectId, setActivePhase, refreshStatus } = useWorkspace()
+  const [selectedSupplierIndices, setSelectedSupplierIndices] = useState<number[]>([])
+  const [approvalLoading, setApprovalLoading] = useState(false)
+  const [approvalError, setApprovalError] = useState<string | null>(null)
+  const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null)
 
   const comparison = status?.comparison_result
   const recommendation = status?.recommendation
   const suppliers = status?.discovery_results?.suppliers
   const verifications = status?.verification_results
+  const requirements = status?.parsed_requirements
 
   const verificationMap = useMemo(() => {
     const map = new Map<string, any>()
@@ -78,8 +137,251 @@ export default function ComparePhase() {
     ? [...comparison.comparisons].sort((a: any, b: any) => b.overall_score - a.overall_score)
     : []
 
+  const recommendationDefaults = useMemo(
+    () =>
+      (recommendation?.recommendations || [])
+        .slice(0, 3)
+        .map((rec: any) => rec.supplier_index)
+        .filter((idx: number) => Number.isInteger(idx)),
+    [recommendation?.recommendations]
+  )
+
+  useEffect(() => {
+    if (selectedSupplierIndices.length > 0) return
+    if (!recommendationDefaults.length) return
+    setSelectedSupplierIndices(recommendationDefaults)
+  }, [recommendationDefaults, selectedSupplierIndices.length])
+
+  const selectedSuppliers = useMemo(
+    () =>
+      selectedSupplierIndices
+        .map((idx) => ({
+          idx,
+          supplier: suppliers?.[idx],
+          comparison: sorted.find((row: any) => row.supplier_index === idx),
+        }))
+        .filter((row) => !!row.supplier),
+    [selectedSupplierIndices, sorted, suppliers]
+  )
+
+  const toggleSupplierSelection = useCallback((supplierIndex: number) => {
+    setSelectedSupplierIndices((prev) =>
+      prev.includes(supplierIndex)
+        ? prev.filter((idx) => idx !== supplierIndex)
+        : [...prev, supplierIndex]
+    )
+    setApprovalError(null)
+    setApprovalSuccess(null)
+  }, [])
+
+  const approveAndSendOutreach = useCallback(async () => {
+    if (!projectId) return
+    if (!selectedSupplierIndices.length) {
+      setApprovalError('Pick at least one supplier before approving outreach.')
+      return
+    }
+
+    setApprovalLoading(true)
+    setApprovalError(null)
+    setApprovalSuccess(null)
+    trackTraceEvent(
+      'compare_outreach_approval_attempt',
+      { project_id: projectId, supplier_indices: selectedSupplierIndices },
+      { projectId }
+    )
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/quick-approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          approve: true,
+          max_suppliers: Math.min(10, selectedSupplierIndices.length),
+          supplier_indices: selectedSupplierIndices,
+        }),
+      })
+
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try {
+          const payload = await res.json()
+          detail = payload.detail || JSON.stringify(payload)
+        } catch {
+          // Keep HTTP detail.
+        }
+        throw new Error(detail)
+      }
+
+      const payload = await res.json()
+      setApprovalSuccess(
+        `Outreach approved. Sent to ${payload?.sent_count ?? 0} supplier(s).`
+      )
+      trackTraceEvent(
+        'compare_outreach_approval_success',
+        {
+          project_id: projectId,
+          sent_count: payload?.sent_count,
+          failed_count: payload?.failed_count,
+          supplier_indices: selectedSupplierIndices,
+        },
+        { projectId }
+      )
+      refreshStatus()
+      setActivePhase('outreach')
+    } catch (err: any) {
+      setApprovalError(err?.message || 'Could not approve outreach.')
+      trackTraceEvent(
+        'compare_outreach_approval_error',
+        {
+          project_id: projectId,
+          supplier_indices: selectedSupplierIndices,
+          detail: err?.message || 'unknown',
+        },
+        { projectId, level: 'warn' }
+      )
+    } finally {
+      setApprovalLoading(false)
+    }
+  }, [projectId, refreshStatus, selectedSupplierIndices, setActivePhase])
+
+  const plainLanguagePreview = useMemo(() => {
+    const product = requirements?.product_type || 'your product'
+    const quantity = requirements?.quantity ? `${requirements.quantity} units` : 'your target quantity'
+    const budget = requirements?.budget_range || 'your budget target'
+    const location = requirements?.delivery_location || 'your delivery location'
+    const deadline = requirements?.deadline || 'your timeline'
+
+    return selectedSuppliers.map((row) => {
+      const supplierName = row.supplier?.name || `Supplier ${row.idx + 1}`
+      return `Tamkin will ask ${supplierName} for a quote on ${product}, around ${quantity}, within ${budget}, delivered to ${location} by ${deadline}. It will request MOQ, unit price, lead time, and sample readiness.`
+    })
+  }, [requirements, selectedSuppliers])
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-10">
+      {/* ── Compare → Outreach touchpoint ─────── */}
+      {recommendation && sorted.length > 0 && (
+        <div className="card p-6 space-y-5">
+          <div>
+            <h2 className="font-heading text-2xl text-ink mb-1">Approve outreach shortlist</h2>
+            <p className="text-[12px] text-ink-3">
+              Pick who Tamkin should contact next. You can add suppliers before outreach starts.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {sorted.slice(0, 8).map((supplierComp: any) => {
+              const idx = supplierComp.supplier_index
+              const selected = selectedSupplierIndices.includes(idx)
+              const supplier = suppliers?.[idx]
+              const verification = verificationMap.get(supplierComp.supplier_name)
+              const imageUrl = getSupplierImageUrl(supplier)
+
+              return (
+                <label
+                  key={idx}
+                  className={`rounded-xl border px-3 py-3 cursor-pointer transition-colors ${
+                    selected
+                      ? 'border-teal bg-teal/[0.05]'
+                      : 'border-surface-3 hover:border-surface-4'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleSupplierSelection(idx)}
+                      className="mt-1 accent-teal"
+                    />
+
+                    <div className="flex-1 min-w-0 space-y-2">
+                      {imageUrl ? (
+                        <div className="h-20 rounded-lg overflow-hidden border border-surface-3">
+                          <img
+                            src={imageUrl}
+                            alt={`${supplierComp.supplier_name} product`}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                      ) : null}
+
+                      <div>
+                        <p className="text-[12px] font-medium text-ink truncate">
+                          {supplierComp.supplier_name}
+                        </p>
+                        <p className="text-[10px] text-ink-4">
+                          {supplier?.city || supplier?.country
+                            ? `${supplier?.city || ''}${supplier?.city && supplier?.country ? ', ' : ''}${supplier?.country || ''}`
+                            : 'Location not listed'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 text-[10px] text-ink-4">
+                        {supplierComp.estimated_landed_cost ? (
+                          <span>Landed: {supplierComp.estimated_landed_cost}</span>
+                        ) : supplierComp.estimated_unit_price ? (
+                          <span>Unit: {supplierComp.estimated_unit_price}</span>
+                        ) : null}
+                        {supplierComp.lead_time ? <span>Lead: {supplierComp.lead_time}</span> : null}
+                        {verification?.risk_level ? (
+                          <span>
+                            Risk: <span className="text-ink-3">{verification.risk_level}</span>
+                          </span>
+                        ) : null}
+                        {verification?.composite_score != null ? (
+                          <span>
+                            Verified: <span className="text-ink-3">{Math.round(verification.composite_score)}/100</span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+
+          <div className="rounded-xl border border-surface-3 bg-surface-2/50 px-4 py-3">
+            <p className="text-[11px] font-semibold text-ink-2 mb-2">What will be sent (plain language)</p>
+            {plainLanguagePreview.length > 0 ? (
+              <div className="space-y-2">
+                {plainLanguagePreview.map((line, idx) => (
+                  <p key={`${selectedSupplierIndices[idx]}-preview`} className="text-[11px] text-ink-3">
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-ink-4">Select suppliers to preview outreach intent.</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => void approveAndSendOutreach()}
+              disabled={approvalLoading || selectedSupplierIndices.length === 0}
+              className="px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {approvalLoading ? 'Sending outreach…' : 'Approve and send outreach'}
+            </button>
+            <button
+              onClick={() => setActivePhase('outreach')}
+              className="px-4 py-2 border border-surface-3 text-ink-3 rounded-lg text-[12px] hover:bg-surface-2 transition-colors"
+            >
+              Review outreach phase
+            </button>
+          </div>
+
+          {approvalError ? (
+            <p className="text-[11px] text-red-600">{approvalError}</p>
+          ) : null}
+          {approvalSuccess ? (
+            <p className="text-[11px] text-teal">{approvalSuccess}</p>
+          ) : null}
+        </div>
+      )}
+
       {/* ── Editorial Supplier Cards ──────────── */}
       {comparison && sorted.length > 0 && (
         <div>
@@ -102,6 +404,8 @@ export default function ComparePhase() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {sorted.slice(0, 4).map((c: any, i: number) => {
               const isRecommended = i === 0
+              const supplier = suppliers?.[c.supplier_index]
+              const imageUrl = getSupplierImageUrl(supplier)
               return (
                 <div
                   key={i}
@@ -110,6 +414,17 @@ export default function ComparePhase() {
                   {isRecommended && (
                     <p className="text-[9px] font-bold text-teal tracking-[2px] uppercase mb-3">Recommended</p>
                   )}
+
+                  {imageUrl ? (
+                    <div className="mb-4 h-28 rounded-xl overflow-hidden border border-surface-3">
+                      <img
+                        src={imageUrl}
+                        alt={`${c.supplier_name} product`}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : null}
 
                   {/* Avatar + name */}
                   <div className="flex items-center gap-3 mb-4">
@@ -208,6 +523,7 @@ export default function ComparePhase() {
             {recommendation.recommendations.map((rec: any) => {
               const supplier = suppliers?.[rec.supplier_index]
               const comp = comparisonMap.get(rec.supplier_name)
+              const imageUrl = getSupplierImageUrl(supplier)
 
               return (
                 <div
@@ -241,6 +557,17 @@ export default function ComparePhase() {
                   <p className="mt-3 text-[12px] text-ink-3 leading-relaxed">
                     {rec.reasoning}
                   </p>
+
+                  {imageUrl ? (
+                    <div className="mt-3 h-24 rounded-lg overflow-hidden border border-surface-3">
+                      <img
+                        src={imageUrl}
+                        alt={`${rec.supplier_name} product`}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : null}
 
                   {/* Cost row */}
                   {comp && (comp.estimated_unit_price || comp.estimated_landed_cost) && (
