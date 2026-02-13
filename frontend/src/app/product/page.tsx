@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 import GoogleSignIn from '@/components/GoogleSignIn'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
@@ -16,6 +17,8 @@ import {
 } from '@/lib/auth'
 
 function ProductPageContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
 
@@ -46,6 +49,15 @@ function ProductPageContent() {
     initAuth()
   }, [])
 
+  useEffect(() => {
+    if (!authReady || !authUser) return
+    const projectId = searchParams.get('projectId')?.trim()
+    if (!projectId) {
+      trackTraceEvent('product_redirect_to_dashboard', {}, { path: '/product' })
+      router.replace('/dashboard')
+    }
+  }, [authReady, authUser, router, searchParams])
+
   if (!authReady) {
     return <main className="min-h-screen bg-cream" />
   }
@@ -75,6 +87,11 @@ function ProductPageContent() {
         </div>
       </main>
     )
+  }
+
+  const selectedProjectId = searchParams.get('projectId')?.trim()
+  if (!selectedProjectId) {
+    return <main className="min-h-screen bg-cream" />
   }
 
   const handleSignOut = () => {

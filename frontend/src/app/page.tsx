@@ -201,7 +201,7 @@ export default function HomePage() {
           <a href="#cases">Use Cases</a>
           <a href="#waitlist">Early Access</a>
           <Link
-            href="/product"
+            href="/dashboard"
             className="nav-cta"
             onClick={() => {
               void track('cta_start_sourcing_click', { location: 'nav' })
@@ -227,7 +227,7 @@ export default function HomePage() {
             </p>
             <div className="hero-ctas">
               <Link
-                href="/product"
+                href="/dashboard"
                 className="btn-d"
                 onClick={() => {
                   void track('cta_start_sourcing_click', { location: 'hero' })
@@ -504,13 +504,13 @@ export default function HomePage() {
 
           <div className="hero-ctas" style={{ justifyContent: 'center' }}>
             <Link
-              href="/product"
+              href="/dashboard"
               className="btn-g"
               onClick={() => {
                 void track('cta_start_sourcing_click', { location: 'final' })
               }}
             >
-              Go to product now
+              Open dashboard now
             </Link>
           </div>
 

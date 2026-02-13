@@ -48,6 +48,7 @@ from app.services.project_store import (
     get_legacy_project_dict,
     get_project_store,
 )
+from app.services.project_events import record_project_event
 from app.services.supplier_memory import (
     persist_discovered_suppliers,
     persist_verification_feedback,
@@ -70,6 +71,31 @@ ACTIVE_PIPELINE_STATUSES = {
     "recommending",
     "outreaching",
 }
+
+_STAGE_PHASE = {
+    "parsing": "brief",
+    "clarifying": "brief",
+    "discovering": "search",
+    "verifying": "search",
+    "comparing": "compare",
+    "recommending": "compare",
+    "outreaching": "outreach",
+    "complete": "order",
+    "failed": "brief",
+    "canceled": "brief",
+}
+
+
+def _stage_title(stage_name: str) -> str:
+    titles = {
+        "parsing": "Parsing requirements",
+        "discovering": "Searching suppliers",
+        "verifying": "Verifying suppliers",
+        "comparing": "Comparing options",
+        "recommending": "Generating recommendation",
+        "outreaching": "Running outreach",
+    }
+    return titles.get(stage_name, stage_name.replace("_", " ").title())
 
 
 async def _get_project_or_404(project_id: str) -> dict:
@@ -167,6 +193,16 @@ async def create_project(
         }
 
         await _create_project(project)
+        await record_project_event(
+            project,
+            event_type="project_created",
+            title="Project started",
+            description=f"Started sourcing workflow for {request.title}.",
+            priority="info",
+            phase="brief",
+            payload={"source": "product_form"},
+        )
+        await _save_project(project)
 
         # Run pipeline in background
         background_tasks.add_task(_run_pipeline_task, project_id, request.product_description)
@@ -261,6 +297,15 @@ async def _run_pipeline_task(project_id: str, description: str):
 
             project["current_stage"] = stage_name
             project["status"] = stage_name
+            await record_project_event(
+                project,
+                event_type="stage_started",
+                title=_stage_title(stage_name),
+                description=f"Tamkin started {stage_name.replace('_', ' ')}.",
+                priority="info",
+                phase=_STAGE_PHASE.get(stage_name),
+                payload={"stage": stage_name},
+            )
             await store.save_project(project)
 
             state = await step_fn(state)
@@ -285,10 +330,29 @@ async def _run_pipeline_task(project_id: str, description: str):
                 if persisted_discovery:
                     project["discovery_results"] = persisted_discovery
 
+            await record_project_event(
+                project,
+                event_type="stage_completed",
+                title=f"{_stage_title(stage_name)} complete",
+                description=f"Tamkin completed {stage_name.replace('_', ' ')}.",
+                priority="info",
+                phase=_STAGE_PHASE.get(stage_name),
+                payload={"stage": stage_name},
+            )
             await store.save_project(project)
 
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
+                await record_project_event(
+                    project,
+                    event_type="project_failed",
+                    title="Pipeline failed",
+                    description=state["error"][:300],
+                    priority="high",
+                    phase=_STAGE_PHASE.get(stage_name),
+                    payload={"stage": stage_name},
+                )
+                await store.save_project(project)
                 break
 
             if stage_name == "parsing":
@@ -298,6 +362,15 @@ async def _run_pipeline_task(project_id: str, description: str):
                     project["status"] = "clarifying"
                     project["current_stage"] = "clarifying"
                     project["clarifying_questions"] = questions
+                    await record_project_event(
+                        project,
+                        event_type="clarifying_required",
+                        title="Need a few clarifications",
+                        description=f"{len(questions)} clarification questions need answers.",
+                        priority="high",
+                        phase="brief",
+                        payload={"question_count": len(questions)},
+                    )
                     await store.save_project(project)
                     logger.info(
                         "Pipeline paused for %d clarifying questions (project %s)",
@@ -306,6 +379,15 @@ async def _run_pipeline_task(project_id: str, description: str):
                     )
                     return
 
+        await record_project_event(
+            project,
+            event_type="project_completed",
+            title="Pipeline complete",
+            description="Discovery, verification, and recommendation are ready.",
+            priority="info",
+            phase=_STAGE_PHASE.get(project.get("current_stage")),
+        )
+        await store.save_project(project)
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
     except Exception as e:  # noqa: BLE001
@@ -314,6 +396,14 @@ async def _run_pipeline_task(project_id: str, description: str):
         project["current_stage"] = "failed"
         project["error"] = f"{str(e)}\n{traceback.format_exc()}"
         try:
+            await record_project_event(
+                project,
+                event_type="project_failed",
+                title="Pipeline failed",
+                description=str(e),
+                priority="high",
+                phase="brief",
+            )
             await store.save_project(project)
         except Exception:
             logger.exception("Failed to persist pipeline failure state")
@@ -368,6 +458,15 @@ async def _resume_pipeline_task(project_id: str):
 
             project["current_stage"] = stage_name
             project["status"] = stage_name
+            await record_project_event(
+                project,
+                event_type="stage_started",
+                title=_stage_title(stage_name),
+                description=f"Tamkin resumed and started {stage_name.replace('_', ' ')}.",
+                priority="info",
+                phase=_STAGE_PHASE.get(stage_name),
+                payload={"stage": stage_name, "resume": True},
+            )
             await store.save_project(project)
 
             state = await step_fn(state)
@@ -392,12 +491,40 @@ async def _resume_pipeline_task(project_id: str):
                 if persisted_discovery:
                     project["discovery_results"] = persisted_discovery
 
+            await record_project_event(
+                project,
+                event_type="stage_completed",
+                title=f"{_stage_title(stage_name)} complete",
+                description=f"Tamkin completed {stage_name.replace('_', ' ')}.",
+                priority="info",
+                phase=_STAGE_PHASE.get(stage_name),
+                payload={"stage": stage_name, "resume": True},
+            )
             await store.save_project(project)
 
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
+                await record_project_event(
+                    project,
+                    event_type="project_failed",
+                    title="Pipeline failed",
+                    description=state["error"][:300],
+                    priority="high",
+                    phase=_STAGE_PHASE.get(stage_name),
+                    payload={"stage": stage_name},
+                )
+                await store.save_project(project)
                 break
 
+        await record_project_event(
+            project,
+            event_type="project_completed",
+            title="Pipeline complete",
+            description="Discovery, verification, and recommendation are ready.",
+            priority="info",
+            phase=_STAGE_PHASE.get(project.get("current_stage")),
+        )
+        await store.save_project(project)
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
     except Exception as e:  # noqa: BLE001
@@ -406,6 +533,14 @@ async def _resume_pipeline_task(project_id: str):
         project["current_stage"] = "failed"
         project["error"] = f"{str(e)}\n{traceback.format_exc()}"
         try:
+            await record_project_event(
+                project,
+                event_type="project_failed",
+                title="Pipeline failed",
+                description=str(e),
+                priority="high",
+                phase="brief",
+            )
             await store.save_project(project)
         except Exception:
             logger.exception("Failed to persist resumed pipeline failure state")
@@ -497,6 +632,14 @@ async def cancel_project(
             "progress_pct": None,
             "timestamp": time.time(),
         }
+    )
+    await record_project_event(
+        project,
+        event_type="project_canceled",
+        title="Run canceled",
+        description="You canceled this sourcing run.",
+        priority="medium",
+        phase="brief",
     )
 
     await _save_project(project)
@@ -618,6 +761,15 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
         project["clarifying_questions"] = None
         project["status"] = "discovering"
         project["current_stage"] = "discovering"
+        await record_project_event(
+            project,
+            event_type="clarifying_answered",
+            title="Clarifications received",
+            description=f"Integrated {len(request.answers)} answers and resumed search.",
+            priority="info",
+            phase="brief",
+            payload={"answer_count": len(request.answers)},
+        )
         await _save_project(project)
 
         background_tasks.add_task(_resume_pipeline_task, project_id)
@@ -666,6 +818,14 @@ async def skip_clarifying_questions(
     project["clarifying_questions"] = None
     project["status"] = "discovering"
     project["current_stage"] = "discovering"
+    await record_project_event(
+        project,
+        event_type="clarifying_skipped",
+        title="Clarifications skipped",
+        description="Skipped clarification questions and resumed search.",
+        priority="medium",
+        phase="brief",
+    )
     await _save_project(project)
 
     background_tasks.add_task(_resume_pipeline_task, project_id)

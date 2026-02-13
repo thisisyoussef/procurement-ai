@@ -37,6 +37,7 @@ from app.services.supplier_memory import (
     record_supplier_interaction,
     record_supplier_interactions,
 )
+from app.services.project_events import record_project_event
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +443,15 @@ async def start_outreach(
             source="outreach",
             details={"entrypoint": "manual_start"},
         )
+        await record_project_event(
+            project,
+            event_type="outreach_drafted",
+            title="Outreach drafts ready",
+            description=f"Drafted outreach for {len(selected_indices)} supplier(s).",
+            priority="info",
+            phase="outreach",
+            payload={"selected_count": len(selected_indices), "entrypoint": "manual_start"},
+        )
 
         await _save_project(project)
         return {"drafts": [d.model_dump() for d in result.drafts], "summary": result.summary}
@@ -472,6 +482,14 @@ async def quick_outreach_approval(
         outreach.quick_approval_decision = "declined"
         _append_event(outreach, "quick_outreach_declined")
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_project_event(
+            project,
+            event_type="outreach_declined",
+            title="Outreach skipped",
+            description="You declined outreach for now.",
+            priority="medium",
+            phase="outreach",
+        )
         await _save_project(project)
         return {"status": "declined"}
 
@@ -508,6 +526,18 @@ async def quick_outreach_approval(
     )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+    await record_project_event(
+        project,
+        event_type="outreach_sent",
+        title="Outreach sent",
+        description=(
+            f"Sent outreach to {batch_result['sent_count']} supplier(s); "
+            f"{batch_result['failed_count']} failed."
+        ),
+        priority="info",
+        phase="outreach",
+        payload=batch_result,
+    )
     await _save_project(project)
 
     return {
@@ -568,6 +598,15 @@ async def approve_and_send(
             source="outreach",
             details={"reason": "missing_email"},
         )
+        await record_project_event(
+            project,
+            event_type="outreach_send_failed",
+            title="Outreach send failed",
+            description=f"No email found for {draft.supplier_name}.",
+            priority="high",
+            phase="outreach",
+            payload={"supplier_index": draft.supplier_index, "reason": "missing_email"},
+        )
         project["outreach_state"] = outreach.model_dump(mode="json")
         await _save_project(project)
         return {"sent": False, "error": f"No email address found for {draft.supplier_name}. You'll need to provide one."}
@@ -591,6 +630,15 @@ async def approve_and_send(
             source="outreach",
             details={"email_id": email_id, "recipient": recipient},
         )
+        await record_project_event(
+            project,
+            event_type="outreach_email_sent",
+            title="Outreach email sent",
+            description=f"Sent outreach to {draft.supplier_name}.",
+            priority="info",
+            phase="outreach",
+            payload={"supplier_index": draft.supplier_index, "email_id": email_id},
+        )
     else:
         draft.status = "failed"
         supplier_status.email_sent = False
@@ -603,6 +651,15 @@ async def approve_and_send(
             interaction_type="rfq_send_failed",
             source="outreach",
             details={"reason": result.get("error", "unknown"), "recipient": recipient},
+        )
+        await record_project_event(
+            project,
+            event_type="outreach_send_failed",
+            title="Outreach send failed",
+            description=f"Send failed for {draft.supplier_name}: {result.get('error', 'unknown')}",
+            priority="high",
+            phase="outreach",
+            payload={"supplier_index": draft.supplier_index, "reason": result.get("error", "unknown")},
         )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
@@ -669,6 +726,18 @@ async def parse_response(
                     or "Supplier indicated they cannot fulfill this request",
                 },
             )
+            await record_project_event(
+                project,
+                event_type="supplier_excluded",
+                title="Supplier removed",
+                description=(
+                    f"{supplier.name} was removed: "
+                    f"{quote.fulfillment_note or 'Cannot fulfill request'}"
+                ),
+                priority="high",
+                phase="outreach",
+                payload={"supplier_index": request.supplier_index},
+            )
 
         _append_event(
             outreach,
@@ -688,6 +757,18 @@ async def parse_response(
                 "currency": quote.currency,
                 "moq": quote.moq,
                 "lead_time": quote.lead_time,
+            },
+        )
+        await record_project_event(
+            project,
+            event_type="quote_parsed",
+            title="Supplier quote parsed",
+            description=f"Parsed quote from {supplier.name}.",
+            priority="info",
+            phase="compare",
+            payload={
+                "supplier_index": request.supplier_index,
+                "confidence_score": quote.confidence_score,
             },
         )
 
@@ -718,6 +799,15 @@ async def generate_follow_up_emails(
         outreach.follow_up_emails.extend(result.follow_ups)
         _append_event(outreach, "followup_drafted", count=len(result.follow_ups))
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_project_event(
+            project,
+            event_type="followups_drafted",
+            title="Follow-up drafts ready",
+            description=f"Generated {len(result.follow_ups)} follow-up draft(s).",
+            priority="info",
+            phase="outreach",
+            payload={"count": len(result.follow_ups)},
+        )
         await _save_project(project)
 
         return {"follow_ups": [fu.model_dump() for fu in result.follow_ups], "summary": result.summary}
@@ -758,6 +848,15 @@ async def send_follow_up(
             source="outreach",
             details={"reason": "missing_email"},
         )
+        await record_project_event(
+            project,
+            event_type="followup_send_failed",
+            title="Follow-up failed",
+            description=f"No email found for {fu.supplier_name}.",
+            priority="high",
+            phase="outreach",
+            payload={"supplier_index": fu.supplier_index},
+        )
         project["outreach_state"] = outreach.model_dump(mode="json")
         await _save_project(project)
         return {"sent": False, "error": f"No email for {fu.supplier_name}"}
@@ -779,6 +878,15 @@ async def send_follow_up(
             source="outreach",
             details={"recipient": recipient, "follow_up_number": fu.follow_up_number},
         )
+        await record_project_event(
+            project,
+            event_type="followup_sent",
+            title="Follow-up sent",
+            description=f"Sent follow-up #{fu.follow_up_number} to {fu.supplier_name}.",
+            priority="info",
+            phase="outreach",
+            payload={"supplier_index": fu.supplier_index, "follow_up_number": fu.follow_up_number},
+        )
     else:
         fu.status = "failed"
         _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason=result.get("error", "unknown"))
@@ -788,6 +896,17 @@ async def send_follow_up(
             interaction_type="followup_send_failed",
             source="outreach",
             details={"reason": result.get("error", "unknown"), "recipient": recipient},
+        )
+        await record_project_event(
+            project,
+            event_type="followup_send_failed",
+            title="Follow-up failed",
+            description=(
+                f"Follow-up send failed for {fu.supplier_name}: {result.get('error', 'unknown')}"
+            ),
+            priority="high",
+            phase="outreach",
+            payload={"supplier_index": fu.supplier_index, "reason": result.get("error", "unknown")},
         )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
@@ -894,6 +1013,15 @@ async def recompare_with_quotes(
 
         _append_event(outreach, "recompare_completed", quote_count=len(outreach.parsed_quotes))
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_project_event(
+            project,
+            event_type="recompare_completed",
+            title="Comparison refreshed with real quotes",
+            description=f"Updated comparison using {len(outreach.parsed_quotes)} parsed quote(s).",
+            priority="info",
+            phase="compare",
+            payload={"quote_count": len(outreach.parsed_quotes)},
+        )
         await _save_project(project)
 
         return {"status": "success", "message": f"Re-compared with {len(outreach.parsed_quotes)} real quotes"}
@@ -1128,6 +1256,18 @@ async def start_auto_outreach(
             },
         )
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await record_project_event(
+            project,
+            event_type="auto_outreach_sent",
+            title="Auto outreach executed",
+            description=(
+                f"Auto mode selected {batch_result['selected_count']} supplier(s): "
+                f"{batch_result['sent_count']} sent, {batch_result['failed_count']} failed."
+            ),
+            priority="info",
+            phase="outreach",
+            payload=batch_result,
+        )
         await _save_project(project)
 
         return {
