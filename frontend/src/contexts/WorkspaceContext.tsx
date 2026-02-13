@@ -267,8 +267,10 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
 
       if (normalized) {
         params.set('projectId', normalized)
+        params.delete('new')
       } else {
         params.delete('projectId')
+        params.set('new', '1')
       }
 
       lastHandledUrlProjectRef.current = normalized

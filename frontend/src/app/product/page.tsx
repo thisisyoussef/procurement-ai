@@ -52,7 +52,8 @@ function ProductPageContent() {
   useEffect(() => {
     if (!authReady || !authUser) return
     const projectId = searchParams.get('projectId')?.trim()
-    if (!projectId) {
+    const isNewView = searchParams.get('new') === '1'
+    if (!projectId && !isNewView) {
       trackTraceEvent('product_redirect_to_dashboard', {}, { path: '/product' })
       router.replace('/dashboard')
     }
@@ -90,7 +91,8 @@ function ProductPageContent() {
   }
 
   const selectedProjectId = searchParams.get('projectId')?.trim()
-  if (!selectedProjectId) {
+  const isNewView = searchParams.get('new') === '1'
+  if (!selectedProjectId && !isNewView) {
     return <main className="min-h-screen bg-cream" />
   }
 

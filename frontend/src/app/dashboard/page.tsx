@@ -54,11 +54,6 @@ function DashboardPageContent() {
   const [contactsError, setContactsError] = useState<string | null>(null)
 
   const [tab, setTab] = useState<TabKey>('home')
-  const [showNewModal, setShowNewModal] = useState(false)
-  const [newTitle, setNewTitle] = useState('')
-  const [newDescription, setNewDescription] = useState('')
-  const [creatingProject, setCreatingProject] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
 
   useEffect(() => {
     const initAuth = async () => {
@@ -156,24 +151,9 @@ function DashboardPageContent() {
     trackTraceEvent('dashboard_tab_change', { tab: nextTab }, { path: '/dashboard' })
   }
 
-  const createProject = async () => {
-    if (!newDescription.trim() || creatingProject) return
-    setCreatingProject(true)
-    setCreateError(null)
-    try {
-      const result = await dashboardClient.startProject({
-        title: newTitle.trim() || undefined,
-        description: newDescription.trim(),
-        source: 'dashboard_new',
-      })
-      trackTraceEvent('dashboard_project_created', { project_id: result.project_id }, { path: '/dashboard' })
-      router.push(result.redirect_path)
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      setCreateError(detail)
-    } finally {
-      setCreatingProject(false)
-    }
+  const goToNewProjectView = () => {
+    trackTraceEvent('dashboard_new_project_view_open', {}, { path: '/dashboard' })
+    router.push('/product?new=1')
   }
 
   const firstLetter = useMemo(
@@ -224,7 +204,7 @@ function DashboardPageContent() {
         </div>
 
         <div className="dash-nav-right">
-          <button type="button" className="dash-new-btn" onClick={() => setShowNewModal(true)}>New project</button>
+          <button type="button" className="dash-new-btn" onClick={goToNewProjectView}>New project</button>
           <button type="button" className="dash-av" onClick={handleSignOut} title="Sign out">{firstLetter}</button>
         </div>
       </nav>
@@ -313,7 +293,7 @@ function DashboardPageContent() {
                 </button>
               ))}
 
-              <button type="button" className="dash-proj-card empty" onClick={() => setShowNewModal(true)}>
+              <button type="button" className="dash-proj-card empty" onClick={goToNewProjectView}>
                 <div className="dash-proj-empty-inner">
                   <div className="dash-proj-empty-icon">+</div>
                   <div className="dash-proj-empty-t">Start a new project</div>
@@ -376,38 +356,6 @@ function DashboardPageContent() {
         )}
       </main>
 
-      {showNewModal && (
-        <div className="dash-modal-backdrop" onClick={() => setShowNewModal(false)}>
-          <div className="dash-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="dash-modal-title">Start a new project</div>
-            <div className="dash-modal-sub">Describe what you need made. Tamkin will run discovery, verification, and outreach.</div>
-            <input
-              className="dash-input"
-              placeholder="Project title (optional)"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              disabled={creatingProject}
-            />
-            <div style={{ height: 10 }} />
-            <textarea
-              className="dash-textarea"
-              placeholder="Need 500 embroidered hoodies, budget $15-20, delivery to Los Angeles in 6 weeks."
-              value={newDescription}
-              onChange={(e) => setNewDescription(e.target.value)}
-              disabled={creatingProject}
-            />
-            {createError ? <div className="dash-error">{createError}</div> : null}
-            <div className="dash-modal-actions">
-              <button type="button" className="dash-btn-muted" onClick={() => setShowNewModal(false)} disabled={creatingProject}>
-                Cancel
-              </button>
-              <button type="button" className="dash-new-btn" onClick={createProject} disabled={creatingProject || !newDescription.trim()}>
-                {creatingProject ? 'Starting...' : 'Start project'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
