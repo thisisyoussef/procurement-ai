@@ -28,6 +28,7 @@ project_status = postgresql.ENUM(
     "COMPLETED",
     "FAILED",
     name="projectstatus",
+    create_type=False,
 )
 
 
