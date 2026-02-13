@@ -18,11 +18,14 @@ from app.agents.requirements_parser import parse_requirements
 from app.agents.supplier_discovery import discover_suppliers
 from app.agents.supplier_verifier import verify_suppliers
 from app.schemas.agent_state import (
+    AutoOutreachConfig,
     ComparisonResult,
     DiscoveryResults,
+    OutreachState,
     ParsedRequirements,
     PipelineStage,
     RecommendationResult,
+    SupplierOutreachStatus,
     VerificationResults,
 )
 
@@ -42,10 +45,14 @@ class GraphState(TypedDict, total=False):
     verification_results: dict | None
     comparison_result: dict | None
     recommendation_result: dict | None
+    outreach_result: dict | None
 
     # Progress & clarifying questions
     progress_events: list[dict]
     user_answers: dict | None
+
+    # Auto-outreach flag — when True, pipeline auto-drafts and queues RFQ emails
+    auto_outreach_enabled: bool
 
 
 # ── Graph Nodes ──────────────────────────────────────────────────
@@ -177,6 +184,87 @@ async def recommend_node(state: GraphState) -> GraphState:
         }
 
 
+async def outreach_node(state: GraphState) -> GraphState:
+    """Node F: Auto-draft and queue outreach emails for top recommended suppliers."""
+    logger.info("═══ STAGE 6/6: AUTONOMOUS OUTREACH ═══")
+    try:
+        from app.agents.outreach_agent import draft_outreach_emails
+
+        requirements = ParsedRequirements(**state["parsed_requirements"])
+        discovery = DiscoveryResults(**state["discovery_results"])
+        recommendations = RecommendationResult(**state["recommendation_result"])
+        verifications = VerificationResults(**state["verification_results"])
+
+        # Select top recommended suppliers that have email addresses
+        rec_indices = {r.supplier_index for r in recommendations.recommendations}
+        selected = []
+        selected_indices = []
+        for rec in recommendations.recommendations[:5]:  # Top 5
+            idx = rec.supplier_index
+            if idx < len(discovery.suppliers):
+                supplier = discovery.suppliers[idx]
+                if supplier.email:  # Only suppliers with known emails
+                    selected.append(supplier)
+                    selected_indices.append(idx)
+
+        if not selected:
+            logger.warning("No recommended suppliers have email addresses — skipping outreach")
+            return {
+                **state,
+                "current_stage": PipelineStage.COMPLETE.value,
+                "outreach_result": {"skipped": True, "reason": "no_emails"},
+                "error": None,
+            }
+
+        # Draft emails
+        result = await draft_outreach_emails(selected, requirements, recommendations)
+
+        # Mark all drafts as auto_queued (the scheduler will send them)
+        for draft in result.drafts:
+            draft.status = "auto_queued"
+
+        # Build outreach state
+        supplier_statuses = [
+            SupplierOutreachStatus(
+                supplier_name=s.name,
+                supplier_index=idx,
+            )
+            for idx, s in zip(selected_indices, selected)
+        ]
+
+        outreach = OutreachState(
+            selected_suppliers=selected_indices,
+            supplier_statuses=supplier_statuses,
+            draft_emails=result.drafts,
+            auto_config=AutoOutreachConfig(
+                mode="auto",
+                auto_send_threshold=60.0,
+                max_concurrent_outreach=5,
+            ),
+        )
+
+        logger.info(
+            "═══ OUTREACH COMPLETE: %d emails auto-queued ═══",
+            len(result.drafts),
+        )
+        return {
+            **state,
+            "current_stage": PipelineStage.COMPLETE.value,
+            "outreach_result": outreach.model_dump(mode="json"),
+            "error": None,
+        }
+
+    except Exception as e:
+        logger.error("Outreach stage failed (non-fatal): %s", str(e))
+        # Non-fatal: pipeline is still complete even if outreach drafting fails
+        return {
+            **state,
+            "current_stage": PipelineStage.COMPLETE.value,
+            "outreach_result": {"error": str(e)},
+            "error": None,
+        }
+
+
 # ── Conditional Edges ────────────────────────────────────────────
 
 def should_continue(state: GraphState) -> str:
@@ -189,10 +277,20 @@ def should_continue(state: GraphState) -> str:
         PipelineStage.VERIFYING.value: "verify",
         PipelineStage.COMPARING.value: "compare",
         PipelineStage.RECOMMENDING.value: "recommend",
+        PipelineStage.OUTREACHING.value: "outreach",
         PipelineStage.COMPLETE.value: "end",
         PipelineStage.FAILED.value: "end",
     }
     return stage_to_next.get(stage, "end")
+
+
+def should_continue_after_recommend(state: GraphState) -> str:
+    """After recommend: route to outreach if auto_outreach_enabled, else end."""
+    if state.get("error"):
+        return "end"
+    if state.get("auto_outreach_enabled"):
+        return "outreach"
+    return "end"
 
 
 # ── Build the Graph ──────────────────────────────────────────────
@@ -215,6 +313,7 @@ def build_pipeline_graph():
         graph.add_node("verify", verify_node)
         graph.add_node("compare", compare_node)
         graph.add_node("recommend", recommend_node)
+        graph.add_node("outreach", outreach_node)
 
         # Set entry point
         graph.set_entry_point("parse")
@@ -236,7 +335,12 @@ def build_pipeline_graph():
             "recommend": "recommend",
             "end": END,
         })
-        graph.add_edge("recommend", END)
+        # After recommend: conditionally route to outreach or end
+        graph.add_conditional_edges("recommend", should_continue_after_recommend, {
+            "outreach": "outreach",
+            "end": END,
+        })
+        graph.add_edge("outreach", END)
 
         return graph.compile()
 
@@ -245,7 +349,10 @@ def build_pipeline_graph():
         return None
 
 
-async def run_pipeline_sequential(raw_description: str) -> GraphState:
+async def run_pipeline_sequential(
+    raw_description: str,
+    auto_outreach: bool = False,
+) -> GraphState:
     """
     Fallback: run the pipeline sequentially without LangGraph.
     Used when LangGraph is not installed or for simpler deployments.
@@ -260,8 +367,10 @@ async def run_pipeline_sequential(raw_description: str) -> GraphState:
         "verification_results": None,
         "comparison_result": None,
         "recommendation_result": None,
+        "outreach_result": None,
         "progress_events": [],
         "user_answers": None,
+        "auto_outreach_enabled": auto_outreach,
     }
 
     steps = [parse_node, discover_node, verify_node, compare_node, recommend_node]
@@ -270,6 +379,10 @@ async def run_pipeline_sequential(raw_description: str) -> GraphState:
         state = await step(state)
         if state.get("error"):
             break
+
+    # Run outreach if enabled and pipeline succeeded
+    if not state.get("error") and auto_outreach:
+        state = await outreach_node(state)
 
     return state
 
@@ -335,13 +448,20 @@ async def rerun_from_stage(
     return state
 
 
-async def run_pipeline(raw_description: str) -> GraphState:
+async def run_pipeline(
+    raw_description: str,
+    auto_outreach: bool = False,
+) -> GraphState:
     """
     Run the full procurement pipeline.
 
     Tries LangGraph first, falls back to sequential execution.
+
+    Args:
+        raw_description: Natural-language product/supplier requirements.
+        auto_outreach: If True, auto-draft and queue outreach emails after recommendations.
     """
-    logger.info("🚀 Pipeline started for: '%s'", raw_description[:80])
+    logger.info("Pipeline started for: '%s' (auto_outreach=%s)", raw_description[:80], auto_outreach)
     graph = build_pipeline_graph()
 
     initial_state: GraphState = {
@@ -353,8 +473,10 @@ async def run_pipeline(raw_description: str) -> GraphState:
         "verification_results": None,
         "comparison_result": None,
         "recommendation_result": None,
+        "outreach_result": None,
         "progress_events": [],
         "user_answers": None,
+        "auto_outreach_enabled": auto_outreach,
     }
 
     if graph is not None:
@@ -365,4 +487,4 @@ async def run_pipeline(raw_description: str) -> GraphState:
         except Exception as e:
             logger.info("Falling back to sequential pipeline")
 
-    return await run_pipeline_sequential(raw_description)
+    return await run_pipeline_sequential(raw_description, auto_outreach=auto_outreach)

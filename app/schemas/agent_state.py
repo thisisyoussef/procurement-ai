@@ -44,6 +44,17 @@ class ProgressEvent(BaseModel):
     timestamp: float = Field(default_factory=time.time)
 
 
+class ContactEnrichmentResult(BaseModel):
+    """Tracks contact enrichment attempts and results for a supplier."""
+    sources_tried: list[str] = Field(default_factory=list)
+    sources_succeeded: list[str] = Field(default_factory=list)
+    emails_found: list[str] = Field(default_factory=list)
+    phones_found: list[str] = Field(default_factory=list)
+    best_email: str | None = None
+    best_phone: str | None = None
+    enrichment_confidence: float = 0.0  # 0-100
+
+
 class IntermediaryDetection(BaseModel):
     """Result of intermediary/directory detection for a discovered supplier."""
     is_intermediary: bool = False
@@ -175,6 +186,7 @@ class DiscoveredSupplier(BaseModel):
     intermediary_detection: IntermediaryDetection | None = None
     original_source_url: str | None = None
     language_discovered: str | None = None
+    enrichment: ContactEnrichmentResult | None = None
     filtered_reason: str | None = Field(
         None,
         description="If set, supplier was filtered from main results. "
@@ -291,6 +303,7 @@ class PipelineStage(str, Enum):
     VERIFYING = "verifying"
     COMPARING = "comparing"
     RECOMMENDING = "recommending"
+    OUTREACHING = "outreaching"
     COMPLETE = "complete"
     FAILED = "failed"
 
@@ -400,6 +413,24 @@ class QuoteParseResult(BaseModel):
     """Output from the Response Parser Agent."""
     quotes: list[ParsedQuote] = Field(default_factory=list)
     parsing_notes: str = ""
+
+
+# ── Negotiation output ────────────────────────────────────────
+
+class NegotiationResponse(BaseModel):
+    """AI-generated negotiation response to a supplier's quote."""
+    supplier_name: str
+    supplier_index: int
+    action: str  # "accept", "clarify", "counter", "reject"
+    reasoning: str = ""
+    draft_email: DraftEmail | None = None
+    confidence: float = 0.0  # 0-100
+
+
+class NegotiationResult(BaseModel):
+    """Output from the Negotiation Agent."""
+    responses: list[NegotiationResponse] = Field(default_factory=list)
+    summary: str = ""
 
 
 # ── Outreach tracking state ───────────────────────────────────

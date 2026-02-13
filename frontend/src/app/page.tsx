@@ -94,7 +94,7 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [polling, projectId, pollStatus])
 
-  const handleSearch = async (description: string) => {
+  const handleSearch = async (description: string, autoOutreach?: boolean) => {
     setLoading(true)
     setStatus(null)
     setErrorMessage(null)
@@ -106,6 +106,7 @@ export default function Home() {
         body: JSON.stringify({
           title: description.slice(0, 80),
           product_description: description,
+          auto_outreach: autoOutreach || false,
         }),
       })
 

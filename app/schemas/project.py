@@ -20,6 +20,10 @@ from app.schemas.agent_state import (
 class ProjectCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     product_description: str = Field(min_length=10, max_length=5000)
+    auto_outreach: bool = Field(
+        default=False,
+        description="If True, automatically draft and send outreach emails after recommendations",
+    )
 
 
 class ProjectResponse(BaseModel):

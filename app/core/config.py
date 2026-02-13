@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     # Firecrawl
     firecrawl_api_key: str = ""
 
+    # Hunter.io (contact enrichment)
+    hunter_api_key: str = ""
+
+    # Browserless (website screenshots)
+    browserless_api_key: str = ""
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
