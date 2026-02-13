@@ -32,7 +32,22 @@ project_status = postgresql.ENUM(
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    vector_available = True
+    try:
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    except Exception as exc:
+        # Managed Postgres hosts may not have pgvector installed.
+        # Keep baseline migration non-blocking by falling back to JSONB storage.
+        message = str(exc).lower()
+        if "extension \"vector\" is not available" in message or "vector.control" in message:
+            vector_available = False
+        else:
+            raise
+
+    embedding_type = (
+        Vector(1536) if vector_available else postgresql.JSONB(astext_type=sa.Text())
+    )
+
     project_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
@@ -69,7 +84,7 @@ def upgrade() -> None:
         sa.Column("google_rating", sa.Float(), nullable=True),
         sa.Column("google_review_count", sa.Integer(), nullable=True),
         sa.Column("is_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("embedding", Vector(1536), nullable=True),
+        sa.Column("embedding", embedding_type, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
