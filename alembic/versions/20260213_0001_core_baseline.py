@@ -32,20 +32,32 @@ project_status = postgresql.ENUM(
 
 
 def upgrade() -> None:
-    vector_available = True
-    try:
-        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    except Exception as exc:
-        # Managed Postgres hosts may not have pgvector installed.
-        # Keep baseline migration non-blocking by falling back to JSONB storage.
-        message = str(exc).lower()
-        if "extension \"vector\" is not available" in message or "vector.control" in message:
+    bind = op.get_bind()
+    vector_available = bool(
+        bind.execute(
+            sa.text(
+                "SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector')"
+            )
+        ).scalar()
+    )
+
+    if vector_available:
+        # Execute extension creation in autocommit mode so failures don't poison
+        # Alembic's migration transaction.
+        try:
+            with op.get_context().autocommit_block():
+                op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        except Exception:
             vector_available = False
-        else:
-            raise
+
+    vector_installed = bool(
+        bind.execute(
+            sa.text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+        ).scalar()
+    )
 
     embedding_type = (
-        Vector(1536) if vector_available else postgresql.JSONB(astext_type=sa.Text())
+        Vector(1536) if vector_installed else postgresql.JSONB(astext_type=sa.Text())
     )
 
     project_status.create(op.get_bind(), checkfirst=True)
