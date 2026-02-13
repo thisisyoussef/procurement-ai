@@ -9,55 +9,49 @@ import {
   useMemo,
   ReactNode,
 } from 'react'
-import { useSearchParams } from 'next/navigation'
-import {
-  AuthUser,
-  authFetch,
-  clearAuthSession,
-  getStoredAccessToken,
-} from '@/lib/auth'
-import {
-  Phase,
-  PipelineStatus,
-  stageToPhase,
-  phaseIndex,
-} from '@/types/pipeline'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { AuthUser, authFetch, clearAuthSession } from '@/lib/auth'
+import { Phase, PipelineStatus, stageToPhase, phaseIndex } from '@/types/pipeline'
 import { usePipelinePolling } from '@/hooks/usePipelinePolling'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
-// ─── Context Type ───────────────────────────────────────
+export interface WorkspaceProjectSummary {
+  id: string
+  title: string
+  status: string
+  current_stage: string
+}
 
 interface WorkspaceContextValue {
-  // Auth
   authUser: AuthUser
   handleSignOut: () => void
 
-  // Project
   projectId: string | null
   setProjectId: (id: string | null) => void
+  projectList: WorkspaceProjectSummary[]
+  projectListLoading: boolean
 
-  // Pipeline
   status: PipelineStatus | null
   loading: boolean
   polling: boolean
 
-  // Phase navigation
   activePhase: Phase
   setActivePhase: (phase: Phase) => void
   highestReachedPhase: Phase
 
-  // Backend health
   backendOk: boolean | null
 
-  // Error
   errorMessage: string | null
   setErrorMessage: (msg: string | null) => void
 
-  // Actions
   handleSearch: (description: string) => Promise<void>
+  startNewProject: () => void
+  openProject: (id: string) => void
+  cancelCurrentProject: () => Promise<boolean>
   handleClarifyingAnswered: () => void
   refreshStatus: () => void
+  refreshProjectList: () => Promise<void>
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -67,8 +61,6 @@ export function useWorkspace(): WorkspaceContextValue {
   if (!ctx) throw new Error('useWorkspace must be used within WorkspaceProvider')
   return ctx
 }
-
-// ─── Provider ───────────────────────────────────────────
 
 interface WorkspaceProviderProps {
   authUser: AuthUser
@@ -81,9 +73,13 @@ export function WorkspaceProvider({
   onSignOut,
   children,
 }: WorkspaceProviderProps) {
+  const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
 
   const [projectId, setProjectId] = useState<string | null>(null)
+  const [projectList, setProjectList] = useState<WorkspaceProjectSummary[]>([])
+  const [projectListLoading, setProjectListLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [backendOk, setBackendOk] = useState<boolean | null>(null)
   const [activePhase, setActivePhase] = useState<Phase>('brief')
@@ -99,20 +95,149 @@ export function WorkspaceProvider({
     onUnauthorized: handleUnauthorized,
   })
 
-  const { status, loading, polling, startPolling, refreshStatus, pollStatus } =
-    pipeline
+  const {
+    status,
+    loading,
+    polling,
+    refreshStatus,
+    setStatus,
+    setLoading,
+    setPolling,
+    stopPolling,
+  } = pipeline
 
-  // Pick up projectId from URL params
-  useEffect(() => {
-    const initialProjectId = searchParams.get('projectId')
-    if (initialProjectId) {
-      setProjectId(initialProjectId)
-      pipeline.setLoading(true)
-      pipeline.setPolling(true)
+  const resetWorkspace = useCallback(() => {
+    setProjectId(null)
+    setStatus(null)
+    setErrorMessage(null)
+    setActivePhase('brief')
+    setHighestReachedPhase('brief')
+    setUserOverridePhase(false)
+    stopPolling()
+  }, [setStatus, stopPolling])
+
+  const refreshProjectList = useCallback(async () => {
+    setProjectListLoading(true)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects`)
+      if (res.status === 401) {
+        handleUnauthorized()
+        return
+      }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const data = (await res.json()) as WorkspaceProjectSummary[]
+      setProjectList(data)
+    } catch (err) {
+      console.error('Project list error:', err)
+    } finally {
+      setProjectListLoading(false)
     }
-  }, [searchParams])
+  }, [handleUnauthorized])
 
-  // Backend health check
+  const openProject = useCallback(
+    (id: string) => {
+      if (!id || id === projectId) return
+      setProjectId(id)
+      setStatus(null)
+      setErrorMessage(null)
+      setLoading(true)
+      setPolling(true)
+    },
+    [projectId, setLoading, setPolling, setStatus]
+  )
+
+  const startNewProject = useCallback(() => {
+    resetWorkspace()
+  }, [resetWorkspace])
+
+  const cancelCurrentProject = useCallback(async (): Promise<boolean> => {
+    if (!projectId) return false
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/cancel`, {
+        method: 'POST',
+      })
+      if (res.status === 401) {
+        handleUnauthorized()
+        return false
+      }
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try {
+          const payload = await res.json()
+          detail = payload.detail || JSON.stringify(payload)
+        } catch {
+          // Ignore payload parse failures and keep HTTP detail.
+        }
+        throw new Error(detail)
+      }
+
+      setStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'canceled',
+              current_stage: 'canceled',
+              error: prev.error || 'Canceled by user',
+            }
+          : prev
+      )
+      setLoading(false)
+      setPolling(false)
+      setErrorMessage(null)
+      await refreshProjectList()
+      return true
+    } catch (err: any) {
+      const msg = err?.message || 'Could not cancel this run.'
+      setErrorMessage(msg)
+      return false
+    }
+  }, [
+    projectId,
+    handleUnauthorized,
+    setStatus,
+    setLoading,
+    setPolling,
+    refreshProjectList,
+  ])
+
+  useEffect(() => {
+    const urlProjectId = searchParams.get('projectId')?.trim() || null
+    if (urlProjectId && urlProjectId !== projectId) {
+      setProjectId(urlProjectId)
+      setStatus(null)
+      setErrorMessage(null)
+      setLoading(true)
+      setPolling(true)
+      return
+    }
+  }, [
+    projectId,
+    searchParams,
+    setLoading,
+    setPolling,
+    setStatus,
+  ])
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    const currentParamId = params.get('projectId')
+    if (projectId) {
+      if (currentParamId === projectId) return
+      params.set('projectId', projectId)
+    } else {
+      if (!currentParamId) return
+      params.delete('projectId')
+    }
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [pathname, projectId, router, searchParams])
+
+  useEffect(() => {
+    void refreshProjectList()
+  }, [refreshProjectList])
+
   useEffect(() => {
     const checkHealth = async () => {
       try {
@@ -129,7 +254,6 @@ export function WorkspaceProvider({
     return () => clearInterval(interval)
   }, [])
 
-  // Phase auto-advance: only advance forward, never backward
   useEffect(() => {
     if (!status || userOverridePhase) return
     const autoPhase = stageToPhase(status.current_stage)
@@ -139,29 +263,24 @@ export function WorkspaceProvider({
     if (autoIdx > currentHighestIdx) {
       setHighestReachedPhase(autoPhase)
     }
-    // Auto-advance the active phase to match pipeline
     if (autoIdx >= phaseIndex(activePhase)) {
       setActivePhase(autoPhase)
     }
-  }, [status?.current_stage])
+  }, [activePhase, highestReachedPhase, status, userOverridePhase])
 
-  // Reset user override when pipeline stage changes
   useEffect(() => {
     setUserOverridePhase(false)
   }, [status?.current_stage])
 
-  const handleSetActivePhase = useCallback(
-    (phase: Phase) => {
-      setActivePhase(phase)
-      setUserOverridePhase(true)
-    },
-    []
-  )
+  const handleSetActivePhase = useCallback((phase: Phase) => {
+    setActivePhase(phase)
+    setUserOverridePhase(true)
+  }, [])
 
   const handleSearch = useCallback(
     async (description: string) => {
-      pipeline.setLoading(true)
-      pipeline.setStatus(null)
+      setLoading(true)
+      setStatus(null)
       setErrorMessage(null)
       setActivePhase('brief')
       setHighestReachedPhase('brief')
@@ -195,7 +314,8 @@ export function WorkspaceProvider({
 
         const data = await res.json()
         setProjectId(data.project_id)
-        pipeline.setPolling(true)
+        setPolling(true)
+        void refreshProjectList()
       } catch (err: any) {
         const msg = err?.message || 'Unknown error'
         console.error('Search error:', msg)
@@ -206,15 +326,15 @@ export function WorkspaceProvider({
             ? `Cannot reach the backend API at ${API_BASE || 'this origin'}.`
             : msg
         )
-        pipeline.setLoading(false)
+        setLoading(false)
       }
     },
-    [handleUnauthorized]
+    [handleUnauthorized, refreshProjectList, setLoading, setPolling, setStatus]
   )
 
   const handleClarifyingAnswered = useCallback(() => {
-    pipeline.setPolling(true)
-  }, [])
+    setPolling(true)
+  }, [setPolling])
 
   const handleSignOut = useCallback(() => {
     clearAuthSession()
@@ -227,6 +347,8 @@ export function WorkspaceProvider({
       handleSignOut,
       projectId,
       setProjectId,
+      projectList,
+      projectListLoading,
       status,
       loading,
       polling,
@@ -237,13 +359,19 @@ export function WorkspaceProvider({
       errorMessage,
       setErrorMessage,
       handleSearch,
+      startNewProject,
+      openProject,
+      cancelCurrentProject,
       handleClarifyingAnswered,
       refreshStatus,
+      refreshProjectList,
     }),
     [
       authUser,
       handleSignOut,
       projectId,
+      projectList,
+      projectListLoading,
       status,
       loading,
       polling,
@@ -253,8 +381,12 @@ export function WorkspaceProvider({
       backendOk,
       errorMessage,
       handleSearch,
+      startNewProject,
+      openProject,
+      cancelCurrentProject,
       handleClarifyingAnswered,
       refreshStatus,
+      refreshProjectList,
     ]
   )
 

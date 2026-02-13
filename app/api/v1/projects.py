@@ -7,6 +7,7 @@ Supports:
 """
 
 import logging
+import time
 import traceback
 import uuid
 
@@ -60,6 +61,16 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 # Legacy compatibility for tests still importing this symbol.
 _projects = get_legacy_project_dict()
 
+ACTIVE_PIPELINE_STATUSES = {
+    "parsing",
+    "clarifying",
+    "discovering",
+    "verifying",
+    "comparing",
+    "recommending",
+    "outreaching",
+}
+
 
 async def _get_project_or_404(project_id: str) -> dict:
     store = get_project_store()
@@ -92,6 +103,30 @@ async def _create_project(project: dict) -> None:
         await store.create_project(project)
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+
+
+def _is_canceled(project: dict | None) -> bool:
+    if not project:
+        return False
+    return project.get("status") == "canceled" or project.get("current_stage") == "canceled"
+
+
+async def _should_stop_for_cancellation(store, project_id: str) -> tuple[bool, dict | None]:
+    try:
+        latest = await store.get_project(project_id)
+    except Exception:
+        logger.exception("Cancellation check failed for project %s", project_id)
+        return True, None
+
+    if not latest:
+        logger.info("Stopping pipeline for missing project %s", project_id)
+        return True, None
+
+    if _is_canceled(latest):
+        logger.info("Pipeline stop requested: project %s is canceled", project_id)
+        return True, latest
+
+    return False, latest
 
 
 @router.post("")
@@ -184,6 +219,10 @@ async def _run_pipeline_task(project_id: str, description: str):
     if not project:
         return
 
+    if _is_canceled(project):
+        logger.info("Project %s is canceled before pipeline start", project_id)
+        return
+
     state: GraphState = {
         "raw_description": description,
         "current_stage": PipelineStage.PARSING.value,
@@ -215,11 +254,22 @@ async def _run_pipeline_task(project_id: str, description: str):
         logger.info("Starting pipeline for project %s (auto_outreach=%s)", project_id, project.get("auto_outreach"))
 
         for stage_name, step_fn in steps:
+            should_stop, latest_project = await _should_stop_for_cancellation(store, project_id)
+            if should_stop:
+                return
+            project = latest_project or project
+
             project["current_stage"] = stage_name
             project["status"] = stage_name
             await store.save_project(project)
 
             state = await step_fn(state)
+
+            should_stop, latest_project = await _should_stop_for_cancellation(store, project_id)
+            if should_stop:
+                return
+            project = latest_project or project
+
             _sync_state_to_project(project, state)
 
             if stage_name == "discovering" and project.get("discovery_results"):
@@ -283,6 +333,10 @@ async def _resume_pipeline_task(project_id: str):
     if not project:
         return
 
+    if _is_canceled(project):
+        logger.info("Project %s is canceled before resume", project_id)
+        return
+
     state: GraphState = {
         "raw_description": project.get("product_description", ""),
         "current_stage": PipelineStage.DISCOVERING.value,
@@ -307,11 +361,22 @@ async def _resume_pipeline_task(project_id: str):
         logger.info("Resuming pipeline for project %s from discover", project_id)
 
         for stage_name, step_fn in steps:
+            should_stop, latest_project = await _should_stop_for_cancellation(store, project_id)
+            if should_stop:
+                return
+            project = latest_project or project
+
             project["current_stage"] = stage_name
             project["status"] = stage_name
             await store.save_project(project)
 
             state = await step_fn(state)
+
+            should_stop, latest_project = await _should_stop_for_cancellation(store, project_id)
+            if should_stop:
+                return
+            project = latest_project or project
+
             _sync_state_to_project(project, state)
 
             if stage_name == "discovering" and project.get("discovery_results"):
@@ -394,6 +459,48 @@ async def get_project_status(
         progress_events=project.get("progress_events", []),
         clarifying_questions=project.get("clarifying_questions"),
     )
+
+
+@router.post("/{project_id}/cancel")
+async def cancel_project(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Cancel an in-progress project pipeline."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    project_status = project.get("status")
+    if project_status in {"complete", "failed", "canceled"}:
+        return {
+            "project_id": project_id,
+            "status": project_status,
+            "already_terminal": True,
+        }
+
+    if project_status not in ACTIVE_PIPELINE_STATUSES:
+        return {
+            "project_id": project_id,
+            "status": project_status or "idle",
+            "already_terminal": True,
+        }
+
+    project["status"] = "canceled"
+    project["current_stage"] = "canceled"
+    project["error"] = project.get("error") or "Canceled by user"
+    progress_events = project.setdefault("progress_events", [])
+    progress_events.append(
+        {
+            "stage": "canceled",
+            "substep": "user_requested_cancel",
+            "detail": "Run canceled by user",
+            "progress_pct": None,
+            "timestamp": time.time(),
+        }
+    )
+
+    await _save_project(project)
+    return {"project_id": project_id, "status": "canceled"}
 
 
 @router.get("/{project_id}/run-sync")

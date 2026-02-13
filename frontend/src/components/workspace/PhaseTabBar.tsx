@@ -6,8 +6,8 @@ import { Phase, isPhaseAccessible, isPhaseComplete } from '@/types/pipeline'
 const PHASES: { key: Phase; label: string }[] = [
   { key: 'brief', label: 'Brief' },
   { key: 'search', label: 'Search' },
-  { key: 'outreach', label: 'Outreach' },
   { key: 'compare', label: 'Compare' },
+  { key: 'outreach', label: 'Outreach' },
   { key: 'samples', label: 'Samples' },
   { key: 'order', label: 'Order' },
 ]
@@ -22,7 +22,12 @@ export default function PhaseTabBar() {
         const complete = isPhaseComplete(phase.key, status)
         const isActive = activePhase === phase.key
         const isPipelinePhase =
-          status && !complete && isActive && status.status !== 'complete' && status.status !== 'failed'
+          status &&
+          !complete &&
+          isActive &&
+          status.status !== 'complete' &&
+          status.status !== 'failed' &&
+          status.status !== 'canceled'
 
         return (
           <button

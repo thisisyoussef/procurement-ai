@@ -32,7 +32,11 @@ export function usePipelinePolling(
         const data: PipelineStatus = await res.json()
         setStatus(data)
 
-        if (data.status === 'complete' || data.status === 'failed') {
+        if (
+          data.status === 'complete' ||
+          data.status === 'failed' ||
+          data.status === 'canceled'
+        ) {
           setPolling(false)
           setLoading(false)
         }

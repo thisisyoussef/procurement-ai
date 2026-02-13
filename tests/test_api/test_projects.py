@@ -87,3 +87,26 @@ def test_list_projects():
     response = client.get("/api/v1/projects", headers=_auth_headers())
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_cancel_project():
+    """Test canceling an in-progress project."""
+    create_response = client.post(
+        "/api/v1/projects",
+        json={
+            "title": "Cancel Test",
+            "product_description": "Need 500 steel fasteners sourced for automotive assembly",
+        },
+        headers=_auth_headers(),
+    )
+    assert create_response.status_code == 200
+    project_id = create_response.json()["project_id"]
+
+    cancel_response = client.post(
+        f"/api/v1/projects/{project_id}/cancel",
+        headers=_auth_headers(),
+    )
+    assert cancel_response.status_code == 200
+    cancel_data = cancel_response.json()
+    assert cancel_data["project_id"] == project_id
+    assert cancel_data["status"] in {"canceled", "failed", "complete"}

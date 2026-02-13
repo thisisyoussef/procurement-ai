@@ -132,8 +132,12 @@ export default function InputBar() {
           {/* Paperclip */}
           <button
             type="button"
+            disabled
+            title="File attachments are coming soon"
+            aria-label="File attachments coming soon"
             className="w-9 h-9 rounded-full border border-surface-3 flex items-center justify-center
-                       text-ink-4 hover:text-teal hover:border-teal transition-colors shrink-0 mb-0.5"
+                       text-ink-4 hover:text-teal hover:border-teal disabled:opacity-40 disabled:cursor-not-allowed
+                       transition-colors shrink-0 mb-0.5"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
