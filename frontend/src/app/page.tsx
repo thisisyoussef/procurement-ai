@@ -175,6 +175,20 @@ export default function HomePage() {
     e.preventDefault()
     if (leadSubmitting) return
 
+  const handleSearch = async (description: string, autoOutreach?: boolean) => {
+    setLoading(true)
+    setStatus(null)
+    setErrorMessage(null)
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: description.slice(0, 80),
+          product_description: description,
+          auto_outreach: autoOutreach || false,
+        }),
     setLeadSubmitting(true)
     setLeadError(null)
     setLeadSuccess(null)

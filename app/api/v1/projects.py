@@ -18,6 +18,7 @@ from app.agents.orchestrator import (
     discover_node,
     parse_node,
     recommend_node,
+    outreach_node,
     run_pipeline,
     verify_node,
     GraphState,
@@ -114,6 +115,7 @@ async def create_project(
             "user_id": user_id,
             "title": request.title,
             "product_description": request.product_description,
+            "auto_outreach": request.auto_outreach,
             "status": "parsing",
             "current_stage": "parsing",
             "error": None,
@@ -158,6 +160,10 @@ def _sync_state_to_project(project: dict, state: GraphState) -> None:
         project["comparison_result"] = state["comparison_result"]
     if state.get("recommendation_result"):
         project["recommendation_result"] = state["recommendation_result"]
+    # Sync auto-outreach results from the pipeline outreach_node
+    outreach_result = state.get("outreach_result")
+    if outreach_result and not outreach_result.get("skipped") and not outreach_result.get("error"):
+        project["outreach_state"] = outreach_result
 
 
 async def _run_pipeline_task(project_id: str, description: str):
@@ -187,8 +193,10 @@ async def _run_pipeline_task(project_id: str, description: str):
         "verification_results": None,
         "comparison_result": None,
         "recommendation_result": None,
+        "outreach_result": None,
         "progress_events": [],
         "user_answers": None,
+        "auto_outreach_enabled": bool(project.get("auto_outreach")),
     }
 
     steps = [
@@ -199,8 +207,12 @@ async def _run_pipeline_task(project_id: str, description: str):
         ("recommending", recommend_node),
     ]
 
+    # Add outreach step if auto_outreach is enabled
+    if project.get("auto_outreach"):
+        steps.append(("outreaching", outreach_node))
+
     try:
-        logger.info("Starting pipeline for project %s", project_id)
+        logger.info("Starting pipeline for project %s (auto_outreach=%s)", project_id, project.get("auto_outreach"))
 
         for stage_name, step_fn in steps:
             project["current_stage"] = stage_name

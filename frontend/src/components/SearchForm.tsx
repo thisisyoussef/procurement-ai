@@ -3,7 +3,7 @@
 import { useState } from 'react'
 
 interface SearchFormProps {
-  onSearch: (description: string) => void
+  onSearch: (description: string, autoOutreach?: boolean) => void
   loading: boolean
 }
 
@@ -15,11 +15,12 @@ const EXAMPLES = [
 
 export default function SearchForm({ onSearch, loading }: SearchFormProps) {
   const [description, setDescription] = useState('')
+  const [autoOutreach, setAutoOutreach] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!description.trim() || loading) return
-    onSearch(description.trim())
+    onSearch(description.trim(), autoOutreach)
   }
 
   return (
@@ -55,6 +56,31 @@ export default function SearchForm({ onSearch, loading }: SearchFormProps) {
             'Find Suppliers'
           )}
         </button>
+      </div>
+
+      {/* Auto-outreach toggle */}
+      <div className="mt-3 flex items-center gap-3">
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autoOutreach}
+            onChange={(e) => setAutoOutreach(e.target.checked)}
+            className="sr-only peer"
+            disabled={loading}
+          />
+          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2
+                          peer-focus:ring-blue-300 rounded-full peer
+                          peer-checked:after:translate-x-full peer-checked:after:border-white
+                          after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                          after:bg-white after:border-slate-300 after:border after:rounded-full
+                          after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+        </label>
+        <span className="text-sm text-slate-600">
+          Auto-pilot mode
+        </span>
+        <span className="text-xs text-slate-400">
+          — automatically email top suppliers after analysis
+        </span>
       </div>
 
       {!loading && (

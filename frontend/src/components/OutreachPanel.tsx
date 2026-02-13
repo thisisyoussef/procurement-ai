@@ -951,18 +951,60 @@ export default function OutreachPanel({
               </div>
             )}
 
-            {/* Inbox monitoring coming soon */}
-            <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Coming Soon</span>
-                <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">
-                  Planned
+            {/* Send Now button */}
+            {autoStatus && autoStatus.queued_count > 0 && (
+              <button
+                onClick={async () => {
+                  setLoading(true)
+                  try {
+                    await fetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/auto-send`, {
+                      method: 'POST',
+                    })
+                    refreshOutreachState()
+                  } catch (err) {
+                    console.error('Auto-send failed:', err)
+                  } finally {
+                    setLoading(false)
+                  }
+                }}
+                disabled={loading}
+                className="mt-3 w-full px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium
+                           hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                {loading ? 'Sending...' : `Send ${autoStatus.queued_count} Queued Emails Now`}
+              </button>
+            )}
+
+            {/* Autonomous features status */}
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-blue-700">Autonomous Features</span>
+                <span className="text-[10px] bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded">
+                  Active
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Automated inbox monitoring — detect supplier responses, parse quotes, and trigger
-                follow-ups automatically.
-              </p>
+              <div className="space-y-1.5 text-xs text-blue-600">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  Email queue processor (every 30s)
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  Auto follow-ups (Day 3, 7, 14)
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  Inbox monitoring (every 5 min)
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  Phone escalation for non-responsive suppliers
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  AI negotiation on received quotes
+                </div>
+              </div>
             </div>
           </div>
         )}

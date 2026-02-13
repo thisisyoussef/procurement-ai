@@ -143,6 +143,16 @@ async def verify_supplier(
     """Run all verification checks on a single supplier in parallel."""
     logger.info("🔎 Verifying supplier [%d]: %s", index, supplier.name)
 
+    # ── Contact enrichment pre-step ──────────────────────────────
+    # If the supplier is missing email or phone, relentlessly try to find them
+    # through multiple sources before running verification checks.
+    if not supplier.email or not supplier.phone:
+        try:
+            from app.agents.tools.contact_enricher import enrich_supplier_contacts
+            supplier = await enrich_supplier_contacts(supplier, aggressive=True)
+        except Exception as e:
+            logger.warning("Contact enrichment failed for %s: %s", supplier.name, e)
+
     checks = await asyncio.gather(
         _check_website(supplier),
         _check_google_reviews(supplier),

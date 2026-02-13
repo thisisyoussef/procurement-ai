@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import logging
+from contextlib import asynccontextmanager
 import os
 from typing import List
 
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.log_stream import install_project_log_handler
+from app.core.scheduler import get_scheduler
 from app.services.project_store import StoreUnavailableError, get_project_store
 
 # Configure logging so errors show in the terminal
@@ -26,6 +28,20 @@ install_project_log_handler()
 settings = get_settings()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the autonomous outreach scheduler on startup, stop on shutdown."""
+    scheduler = get_scheduler()
+    await scheduler.start()
+    yield
+    await scheduler.stop()
+
+
+app = FastAPI(
+    title=settings.app_title,
+    version=settings.app_version,
+    description="AI-powered supplier discovery and comparison for small businesses",
+    lifespan=lifespan,
 def _parse_cors_origins(raw_origins: str) -> List[str]:
     return [
         origin.strip()

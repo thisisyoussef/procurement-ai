@@ -22,6 +22,13 @@ interface Supplier {
   is_intermediary: boolean
   language_discovered: string | null
   filtered_reason?: string | null
+  enrichment?: {
+    sources_tried: string[]
+    sources_succeeded: string[]
+    best_email: string | null
+    best_phone: string | null
+    enrichment_confidence: number
+  } | null
 }
 
 interface Verification {
@@ -356,6 +363,15 @@ export default function SupplierResults({ discovery, verifications }: SupplierRe
                     {/* Contact method badge */}
                     {v?.preferred_contact_method && (
                       <ContactBadge method={v.preferred_contact_method} notes={v.contact_notes} />
+                    )}
+                    {/* Enrichment indicator */}
+                    {supplier.enrichment && supplier.enrichment.sources_succeeded.length > 0 && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200"
+                        title={`Contact found via: ${supplier.enrichment.sources_succeeded.join(', ')}`}
+                      >
+                        Contact enriched ({supplier.enrichment.sources_succeeded.length} source{supplier.enrichment.sources_succeeded.length > 1 ? 's' : ''})
+                      </span>
                     )}
                   </div>
 

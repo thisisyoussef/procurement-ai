@@ -523,6 +523,32 @@ async def recompare_with_quotes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/auto-send")
+async def trigger_auto_send(project_id: str):
+    """Immediately process the auto-queue for this project (bypass scheduler wait)."""
+    project = _get_project(project_id)
+    outreach = _get_outreach_state(project)
+
+    queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
+    if not queued:
+        return {"status": "nothing_to_send", "queued_count": 0}
+
+    from app.core.scheduler import get_scheduler
+    scheduler = get_scheduler()
+    result = await scheduler.process_project_now(project_id)
+    return {"status": "processed", **result}
+
+
+@router.get("/scheduler-status")
+async def get_scheduler_status(project_id: str):
+    """Return scheduler health, loop counts, and last-run timestamps."""
+    _get_project(project_id)  # Validate project exists
+
+    from app.core.scheduler import get_scheduler
+    scheduler = get_scheduler()
+    return scheduler.stats
+
+
 @router.post("/auto-config")
 async def set_auto_outreach_config(
     project_id: str,
