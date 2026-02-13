@@ -56,27 +56,40 @@ async def send_email(
     """
     settings = get_settings()
 
+    normalized_cc = []
+    seen: set[str] = set()
+    for candidate in cc or []:
+        value = (candidate or "").strip().lower()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized_cc.append(value)
+
     if not settings.resend_api_key:
         logger.warning("Resend API key not configured — email not sent to %s", to)
-        return {"error": "Resend API key not configured", "sent": False}
+        return {
+            "error": "Resend API key not configured",
+            "error_type": "missing_api_key",
+            "provider": "resend",
+            "sent": False,
+            "to": to,
+            "cc": normalized_cc,
+            "from": None,
+        }
     from_email = (settings.from_email or "").strip() or "sourcing@asmbl.app"
     if from_email == "sourcing@yourdomain.com":
         logger.warning("FROM_EMAIL is still placeholder value; refusing to send to %s", to)
         return {
             "error": "FROM_EMAIL is not configured (still sourcing@yourdomain.com)",
+            "error_type": "invalid_from_email",
+            "provider": "resend",
             "sent": False,
+            "to": to,
+            "cc": normalized_cc,
+            "from": from_email,
         }
 
     try:
-        normalized_cc = []
-        seen: set[str] = set()
-        for candidate in cc or []:
-            value = (candidate or "").strip().lower()
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            normalized_cc.append(value)
-
         payload = {
             "from": from_email,
             "to": [to],
@@ -94,7 +107,16 @@ async def send_email(
         email_id = _extract_resend_email_id(result)
         if not email_id:
             logger.error("Resend returned no email id for %s: %r", to, result)
-            return {"error": "Resend response missing email id", "sent": False}
+            return {
+                "error": "Resend response missing email id",
+                "error_type": "missing_provider_id",
+                "provider": "resend",
+                "sent": False,
+                "to": to,
+                "cc": normalized_cc,
+                "from": from_email,
+                "provider_response": result if isinstance(result, dict) else str(result),
+            }
         logger.info(
             "Email sent to %s (cc=%s): subject=%s, id=%s",
             to,
@@ -105,14 +127,32 @@ async def send_email(
         return {
             "id": email_id,
             "sent": True,
+            "provider": "resend",
             "to": to,
             "cc": normalized_cc,
             "from": from_email,
         }
 
     except Exception as e:
-        logger.error("Failed to send email to %s: %s", to, str(e))
-        return {"error": str(e), "sent": False}
+        error_message = str(e)
+        error_type = type(e).__name__
+        logger.error(
+            "Failed to send email via Resend to %s (from=%s, cc=%s): %s",
+            to,
+            from_email,
+            ",".join(normalized_cc) if normalized_cc else "-",
+            error_message,
+            exc_info=True,
+        )
+        return {
+            "error": error_message,
+            "error_type": error_type,
+            "provider": "resend",
+            "sent": False,
+            "to": to,
+            "cc": normalized_cc,
+            "from": from_email,
+        }
 
 
 def verify_webhook_signature(

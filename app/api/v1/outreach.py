@@ -191,9 +191,26 @@ async def _send_and_track_email(
             delivery_status="sent",
             source=source_label,
             event_type="email_sent",
-            details={"project_id": project.get("id")},
+            details={
+                "project_id": project.get("id"),
+                "provider": result.get("provider", "resend"),
+                "from_email": result.get("from"),
+                "to_email": result.get("to") or recipient,
+                "cc_emails": result.get("cc") or cc,
+            },
         )
     else:
+        error_detail = {
+            "error": result.get("error", "unknown"),
+            "error_type": result.get("error_type"),
+            "provider": result.get("provider", "resend"),
+            "from_email": result.get("from") or settings.from_email,
+            "to_email": result.get("to") or recipient,
+            "cc_emails": result.get("cc") or cc,
+        }
+        provider_response = result.get("provider_response")
+        if provider_response is not None:
+            error_detail["provider_response"] = provider_response
         record_outbound_email(
             outreach,
             supplier_index=supplier_index,
@@ -207,7 +224,10 @@ async def _send_and_track_email(
             delivery_status="failed",
             source=source_label,
             event_type="send_failed",
-            details={"error": result.get("error", "unknown"), "project_id": project.get("id")},
+            details={
+                "project_id": project.get("id"),
+                **error_detail,
+            },
         )
     return result
 

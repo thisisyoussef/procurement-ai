@@ -115,6 +115,17 @@ function eventLabel(eventType: string) {
   }
 }
 
+function stringifyDetailValue(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 export default function OutreachPhase() {
   const { projectId, status, refreshStatus, setActivePhase, restartCurrentProject } = useWorkspace()
   const [outreachState, setOutreachState] = useState<OutreachState | null>(null)
@@ -438,6 +449,45 @@ export default function OutreachPhase() {
     [monitor?.messages]
   )
 
+  const recentDiagnostics = useMemo(() => {
+    const rows: Array<{
+      key: string
+      supplierName: string
+      status: string
+      when?: number
+      source?: string
+      detail?: string
+    }> = []
+    for (const msg of monitor?.messages || []) {
+      for (const ev of msg.events || []) {
+        const isFailure =
+          ev.status === 'failed' ||
+          ev.status === 'bounced' ||
+          ev.status === 'complained' ||
+          (ev.event_type || '').includes('failed')
+        if (!isFailure) continue
+
+        const detail =
+          stringifyDetailValue(ev.details?.['error']) ||
+          stringifyDetailValue(ev.details?.['reason']) ||
+          stringifyDetailValue(ev.details?.['error_type']) ||
+          stringifyDetailValue(ev.details?.['provider_response'])
+
+        rows.push({
+          key: `${msg.message_key}:${ev.event_type}:${ev.timestamp}`,
+          supplierName: msg.supplier_name || msg.to_email || msg.from_email || 'Unknown supplier',
+          status: ev.status,
+          when: ev.timestamp,
+          source: ev.source,
+          detail: detail || undefined,
+        })
+      }
+    }
+    return rows
+      .sort((a, b) => (b.when || 0) - (a.when || 0))
+      .slice(0, 8)
+  }, [monitor?.messages])
+
   if (!projectId || !status?.recommendation) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
@@ -609,38 +659,78 @@ export default function OutreachPhase() {
 
           {recentMessages.length > 0 ? (
             <div className="space-y-2">
-              {recentMessages.map((msg) => (
-                <div key={msg.message_key} className="rounded-lg border border-surface-3 px-3 py-2">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full ${
-                        msg.direction === 'outbound'
-                          ? 'bg-teal/[0.08] text-teal'
-                          : 'bg-warm/10 text-warm'
-                      }`}
-                    >
-                      {msg.direction === 'outbound' ? 'Outbound' : 'Inbound'}
-                    </span>
-                    <span className="text-[10px] text-ink-4">
-                      {msg.delivery_status || 'unknown'} · {formatTimeAgo(msg.updated_at || msg.created_at)}
-                    </span>
+              {recentMessages.map((msg) => {
+                const failureEvent = [...(msg.events || [])]
+                  .reverse()
+                  .find(
+                    (ev) =>
+                      ev.status === 'failed' ||
+                      ev.status === 'bounced' ||
+                      ev.status === 'complained' ||
+                      (ev.event_type || '').includes('failed')
+                  )
+                const failureDetail =
+                  stringifyDetailValue(failureEvent?.details?.['error']) ||
+                  stringifyDetailValue(failureEvent?.details?.['reason']) ||
+                  stringifyDetailValue(failureEvent?.details?.['error_type'])
+                return (
+                  <div key={msg.message_key} className="rounded-lg border border-surface-3 px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full ${
+                          msg.direction === 'outbound'
+                            ? 'bg-teal/[0.08] text-teal'
+                            : 'bg-warm/10 text-warm'
+                        }`}
+                      >
+                        {msg.direction === 'outbound' ? 'Outbound' : 'Inbound'}
+                      </span>
+                      <span className="text-[10px] text-ink-4">
+                        {msg.delivery_status || 'unknown'} · {formatTimeAgo(msg.updated_at || msg.created_at)}
+                      </span>
+                      {failureEvent?.source ? (
+                        <span className="text-[10px] text-ink-4">source: {failureEvent.source}</span>
+                      ) : null}
+                    </div>
+                    <p className="text-[12px] text-ink truncate">
+                      {msg.supplier_name || msg.to_email || msg.from_email || 'Unknown contact'}
+                    </p>
+                    {msg.subject ? <p className="text-[11px] text-ink-3 truncate">{msg.subject}</p> : null}
+                    {msg.body_preview ? <p className="text-[10px] text-ink-4 truncate">{msg.body_preview}</p> : null}
+                    {msg.direction === 'outbound' && msg.cc_emails?.length ? (
+                      <p className="text-[10px] text-ink-4 mt-1">CC: {msg.cc_emails.join(', ')}</p>
+                    ) : null}
+                    {failureDetail ? (
+                      <p className="text-[10px] text-red-600 mt-1 break-words">
+                        Failure detail: {failureDetail}
+                      </p>
+                    ) : null}
                   </div>
-                  <p className="text-[12px] text-ink truncate">
-                    {msg.supplier_name || msg.to_email || msg.from_email || 'Unknown contact'}
-                  </p>
-                  {msg.subject ? <p className="text-[11px] text-ink-3 truncate">{msg.subject}</p> : null}
-                  {msg.body_preview ? <p className="text-[10px] text-ink-4 truncate">{msg.body_preview}</p> : null}
-                  {msg.direction === 'outbound' && msg.cc_emails?.length ? (
-                    <p className="text-[10px] text-ink-4 mt-1">CC: {msg.cc_emails.join(', ')}</p>
-                  ) : null}
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-surface-3 px-3 py-4 text-[11px] text-ink-4">
               No communication records yet.
             </div>
           )}
+
+          {recentDiagnostics.length > 0 ? (
+            <div className="rounded-lg border border-red-200 bg-red-50/50 px-3 py-3">
+              <p className="text-[11px] font-semibold text-red-700 mb-2">Recent delivery failures</p>
+              <div className="space-y-1.5">
+                {recentDiagnostics.map((row) => (
+                  <div key={row.key} className="text-[10px] text-red-700">
+                    <span className="font-medium">{row.supplierName}</span>
+                    <span> · {row.status}</span>
+                    <span> · {formatTimeAgo(row.when)}</span>
+                    {row.source ? <span> · {row.source}</span> : null}
+                    {row.detail ? <span> · {row.detail}</span> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
