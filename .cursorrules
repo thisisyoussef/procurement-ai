@@ -1,0 +1,31 @@
+You are working on ProcureAI, an AI-powered procurement platform for small businesses.
+
+## Tech Stack
+- Backend: FastAPI (Python 3.12+), async-first
+- Database: Supabase (PostgreSQL) with pgvector
+- AI: Anthropic Claude API, LangGraph for orchestration
+- Frontend: Next.js 15, React 19, Tailwind CSS
+- Email: Resend
+- Scraping: Firecrawl
+
+## Coding Standards
+- Use Pydantic v2 for ALL schemas and data validation
+- Use SQLAlchemy 2.0 async ORM for database models
+- All FastAPI endpoints must be async
+- Type hints everywhere — no `Any` without justification
+- Agent prompts stored as Markdown files in `app/agents/prompts/`
+- Agent outputs must be Pydantic models (typed, validated)
+- Use `httpx.AsyncClient` for all HTTP calls (never `requests`)
+
+## Architecture
+- LangGraph orchestrator in `app/agents/orchestrator.py`
+- Each agent is a separate module in `app/agents/`
+- Agent tools in `app/agents/tools/`
+- State flows through `GraphState` TypedDict between agents
+- In-memory project store for MVP (migrate to Supabase later)
+
+## Patterns
+- Structured JSON output from LLMs — always validate with Pydantic
+- Parallel fan-out for multi-source searches
+- Error boundaries per agent — never let one agent crash the pipeline
+- Human-in-the-loop checkpoints before outreach and final recommendations

@@ -1,0 +1,103 @@
+"""Sourcing project API request/response schemas."""
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+from app.schemas.agent_state import (
+    ChatMessage,
+    ComparisonResult,
+    DiscoveryResults,
+    OutreachState,
+    ParsedRequirements,
+    RecommendationResult,
+    VerificationResults,
+)
+
+
+class ProjectCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    product_description: str = Field(min_length=10, max_length=5000)
+
+
+class ProjectResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    title: str
+    product_description: str
+    status: str
+    parsed_requirements: ParsedRequirements | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectDetailResponse(ProjectResponse):
+    """Full project response including all agent results."""
+    discovery_results: DiscoveryResults | None = None
+    verification_results: VerificationResults | None = None
+    comparison_result: ComparisonResult | None = None
+    recommendation: RecommendationResult | None = None
+
+
+class PipelineStatusResponse(BaseModel):
+    project_id: UUID
+    status: str
+    current_stage: str
+    error: str | None = None
+    parsed_requirements: ParsedRequirements | None = None
+    discovery_results: DiscoveryResults | None = None
+    verification_results: VerificationResults | None = None
+    comparison_result: ComparisonResult | None = None
+    recommendation: RecommendationResult | None = None
+    chat_messages: list[ChatMessage] = Field(default_factory=list)
+    outreach_state: OutreachState | None = None
+    progress_events: list[dict] = Field(default_factory=list)
+    clarifying_questions: list[dict] | None = None
+
+
+# ── Chat request/response ──────────────────────────────────────
+
+class ChatMessageRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=5000)
+
+
+# ── Outreach requests ─────────────────────────────────────────
+
+class OutreachStartRequest(BaseModel):
+    supplier_indices: list[int] = Field(min_length=1)
+
+
+class EmailApprovalRequest(BaseModel):
+    draft_index: int
+    edited_subject: str | None = None
+    edited_body: str | None = None
+
+
+class QuoteParseRequest(BaseModel):
+    supplier_index: int
+    response_text: str = Field(min_length=10, max_length=20000)
+
+
+class ClarifyingAnswerRequest(BaseModel):
+    """User's answers to clarifying questions."""
+    answers: dict[str, str] = Field(description="Mapping of field name to answer text")
+
+
+class PhoneCallStartRequest(BaseModel):
+    """Request to initiate an AI phone call to a supplier."""
+    supplier_index: int
+    phone_number: str
+    questions: list[str] = Field(default_factory=list)
+
+
+class PhoneCallConfigRequest(BaseModel):
+    """Configure AI phone calling for a project."""
+    enabled: bool = False
+    voice_id: str = "11labs-Adrian"
+    max_call_duration_seconds: int = 300
+    default_questions: list[str] = Field(default_factory=list)

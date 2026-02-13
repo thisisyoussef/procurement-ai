@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app  # Hot reload in dev
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Celery worker for background tasks (optional for MVP)
+  # worker:
+  #   build: .
+  #   env_file:
+  #     - .env
+  #   command: celery -A app.tasks worker --loglevel=info
+  #   depends_on:
+  #     - redis
