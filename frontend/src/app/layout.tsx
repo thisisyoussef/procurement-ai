@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'ProcureAI — Find Suppliers with AI',
-  description: 'AI-powered supplier discovery and comparison for small businesses',
+  title: 'Tamkin — Find the right people to make your stuff',
+  description: 'Tamkin helps businesses find, vet, and manage suppliers with AI-powered mission workflows.',
 }
 
 export default function RootLayout({
