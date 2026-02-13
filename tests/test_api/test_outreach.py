@@ -1,8 +1,11 @@
 """Tests for outreach lifecycle planning and tracking."""
 
+import os
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+
+os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.main import app

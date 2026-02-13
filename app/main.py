@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.log_stream import install_project_log_handler
+from app.services.project_store import StoreUnavailableError, get_project_store
 
 # Configure logging so errors show in the terminal
 logging.basicConfig(
@@ -25,7 +26,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
-    description="AI-powered supplier discovery and comparison for small businesses",
+    description="Find the right people to make your stuff. Manage them like a pro.",
 )
 
 # CORS — allow frontend origins
@@ -69,3 +70,22 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.on_event("startup")
+async def recover_stale_project_runs():
+    """
+    Mark any in-flight project runs as recoverable failures after process restart.
+
+    This prevents projects from being stuck in a running stage if the API restarts
+    while background tasks were executing.
+    """
+    try:
+        store = get_project_store()
+        recovered = await store.recover_stale_runs()
+        if recovered:
+            logger.info("Recovered %d stale project run(s) after startup", recovered)
+    except StoreUnavailableError as exc:
+        logger.warning("Project store unavailable during startup recovery: %s", exc)
+    except Exception:
+        logger.exception("Unexpected failure during startup stale-run recovery")

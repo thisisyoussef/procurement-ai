@@ -1,27 +1,25 @@
 """Granular progress event system for the pipeline.
 
-Writes progress events directly to the in-memory project dict so the
-frontend picks them up on the next status poll (every 1 second).
-No additional SSE channel required.
+Writes progress events to the active project store. Persistence updates
+are dispatched asynchronously so agent stages stay non-blocking.
 """
 
+import asyncio
 import logging
 import time
 
 from app.core.log_stream import current_project_id
+from app.services.project_store import get_project_store
 
 logger = logging.getLogger(__name__)
 
-# Lazy import to avoid circular dependency — projects.py imports from us
-_projects_ref = None
-
-
-def _get_projects() -> dict:
-    global _projects_ref
-    if _projects_ref is None:
-        from app.api.v1.projects import _projects
-        _projects_ref = _projects
-    return _projects_ref
+async def _persist_progress_event(project_id: str, event: dict) -> None:
+    """Persist a progress event in the background."""
+    store = get_project_store()
+    try:
+        await store.append_progress_event(project_id, event)
+    except Exception:
+        logger.debug("Skipping progress persistence for project %s", project_id, exc_info=True)
 
 
 def emit_progress(
@@ -50,10 +48,12 @@ def emit_progress(
         "timestamp": time.time(),
     }
 
-    projects = _get_projects()
-    project = projects.get(project_id)
-    if project:
-        project.setdefault("progress_events", []).append(event)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_persist_progress_event(project_id, event))
+    except RuntimeError:
+        # No running loop (e.g. sync context). Skip persistence.
+        pass
 
     # Also log so it shows in the log stream
     logger.info("📊 [%s/%s] %s", stage, substep, detail)

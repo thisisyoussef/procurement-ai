@@ -1,10 +1,10 @@
 #!/bin/bash
-# Start both backend and frontend for ProcureAI
+# Start both backend and frontend for Tamkin
 # Usage: ./start.sh
 
 set -e
 
-echo "Starting ProcureAI..."
+echo "Starting Tamkin..."
 echo ""
 
 # Check if port 8000 is already in use

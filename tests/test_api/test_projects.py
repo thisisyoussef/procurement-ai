@@ -1,9 +1,12 @@
 """Tests for the projects API endpoints."""
 
+import os
 import pytest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+
+os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.main import app
 
@@ -15,7 +18,7 @@ def test_root():
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert data["app"] == "ProcureAI"
+    assert data["app"] == "Tamkin"
     assert data["status"] == "running"
 
 

@@ -19,19 +19,30 @@ from app.schemas.agent_state import (
     SupplierOutreachStatus,
 )
 from app.schemas.project import PhoneCallConfigRequest, PhoneCallStartRequest
+from app.services.project_store import StoreUnavailableError, get_project_store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/phone", tags=["phone"])
 
 
-def _get_project(project_id: str) -> dict:
-    from app.api.v1.projects import _projects
-
-    project = _projects.get(project_id)
+async def _get_project(project_id: str) -> dict:
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+async def _save_project(project: dict) -> None:
+    store = get_project_store()
+    try:
+        await store.save_project(project)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
 
 
 def _get_outreach_state(project: dict) -> OutreachState:
@@ -47,7 +58,7 @@ async def configure_phone(project_id: str, request: PhoneCallConfigRequest):
 
     Sets the voice, max duration, and default questions for calls.
     """
-    project = _get_project(project_id)
+    project = await _get_project(project_id)
     outreach = _get_outreach_state(project)
 
     outreach.phone_config = PhoneCallConfig(
@@ -58,6 +69,7 @@ async def configure_phone(project_id: str, request: PhoneCallConfigRequest):
     )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
 
     return {
         "status": "configured",
@@ -73,7 +85,7 @@ async def start_phone_call(project_id: str, request: PhoneCallStartRequest):
     an outbound call. The call status can be tracked via webhooks
     or by polling the /calls/{call_id} endpoint.
     """
-    project = _get_project(project_id)
+    project = await _get_project(project_id)
 
     if not project.get("parsed_requirements"):
         raise HTTPException(status_code=400, detail="Pipeline must complete before calling")
@@ -125,6 +137,7 @@ async def start_phone_call(project_id: str, request: PhoneCallStartRequest):
             )
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return {
             "call_id": call_status.call_id,
@@ -143,7 +156,7 @@ async def start_phone_call(project_id: str, request: PhoneCallStartRequest):
 @router.get("/calls")
 async def list_phone_calls(project_id: str):
     """List all phone calls for a project."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id)
     outreach = _get_outreach_state(project)
 
     return {
@@ -156,7 +169,7 @@ async def list_phone_calls(project_id: str):
 @router.get("/calls/{call_id}")
 async def get_phone_call(project_id: str, call_id: str):
     """Get detailed status of a specific phone call, including transcript."""
-    project = _get_project(project_id)
+    project = await _get_project(project_id)
     outreach = _get_outreach_state(project)
 
     # Find the call in our state
@@ -182,6 +195,7 @@ async def get_phone_call(project_id: str, call_id: str):
         local_call.ended_at = detail.get("ended_at", local_call.ended_at)
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return local_call.model_dump()
 
@@ -197,7 +211,7 @@ async def parse_phone_call(project_id: str, call_id: str):
 
     Extracts pricing, MOQ, lead time, and key findings from the transcript.
     """
-    project = _get_project(project_id)
+    project = await _get_project(project_id)
     outreach = _get_outreach_state(project)
 
     # Find the call
@@ -242,6 +256,7 @@ async def parse_phone_call(project_id: str, call_id: str):
                 break
 
         project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
 
         return result.model_dump()
 

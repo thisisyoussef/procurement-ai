@@ -6,32 +6,25 @@ Supports:
 - Progress event syncing for granular UI updates
 """
 
-import asyncio
-import json
 import logging
 import traceback
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.orchestrator import (
-    parse_node,
-    discover_node,
-    verify_node,
     compare_node,
+    discover_node,
+    parse_node,
     recommend_node,
     run_pipeline,
+    verify_node,
     GraphState,
 )
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
-from app.core.log_stream import (
-    current_project_id,
-    get_project_logs,
-    subscribe_to_logs,
-)
+from app.core.log_stream import current_project_id, get_project_logs, subscribe_to_logs
 from app.schemas.agent_state import (
     ChatMessage,
     ComparisonResult,
@@ -47,14 +40,47 @@ from app.schemas.project import (
     PipelineStatusResponse,
     ProjectCreateRequest,
 )
+from app.services.project_store import (
+    StoreUnavailableError,
+    get_legacy_project_dict,
+    get_project_store,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
-# In-memory project store for MVP (replace with Supabase in production)
-_projects: dict[str, dict[str, Any]] = {}
+# Legacy compatibility for tests still importing this symbol.
+_projects = get_legacy_project_dict()
+
+
+async def _get_project_or_404(project_id: str) -> dict:
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+async def _save_project(project: dict) -> None:
+    store = get_project_store()
+    try:
+        await store.save_project(project)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+
+
+async def _create_project(project: dict) -> None:
+    store = get_project_store()
+    try:
+        await store.create_project(project)
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
 
 
 @router.post("")
@@ -92,16 +118,18 @@ async def create_project(
             "user_answers": None,
         }
 
-        _projects[project_id] = project
+        await _create_project(project)
 
         # Run pipeline in background
         background_tasks.add_task(_run_pipeline_task, project_id, request.product_description)
 
         return {"project_id": project_id, "status": "started"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to create project")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}\n{traceback.format_exc()}") from e
 
 
 def _sync_state_to_project(project: dict, state: GraphState) -> None:
@@ -119,8 +147,6 @@ def _sync_state_to_project(project: dict, state: GraphState) -> None:
         project["comparison_result"] = state["comparison_result"]
     if state.get("recommendation_result"):
         project["recommendation_result"] = state["recommendation_result"]
-    # Sync progress events from the project store (written by emit_progress)
-    # Already written directly by progress.py — no extra sync needed
 
 
 async def _run_pipeline_task(project_id: str, description: str):
@@ -129,10 +155,15 @@ async def _run_pipeline_task(project_id: str, description: str):
     After parsing, checks for clarifying questions. If found, pauses the pipeline
     (status = "clarifying") so the user can answer before discovery begins.
     """
-    # Set context var so all log messages and progress events are captured for this project
     current_project_id.set(project_id)
 
-    project = _projects.get(project_id)
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except Exception:
+        logger.exception("Pipeline start failed: project store unavailable")
+        return
+
     if not project:
         return
 
@@ -161,19 +192,18 @@ async def _run_pipeline_task(project_id: str, description: str):
         logger.info("Starting pipeline for project %s", project_id)
 
         for stage_name, step_fn in steps:
-            # Update project so frontend shows current stage
             project["current_stage"] = stage_name
             project["status"] = stage_name
+            await store.save_project(project)
 
             state = await step_fn(state)
-            # Push results to project dict immediately after each step
             _sync_state_to_project(project, state)
+            await store.save_project(project)
 
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
                 break
 
-            # After parsing: check for clarifying questions → pause if found
             if stage_name == "parsing":
                 reqs = state.get("parsed_requirements") or {}
                 questions = reqs.get("clarifying_questions", [])
@@ -181,30 +211,38 @@ async def _run_pipeline_task(project_id: str, description: str):
                     project["status"] = "clarifying"
                     project["current_stage"] = "clarifying"
                     project["clarifying_questions"] = questions
+                    await store.save_project(project)
                     logger.info(
                         "Pipeline paused for %d clarifying questions (project %s)",
-                        len(questions), project_id,
+                        len(questions),
+                        project_id,
                     )
-                    return  # Pause — user must answer or skip before pipeline continues
+                    return
 
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("Pipeline failed for project %s", project_id)
         project["status"] = "failed"
         project["current_stage"] = "failed"
         project["error"] = f"{str(e)}\n{traceback.format_exc()}"
+        try:
+            await store.save_project(project)
+        except Exception:
+            logger.exception("Failed to persist pipeline failure state")
 
 
 async def _resume_pipeline_task(project_id: str):
-    """Resume a paused pipeline from the discover stage onward.
-
-    Called after the user answers clarifying questions or skips them.
-    Uses the existing parsed_requirements (possibly enhanced with answers).
-    """
+    """Resume a paused pipeline from the discover stage onward."""
     current_project_id.set(project_id)
 
-    project = _projects.get(project_id)
+    store = get_project_store()
+    try:
+        project = await store.get_project(project_id)
+    except Exception:
+        logger.exception("Resume failed: project store unavailable")
+        return
+
     if not project:
         return
 
@@ -221,7 +259,6 @@ async def _resume_pipeline_task(project_id: str):
         "user_answers": project.get("user_answers"),
     }
 
-    # Only run from discover onwards
     steps = [
         ("discovering", discover_node),
         ("verifying", verify_node),
@@ -235,9 +272,11 @@ async def _resume_pipeline_task(project_id: str):
         for stage_name, step_fn in steps:
             project["current_stage"] = stage_name
             project["status"] = stage_name
+            await store.save_project(project)
 
             state = await step_fn(state)
             _sync_state_to_project(project, state)
+            await store.save_project(project)
 
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
@@ -245,19 +284,21 @@ async def _resume_pipeline_task(project_id: str):
 
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("Pipeline failed for project %s", project_id)
         project["status"] = "failed"
         project["current_stage"] = "failed"
         project["error"] = f"{str(e)}\n{traceback.format_exc()}"
+        try:
+            await store.save_project(project)
+        except Exception:
+            logger.exception("Failed to persist resumed pipeline failure state")
 
 
 @router.get("/{project_id}/status", response_model=PipelineStatusResponse)
 async def get_project_status(project_id: str):
     """Get the current status and results of a sourcing project pipeline."""
-    project = _projects.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await _get_project_or_404(project_id)
 
     return PipelineStatusResponse(
         project_id=uuid.UUID(project["id"]),
@@ -289,9 +330,7 @@ async def get_project_status(project_id: str):
             if project.get("recommendation_result")
             else None
         ),
-        chat_messages=[
-            ChatMessage(**m) for m in project.get("chat_messages", [])
-        ],
+        chat_messages=[ChatMessage(**m) for m in project.get("chat_messages", [])],
         outreach_state=(
             OutreachState(**project["outreach_state"])
             if project.get("outreach_state")
@@ -304,24 +343,15 @@ async def get_project_status(project_id: str):
 
 @router.get("/{project_id}/run-sync")
 async def run_project_sync(project_id: str):
-    """
-    Run the pipeline synchronously (for testing / demo).
-    Blocks until complete. Do not use in production.
-    """
-    project = _projects.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
+    """Run the pipeline synchronously (for testing / demo)."""
+    project = await _get_project_or_404(project_id)
     await _run_pipeline_task(project_id, project["product_description"])
     return await get_project_status(project_id)
 
 
 @router.post("/search")
 async def quick_search(request: ProjectCreateRequest):
-    """
-    Quick synchronous search — runs the full pipeline and returns results.
-    Use for demos and testing. Production should use async create + poll.
-    """
+    """Quick synchronous search — runs the full pipeline and returns results."""
     result = await run_pipeline(request.product_description)
 
     return {
@@ -343,13 +373,7 @@ async def get_logs(project_id: str):
 
 @router.get("/{project_id}/logs/stream")
 async def stream_logs(project_id: str):
-    """
-    SSE endpoint — streams live log entries as they happen.
-
-    Connect from the frontend with EventSource:
-        const es = new EventSource('/api/v1/projects/{id}/logs/stream')
-        es.onmessage = (e) => console.log(JSON.parse(e.data))
-    """
+    """SSE endpoint — streams live log entries as they happen."""
     return StreamingResponse(
         subscribe_to_logs(project_id),
         media_type="text/event-stream",
@@ -367,32 +391,24 @@ async def answer_clarifying_questions(
     request: ClarifyingAnswerRequest,
     background_tasks: BackgroundTasks,
 ):
-    """Submit answers to clarifying questions and resume the pipeline.
-
-    The answers are used to enhance the parsed requirements before discovery begins.
-    Uses a cheap LLM call to integrate user answers into the existing requirements.
-    """
-    project = _projects.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Submit answers to clarifying questions and resume the pipeline."""
+    project = await _get_project_or_404(project_id)
 
     if project.get("status") != "clarifying":
         raise HTTPException(status_code=400, detail="Project is not waiting for answers")
 
     try:
-        # Store user answers
         project["user_answers"] = request.answers
 
-        # Enhance parsed requirements with user answers via LLM
         reqs = project.get("parsed_requirements", {})
         enhance_prompt = f"""The user was asked clarifying questions about their procurement needs.
 Here are their answers:
 
-{json.dumps(request.answers, indent=2)}
+{request.answers}
 
 Here are the current parsed requirements:
 
-{json.dumps(reqs, indent=2)}
+{reqs}
 
 Update the requirements JSON with the user's answers. Fill in missing fields, refine search queries
 based on new information, and adjust regional search strategies if needed.
@@ -406,31 +422,35 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
         )
 
         try:
+            import json
+
             text = response.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             enhanced = json.loads(text)
-            # Validate it parses as ParsedRequirements
             ParsedRequirements(**enhanced)
             project["parsed_requirements"] = enhanced
             logger.info("Enhanced requirements with %d answers", len(request.answers))
-        except (json.JSONDecodeError, Exception) as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Could not enhance requirements with answers: %s — continuing with original", e)
 
-        # Clear clarifying state and resume pipeline
         project["clarifying_questions"] = None
         project["status"] = "discovering"
         project["current_stage"] = "discovering"
+        await _save_project(project)
 
         background_tasks.add_task(_resume_pipeline_task, project_id)
 
-        return {"status": "resumed", "message": f"Integrated {len(request.answers)} answers, resuming pipeline"}
+        return {
+            "status": "resumed",
+            "message": f"Integrated {len(request.answers)} answers, resuming pipeline",
+        }
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Answer processing failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{project_id}/skip-questions")
@@ -439,17 +459,15 @@ async def skip_clarifying_questions(
     background_tasks: BackgroundTasks,
 ):
     """Skip all clarifying questions and resume the pipeline with existing requirements."""
-    project = _projects.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await _get_project_or_404(project_id)
 
     if project.get("status") != "clarifying":
         raise HTTPException(status_code=400, detail="Project is not waiting for answers")
 
-    # Clear clarifying state and resume
     project["clarifying_questions"] = None
     project["status"] = "discovering"
     project["current_stage"] = "discovering"
+    await _save_project(project)
 
     background_tasks.add_task(_resume_pipeline_task, project_id)
 
@@ -459,12 +477,18 @@ async def skip_clarifying_questions(
 @router.get("")
 async def list_projects():
     """List all projects (for demo purposes)."""
+    store = get_project_store()
+    try:
+        projects = await store.list_projects()
+    except StoreUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+
     return [
         {
-            "id": p["id"],
-            "title": p["title"],
-            "status": p["status"],
-            "current_stage": p["current_stage"],
+            "id": p.get("id"),
+            "title": p.get("title"),
+            "status": p.get("status"),
+            "current_stage": p.get("current_stage"),
         }
-        for p in _projects.values()
+        for p in projects
     ]

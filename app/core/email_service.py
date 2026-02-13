@@ -144,7 +144,7 @@ def build_rfq_html(
                 <div style="background-color: #f8f9fa; padding: 16px 32px;
                             border-top: 1px solid #e2e8f0;">
                     <p style="margin: 0; color: #888; font-size: 11px;">
-                        Sent via ProcureAI &middot; AI-Powered Procurement
+                        Sent via Tamkin &middot; AI-Powered Procurement
                     </p>
                 </div>
             </div>

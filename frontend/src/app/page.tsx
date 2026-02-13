@@ -1,15 +1,17 @@
 'use client'
 
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+
+import { tamkinClient } from '@/lib/api/tamkinClient'
+import { featureFlags } from '@/lib/featureFlags'
 
 import './tamkin-landing.css'
 
 type ConvoBlock =
   | { kind: 'message'; role: 'u' | 'a'; text: string }
-  | { kind: 'status' }
-  | { kind: 'results' }
-  | { kind: 'reco' }
-  | { kind: 'readonlyInput' }
+  | { kind: 'status'; text: string }
 
 function AgentAvatar() {
   return (
@@ -62,47 +64,34 @@ function CaseIconFour() {
 }
 
 export default function HomePage() {
+  const router = useRouter()
+
   const [liveInput, setLiveInput] = useState('')
-  const [hasRunDemo, setHasRunDemo] = useState(false)
-  const [hideInput, setHideInput] = useState(false)
+  const [isStartingIntake, setIsStartingIntake] = useState(false)
+  const [intakeError, setIntakeError] = useState<string | null>(null)
   const [blocks, setBlocks] = useState<ConvoBlock[]>([])
 
+  const [leadEmail, setLeadEmail] = useState('')
+  const [leadNote, setLeadNote] = useState('')
+  const [leadSubmitting, setLeadSubmitting] = useState(false)
+  const [leadError, setLeadError] = useState<string | null>(null)
+  const [leadSuccess, setLeadSuccess] = useState<string | null>(null)
+
+  const [sessionId, setSessionId] = useState<string | null>(null)
+
   const convoRef = useRef<HTMLDivElement | null>(null)
-  const timersRef = useRef<number[]>([])
 
-  const schedule = (fn: () => void, delay: number) => {
-    const id = window.setTimeout(fn, delay)
-    timersRef.current.push(id)
-  }
+  useEffect(() => {
+    if (!sessionId) {
+      setSessionId(`sess_${Math.random().toString(36).slice(2)}`)
+    }
+  }, [sessionId])
 
-  const runDemo = () => {
-    if (hasRunDemo) return
-
-    const text =
-      liveInput.trim() ||
-      'Hey - we are launching a streetwear brand and need someone who can make about 500 heavyweight hoodies with embroidered logos. Trying to stay around $15-20 each. Who is good?'
-
-    setHasRunDemo(true)
-    setHideInput(true)
-
-    schedule(() => setBlocks((prev) => [...prev, { kind: 'message', role: 'u', text }]), 400)
-    schedule(
-      () =>
-        setBlocks((prev) => [
-          ...prev,
-          {
-            kind: 'message',
-            role: 'a',
-            text: 'Love that. Let me pull up the best manufacturers for heavyweight cut-and-sew hoodies with embroidery - searching globally now.',
-          },
-        ]),
-      1500
-    )
-    schedule(() => setBlocks((prev) => [...prev, { kind: 'status' }]), 2700)
-    schedule(() => setBlocks((prev) => [...prev, { kind: 'results' }]), 4600)
-    schedule(() => setBlocks((prev) => [...prev, { kind: 'reco' }]), 6000)
-    schedule(() => setBlocks((prev) => [...prev, { kind: 'readonlyInput' }]), 6500)
-  }
+  useEffect(() => {
+    if (featureFlags.tamkinLandingBypass) {
+      router.replace('/product')
+    }
+  }, [router])
 
   useEffect(() => {
     if (!convoRef.current) return
@@ -120,13 +109,102 @@ export default function HomePage() {
     )
 
     document.querySelectorAll('.rv').forEach((node) => observer.observe(node))
-
-    return () => {
-      observer.disconnect()
-      timersRef.current.forEach((id) => window.clearTimeout(id))
-      timersRef.current = []
-    }
+    return () => observer.disconnect()
   }, [])
+
+  if (featureFlags.tamkinLandingBypass) return null
+
+  const track = async (eventName: string, payload: Record<string, unknown> = {}) => {
+    try {
+      await tamkinClient.trackEvent({
+        event_name: eventName,
+        session_id: sessionId || undefined,
+        path: '/',
+        payload,
+      })
+    } catch {
+      // Non-blocking telemetry.
+    }
+  }
+
+  const startIntake = async () => {
+    if (isStartingIntake) return
+
+    const message =
+      liveInput.trim() ||
+      'Need 500 heavyweight hoodies with embroidery, target budget $15-20 per unit, shipping to Los Angeles in 6 weeks.'
+
+    setIsStartingIntake(true)
+    setIntakeError(null)
+    setBlocks((prev) => [
+      ...prev,
+      { kind: 'message', role: 'u', text: message },
+      {
+        kind: 'message',
+        role: 'a',
+        text: 'Got it. I am starting your sourcing mission now and moving this into your product workspace.',
+      },
+      { kind: 'status', text: 'Starting mission and preparing your product workspace...' },
+    ])
+
+    await track('hero_intake_submit', { location: 'scene_chat' })
+
+    try {
+      const result = await tamkinClient.startIntake({
+        message,
+        source: 'landing_hero',
+        session_id: sessionId || undefined,
+      })
+      router.push(result.redirect_path)
+    } catch (err: any) {
+      const detail = err?.message || 'Could not start your mission. Please try again.'
+      setIntakeError(detail)
+      setBlocks((prev) => [
+        ...prev,
+        {
+          kind: 'message',
+          role: 'a',
+          text: `I could not start your mission right now: ${detail}`,
+        },
+      ])
+      setIsStartingIntake(false)
+    }
+  }
+
+  const submitLead = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (leadSubmitting) return
+
+    setLeadSubmitting(true)
+    setLeadError(null)
+    setLeadSuccess(null)
+
+    await track('early_access_submit_attempt', { has_note: Boolean(leadNote.trim()) })
+
+    try {
+      const result = await tamkinClient.submitLead({
+        email: leadEmail,
+        sourcing_note: leadNote.trim() || undefined,
+        source: 'landing_early_access',
+      })
+
+      if (result.deduped) {
+        setLeadSuccess('You are already on the list. We updated your latest sourcing note.')
+      } else {
+        setLeadSuccess('You are in. We will contact you with early access updates.')
+      }
+
+      setLeadEmail('')
+      setLeadNote('')
+      await track('early_access_submit_success', { deduped: result.deduped })
+    } catch (err: any) {
+      const detail = err?.message || 'Could not save your request.'
+      setLeadError(detail)
+      await track('early_access_submit_error', { detail })
+    } finally {
+      setLeadSubmitting(false)
+    }
+  }
 
   return (
     <>
@@ -135,7 +213,16 @@ export default function HomePage() {
         <div className="nav-links">
           <a href="#how">How It Works</a>
           <a href="#cases">Use Cases</a>
-          <a href="#waitlist" className="nav-cta">Early Access</a>
+          <a href="#waitlist">Early Access</a>
+          <Link
+            href="/product"
+            className="nav-cta"
+            onClick={() => {
+              void track('cta_start_sourcing_click', { location: 'nav' })
+            }}
+          >
+            Start now
+          </Link>
         </div>
       </nav>
 
@@ -153,13 +240,19 @@ export default function HomePage() {
               Tamkin finds manufacturers around the world, verifies them, gets real quotes, and manages everything - from first search to first order.
             </p>
             <div className="hero-ctas">
-              <a href="#waitlist" className="btn-d">
-                Get Early Access
+              <Link
+                href="/product"
+                className="btn-d"
+                onClick={() => {
+                  void track('cta_start_sourcing_click', { location: 'hero' })
+                }}
+              >
+                Start sourcing now
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                   <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-              </a>
-              <a href="#how" className="btn-g">See How It Works</a>
+              </Link>
+              <a href="#waitlist" className="btn-g">Get Early Access</a>
             </div>
           </div>
 
@@ -187,24 +280,23 @@ export default function HomePage() {
           </div>
 
           <div className="convo rv" id="convo" ref={convoRef}>
-            {!hasRunDemo && (
-              <div className={`convo-input ${hideInput ? 'input-exit' : ''}`} id="inputWrap">
-                <input
-                  id="liveInput"
-                  placeholder="Describe what you need - in your own words..."
-                  value={liveInput}
-                  onChange={(e) => setLiveInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') runDemo()
-                  }}
-                />
-                <button className="convo-send" id="sendBtn" onClick={runDemo} aria-label="Run demo">
-                  <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-                    <path d="M3 8h10M9 4l4 4-4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </div>
-            )}
+            <div className="convo-input" id="inputWrap">
+              <input
+                id="liveInput"
+                placeholder="Describe what you need - in your own words..."
+                value={liveInput}
+                onChange={(e) => setLiveInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void startIntake()
+                }}
+                disabled={isStartingIntake}
+              />
+              <button className="convo-send" id="sendBtn" onClick={startIntake} aria-label="Start intake" disabled={isStartingIntake}>
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path d="M3 8h10M9 4l4 4-4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
 
             {blocks.map((block, idx) => {
               if (block.kind === 'message') {
@@ -225,64 +317,19 @@ export default function HomePage() {
                 )
               }
 
-              if (block.kind === 'status') {
-                return (
-                  <div key={`${block.kind}-${idx}`} className="status">
-                    <div className="status-h"><span className="dot-pulse" /> Searching for you</div>
-                    <div className="status-line"><span className="ck">✓</span> Found 12,400 apparel manufacturers worldwide</div>
-                    <div className="status-line"><span className="ck">✓</span> Narrowed down to heavyweight fleece with embroidery</div>
-                    <div className="status-line"><span className="ck">✓</span> Verified 6 strong matches - reaching out now</div>
-                    <div className="status-line pending"><span className="ck">·</span> Waiting to hear back from 4 manufacturers...</div>
-                  </div>
-                )
-              }
-
-              if (block.kind === 'results') {
-                return (
-                  <div key={`${block.kind}-${idx}`} className="results">
-                    <div className="r-card pick">
-                      <div className="r-name">Stellar Garments Co.</div>
-                      <div className="r-loc">Lahore, Pakistan - Est. 2011</div>
-                      <div className="r-row">
-                        <span className="r-chip price">$13.80/unit</span>
-                        <span className="r-chip meta">MOQ 300</span>
-                        <span className="r-chip meta">21-day lead</span>
-                      </div>
-                    </div>
-                    <div className="r-card">
-                      <div className="r-name">Pacific Stitch MFG</div>
-                      <div className="r-loc">Ho Chi Minh City, Vietnam - Est. 2016</div>
-                      <div className="r-row">
-                        <span className="r-chip price">$16.20/unit</span>
-                        <span className="r-chip meta">MOQ 200</span>
-                        <span className="r-chip meta">18-day lead</span>
-                      </div>
-                    </div>
-                  </div>
-                )
-              }
-
-              if (block.kind === 'reco') {
-                return (
-                  <div key={`${block.kind}-${idx}`} className="reco">
-                    My pick is <strong>Stellar Garments</strong> - they specialize in heavyweight French terry,
-                    do beautiful embroidery work, and they&apos;re quoting <strong>$13.80 per hoodie</strong> for 500 pieces.
-                    Three-week turnaround. I&apos;ve already reached out to them. Want me to get samples sent your way?
-                  </div>
-                )
-              }
-
               return (
-                <div key={`${block.kind}-${idx}`} className="convo-input" style={{ marginTop: '4px' }}>
-                  <input value="Yes, request samples from Stellar..." readOnly />
-                  <div className="convo-send" aria-hidden>
-                    <svg viewBox="0 0 16 16" fill="none">
-                      <path d="M3 8h10M9 4l4 4-4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
+                <div key={`${block.kind}-${idx}`} className="status">
+                  <div className="status-h"><span className="dot-pulse" /> Agent status</div>
+                  <div className="status-line"><span className="ck">✓</span> {block.text}</div>
                 </div>
               )
             })}
+
+            {intakeError && (
+              <div className="reco" role="alert">
+                <strong>Could not start mission.</strong> {intakeError}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -442,11 +489,48 @@ export default function HomePage() {
           <div className="scene-tag" style={{ textAlign: 'center' }}>Early Access</div>
           <h2>Stop searching.<br />Start <em>finding</em>.</h2>
           <p>Join the waitlist. Tell us what you&apos;re sourcing - we&apos;ll show you what&apos;s possible.</p>
-          <div className="ff">
-            <input type="email" className="fi" placeholder="your@email.com" />
-            <button className="fb" type="button">Get Early Access</button>
+
+          <form onSubmit={submitLead}>
+            <div className="ff">
+              <input
+                type="email"
+                className="fi"
+                placeholder="your@email.com"
+                value={leadEmail}
+                onChange={(e) => setLeadEmail(e.target.value)}
+                required
+                disabled={leadSubmitting}
+              />
+              <button className="fb" type="submit" disabled={leadSubmitting}>
+                {leadSubmitting ? 'Saving...' : 'Get Early Access'}
+              </button>
+            </div>
+            <input
+              type="text"
+              className="fi"
+              style={{ marginTop: 10, width: '100%' }}
+              placeholder="What are you sourcing? (optional)"
+              value={leadNote}
+              onChange={(e) => setLeadNote(e.target.value)}
+              disabled={leadSubmitting}
+            />
+          </form>
+
+          <div className="hero-ctas" style={{ justifyContent: 'center' }}>
+            <Link
+              href="/product"
+              className="btn-g"
+              onClick={() => {
+                void track('cta_start_sourcing_click', { location: 'final' })
+              }}
+            >
+              Go to product now
+            </Link>
           </div>
-          <div className="fn">Free to try - No credit card - First 100 get priority</div>
+
+          {leadError && <div className="fn" style={{ color: '#B91C1C' }}>{leadError}</div>}
+          {leadSuccess && <div className="fn" style={{ color: '#065F46' }}>{leadSuccess}</div>}
+          {!leadError && !leadSuccess && <div className="fn">Free to try - No credit card - First 100 get priority</div>}
         </div>
       </section>
 
