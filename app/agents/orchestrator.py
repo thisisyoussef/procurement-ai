@@ -110,10 +110,28 @@ async def verify_node(state: GraphState) -> GraphState:
             discovery.suppliers, key=lambda s: s.relevance_score, reverse=True
         )[:20]
         result = await verify_suppliers(top_suppliers)
+
+        # Merge enriched contacts back into discovery results so downstream
+        # agents (compare, recommend, outreach) see the updated emails/phones.
+        enriched_map = {
+            (s.name, s.website or ""): s for s in top_suppliers
+        }
+        for i, supplier in enumerate(discovery.suppliers):
+            key = (supplier.name, supplier.website or "")
+            enriched = enriched_map.get(key)
+            if enriched:
+                if enriched.email and not supplier.email:
+                    discovery.suppliers[i].email = enriched.email
+                if enriched.phone and not supplier.phone:
+                    discovery.suppliers[i].phone = enriched.phone
+                if enriched.enrichment:
+                    discovery.suppliers[i].enrichment = enriched.enrichment
+
         logger.info("═══ VERIFICATION COMPLETE ═══")
         return {
             **state,
             "current_stage": PipelineStage.COMPARING.value,
+            "discovery_results": discovery.model_dump(mode="json"),
             "verification_results": result.model_dump(mode="json"),
             "error": None,
         }

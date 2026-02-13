@@ -344,6 +344,11 @@ async def apply_verification_feedback(
             continue
 
         discovered.supplier_id = str(row.id)
+
+        # Merge enriched contact info (email, phone, etc.) into the DB row.
+        # Enrichment may have found these during the verification pre-step.
+        _merge_supplier_row(row, discovered)
+
         composite_score = float(verification.get("composite_score", 0) or 0)
         row.verification_score = max(row.verification_score or 0, composite_score)
         recommendation = str(verification.get("recommendation", "")).lower()
