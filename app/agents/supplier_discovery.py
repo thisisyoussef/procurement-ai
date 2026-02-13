@@ -53,6 +53,51 @@ B2B_MARKETPLACES = [
     {"name": "made_in_china", "domain": "made-in-china.com", "suffix": "manufacturer", "tags": ["electronics", "toys", "packaging", "textiles", "hardware"]},
 ]
 
+INDUSTRIAL_MARKETPLACE_NAMES = {
+    "alibaba",
+    "thomasnet",
+    "globalsources",
+    "europages",
+    "made_in_china",
+    "indiamart",
+}
+
+INDUSTRIAL_SIGNALS = {
+    "automotive",
+    "oem",
+    "tier 1",
+    "tier-1",
+    "tier 2",
+    "tier-2",
+    "iatf",
+    "ppap",
+    "apqp",
+    "stamped steel",
+    "stamping",
+    "seat bracket",
+    "wire harness",
+    "machining",
+    "forging",
+    "drivetrain",
+    "inverter",
+    "die cast",
+    "gm",
+}
+
+CONSUMER_MERCH_INDICATORS = {
+    "tote",
+    "hoodie",
+    "hoodies",
+    "streetwear",
+    "apparel",
+    "merch",
+    "gift shop",
+    "boutique",
+    "canvas bag",
+    "promotional bag",
+    "e-commerce store",
+}
+
 
 def _select_b2b_marketplaces(product_type: str, max_count: int = 3) -> list[dict]:
     """Pick the most relevant B2B marketplaces for the product type."""
@@ -65,6 +110,20 @@ def _select_b2b_marketplaces(product_type: str, max_count: int = 3) -> list[dict
         scored.append((score, mp))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [mp for _, mp in scored[:max_count]]
+
+
+def _is_industrial_oem_requirements(requirements: ParsedRequirements) -> bool:
+    blob = " ".join(
+        [
+            requirements.product_type or "",
+            requirements.material or "",
+            requirements.customization or "",
+            requirements.sourcing_strategy or "",
+            " ".join(requirements.certifications_needed or []),
+            " ".join(requirements.search_queries or []),
+        ]
+    ).lower()
+    return any(signal in blob for signal in INDUSTRIAL_SIGNALS)
 
 
 # ── Product Page URL Validation ──────────────────────────────────
@@ -143,12 +202,19 @@ async def _search_web(queries: list[str], max_per_query: int = 3) -> list[dict]:
 async def _search_marketplaces(
     product_type: str,
     material: str | None = None,
+    industrial_mode: bool = False,
     max_per_query: int = 3,
 ) -> list[dict]:
     """Search Etsy, Alibaba, Amazon, and B2B marketplaces via Firecrawl site: queries."""
     search_term = f"{material} {product_type}" if material else product_type
-    selected_b2b = _select_b2b_marketplaces(product_type, max_count=3)
-    all_mps = COMMON_MARKETPLACES + selected_b2b
+    selected_b2b = _select_b2b_marketplaces(product_type, max_count=4)
+    if industrial_mode:
+        all_mps = [
+            mp for mp in (COMMON_MARKETPLACES + selected_b2b)
+            if mp["name"] in INDUSTRIAL_MARKETPLACE_NAMES
+        ]
+    else:
+        all_mps = COMMON_MARKETPLACES + selected_b2b
 
     logger.info("🏪 Searching %d marketplaces for '%s'...", len(all_mps), search_term)
     emit_progress("discovering", "searching_marketplaces",
@@ -532,10 +598,19 @@ Return a JSON array of query strings. Example: ["query1", "query2", "query3"]"""
 async def _score_and_deduplicate(
     all_raw: list[dict],
     requirements: ParsedRequirements,
+    industrial_mode: bool = False,
 ) -> list[DiscoveredSupplier]:
     """Send raw results to LLM for scoring, deduplication, and ranking."""
     emit_progress("discovering", "scoring",
                   f"AI analyzing and ranking {len(all_raw)} raw results...")
+
+    industrial_guardrail = """
+
+INDUSTRIAL/OEM GUARDRAIL:
+- This request is industrial/OEM sourcing. Strongly penalize consumer merch and retail results.
+- Tote bags, hoodies, streetwear, gift shops, boutiques, and generic e-commerce sellers should score below 20 unless they clearly manufacture the exact industrial part.
+- Prefer suppliers mentioning OEM, manufacturing, factory, tooling, stamping, machining, APQP/PPAP/IATF readiness.
+""" if industrial_mode else ""
 
     prompt = f"""Product requirements:
 {requirements.model_dump_json(indent=2)}
@@ -564,6 +639,7 @@ CRITICAL SCORING RULES:
 2. PENALIZE retail stores — shops, boutiques, e-commerce stores that sell to consumers (not B2B) get -30 to -40 points.
 3. PRIORITIZE factories — actual manufacturers, factories, OEM producers get a +10-15 bonus.
 4. Geographic material signals — if the product references a material origin (Egyptian cotton, Italian leather), prefer manufacturers FROM that region.
+{industrial_guardrail}
 
 MARKETPLACE RESULTS:
 - Results with source starting with "marketplace_" come from real marketplace product listings (Etsy, Alibaba, Amazon, etc.).
@@ -646,6 +722,9 @@ async def discover_suppliers(
     """
     logger.info("🏭 Starting supplier discovery with %d search queries, %d regional configs",
                 len(requirements.search_queries), len(requirements.regional_searches))
+    industrial_mode = _is_industrial_oem_requirements(requirements)
+    if industrial_mode:
+        logger.info("🏭 Industrial/OEM mode enabled for discovery guardrails")
     queries = requirements.search_queries
     if not queries:
         queries = [f"{requirements.product_type} manufacturer"]
@@ -658,7 +737,11 @@ async def discover_suppliers(
     search_tasks = [
         _search_google(queries, location_hint=requirements.delivery_location),
         _search_web(queries),
-        _search_marketplaces(product_type=requirements.product_type, material=requirements.material),
+        _search_marketplaces(
+            product_type=requirements.product_type,
+            material=requirements.material,
+            industrial_mode=industrial_mode,
+        ),
         _search_supplier_memory(requirements),
     ]
     if requirements.regional_searches:
@@ -729,7 +812,7 @@ async def discover_suppliers(
     # ── Step 2: LLM scoring and deduplication ─────────────────
     if all_raw:
         emit_progress("discovering", "scoring", f"Found {len(all_raw)} raw results. AI is scoring and ranking...")
-        suppliers = await _score_and_deduplicate(all_raw, requirements)
+        suppliers = await _score_and_deduplicate(all_raw, requirements, industrial_mode=industrial_mode)
     else:
         suppliers = []
 
@@ -783,7 +866,7 @@ async def discover_suppliers(
         if new_raw:
             all_raw.extend(new_raw)
             # Re-score combined results
-            suppliers = await _score_and_deduplicate(all_raw, requirements)
+            suppliers = await _score_and_deduplicate(all_raw, requirements, industrial_mode=industrial_mode)
             if memory_results:
                 suppliers = _merge_supplier_lists(suppliers, memory_results)
             suppliers, extra_resolved = await _filter_and_resolve_intermediaries(
@@ -808,6 +891,20 @@ async def discover_suppliers(
         # Check low relevance
         if s.relevance_score < 30:
             reason = "low_relevance"
+        # In industrial mode, remove consumer-merch results aggressively.
+        elif industrial_mode:
+            blob = " ".join(
+                [
+                    s.name or "",
+                    s.description or "",
+                    " ".join(s.categories or []),
+                    s.source or "",
+                ]
+            ).lower()
+            if any(ind in blob for ind in CONSUMER_MERCH_INDICATORS):
+                reason = "wrong_industry"
+            elif s.source in {"marketplace_etsy", "marketplace_amazon", "marketplace_faire"}:
+                reason = "wrong_industry"
         # Check retail indicators at moderate relevance
         elif s.relevance_score < 50 and s.description:
             desc_lower = s.description.lower()
