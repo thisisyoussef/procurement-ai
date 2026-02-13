@@ -1,8 +1,9 @@
 """Multi-tier waterfall contact enrichment engine.
 
 Relentlessly finds supplier email addresses and phone numbers by chaining
-progressively more expensive methods. Short-circuits at the first tier
-that finds a valid email.
+progressively more expensive methods. Cheap tiers (1 & 2) always run to
+accumulate the best possible email; expensive tiers (3–5) short-circuit
+once a valid email is found.
 
 Tiers:
   1. Contact page scraping (free — uses existing scrapers)
@@ -85,7 +86,11 @@ def _extract_domain(url: str) -> str | None:
 # ── Tier 1: Contact page scraping (free) ──────────────────────────
 
 async def _tier1_scrape_contact_pages(supplier: DiscoveredSupplier) -> dict:
-    """Scrape common contact pages for email/phone using existing scrapers."""
+    """Scrape common contact pages for email/phone using existing scrapers.
+
+    Scrapes the homepage (footer!) plus many common contact page paths
+    in parallel to maximise coverage.
+    """
     from app.agents.tools.web_search import scrape_url_basic
 
     if not supplier.website:
@@ -93,23 +98,27 @@ async def _tier1_scrape_contact_pages(supplier: DiscoveredSupplier) -> dict:
 
     base = supplier.website.rstrip("/")
     contact_paths = [
+        "",  # homepage — footers almost always have contact info
         "/contact", "/contact-us", "/contact_us",
         "/about", "/about-us", "/about_us",
         "/reach-us", "/get-in-touch", "/enquiry",
+        "/get-a-quote", "/request-quote", "/inquiry",
+        "/support", "/customer-service",
     ]
 
     all_emails: list[str] = []
     all_phones: list[str] = []
 
-    # Scrape contact pages in parallel (max 3 concurrent)
-    sem = asyncio.Semaphore(3)
+    # Scrape contact pages in parallel (max 5 concurrent)
+    sem = asyncio.Semaphore(5)
 
     async def _scrape(path: str):
         async with sem:
             url = base + path
             try:
-                result = await scrape_url_basic(url, max_length=3000)
-                # Extract mailto/tel links found by scrape_url_basic
+                result = await scrape_url_basic(url, max_length=6000)
+                # scrape_url_basic now extracts emails/phones from full HTML
+                # (including footer/nav) before cleanup
                 all_emails.extend(result.get("emails", []))
                 all_phones.extend(result.get("phones", []))
 
@@ -136,80 +145,112 @@ async def _tier1_scrape_contact_pages(supplier: DiscoveredSupplier) -> dict:
 # ── Tier 2: Firecrawl AI extraction ───────────────────────────────
 
 async def _tier2_firecrawl_extract(supplier: DiscoveredSupplier) -> dict:
-    """Use Firecrawl's /extract endpoint with AI to pull contact info."""
+    """Use Firecrawl's /extract endpoint with AI to pull contact info.
+
+    Tries the /contact page first (where contact info is most likely),
+    then falls back to the homepage. Includes full page content
+    (footer/nav) in the extraction scope.
+    """
     if not settings.firecrawl_api_key or not supplier.website:
         return {"emails": [], "phones": [], "source": "firecrawl_extract"}
+
+    base = supplier.website.rstrip("/")
+    # Try contact page first, then homepage
+    urls_to_try = [base + "/contact", base]
 
     logger.info("  Tier 2: Firecrawl AI extraction for %s", supplier.website)
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.firecrawl_api_key}",
     }
-    body = {
-        "url": supplier.website,
-        "formats": ["extract"],
-        "extract": {
-            "prompt": (
-                "Extract all contact information from this website: "
-                "email addresses (especially sales/quotes/orders emails), "
-                "phone numbers, fax numbers, physical address, "
-                "and names/titles of sales or procurement contacts."
-            ),
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "emails": {"type": "array", "items": {"type": "string"}},
-                    "phones": {"type": "array", "items": {"type": "string"}},
-                    "address": {"type": "string"},
-                    "contacts": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "title": {"type": "string"},
-                                "email": {"type": "string"},
-                                "phone": {"type": "string"},
+
+    all_emails: list[str] = []
+    all_phones: list[str] = []
+
+    for target_url in urls_to_try:
+        body = {
+            "url": target_url,
+            "formats": ["extract"],
+            "onlyMainContent": False,  # Include footer/nav/header content
+            "extract": {
+                "prompt": (
+                    "Extract ALL contact information from this website page. "
+                    "Look everywhere including the footer, header, sidebar, and pop-ups. "
+                    "Find: email addresses (especially sales/quotes/orders/rfq/inquiry emails), "
+                    "phone numbers, fax numbers, WhatsApp numbers, "
+                    "physical address, contact form URLs, LinkedIn company page, "
+                    "and names/titles of sales or procurement contacts."
+                ),
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "emails": {"type": "array", "items": {"type": "string"}},
+                        "phones": {"type": "array", "items": {"type": "string"}},
+                        "whatsapp": {"type": "array", "items": {"type": "string"}},
+                        "address": {"type": "string"},
+                        "contact_form_url": {"type": "string"},
+                        "linkedin_url": {"type": "string"},
+                        "contacts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "email": {"type": "string"},
+                                    "phone": {"type": "string"},
+                                },
                             },
                         },
                     },
                 },
             },
-        },
-    }
+        }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.post(
-                "https://api.firecrawl.dev/v1/scrape",
-                json=body,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except (httpx.HTTPError, Exception) as e:
-            logger.warning("  Tier 2: Firecrawl extract failed: %s", e)
-            return {"emails": [], "phones": [], "source": "firecrawl_extract"}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.post(
+                    "https://api.firecrawl.dev/v1/scrape",
+                    json=body,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except (httpx.HTTPError, Exception) as e:
+                logger.warning("  Tier 2: Firecrawl extract failed for %s: %s", target_url, e)
+                continue
 
-    extracted = data.get("data", {}).get("extract", {})
-    emails = extracted.get("emails", [])
-    phones = extracted.get("phones", [])
+        extracted = data.get("data", {}).get("extract", {})
+        emails = extracted.get("emails", [])
+        phones = extracted.get("phones", [])
 
-    # Also check contacts array for additional emails
-    for contact in extracted.get("contacts", []):
-        if contact.get("email"):
-            emails.append(contact["email"])
-        if contact.get("phone"):
-            phones.append(contact["phone"])
+        # Also check contacts array for additional emails
+        for contact in extracted.get("contacts", []):
+            if contact.get("email"):
+                emails.append(contact["email"])
+            if contact.get("phone"):
+                phones.append(contact["phone"])
 
-    emails = list({e.lower() for e in emails if _is_valid_email(e)})
-    phones = list(set(phones))
+        # WhatsApp numbers are also useful phone contacts
+        whatsapp = extracted.get("whatsapp", [])
+        phones.extend(whatsapp)
+
+        all_emails.extend(emails)
+        all_phones.extend(phones)
+
+        # If we found emails on the contact page, no need to try homepage
+        if emails:
+            logger.info("  Tier 2: Found %d emails on %s — skipping homepage", len(emails), target_url)
+            break
+
+    all_emails = list({e.lower() for e in all_emails if _is_valid_email(e)})
+    all_phones = list(set(all_phones))
 
     logger.info(
         "  Tier 2 (Firecrawl extract): %d emails, %d phones",
-        len(emails), len(phones),
+        len(all_emails), len(all_phones),
     )
-    return {"emails": emails, "phones": phones, "source": "firecrawl_extract"}
+    return {"emails": all_emails, "phones": all_phones, "source": "firecrawl_extract"}
 
 
 # ── Tier 3: Visual analysis (Browserless + Claude Vision) ─────────
@@ -283,7 +324,11 @@ async def _tier4_hunter_io(supplier: DiscoveredSupplier) -> dict:
 # ── Tier 5: Google search for contact info ────────────────────────
 
 async def _tier5_google_search(supplier: DiscoveredSupplier) -> dict:
-    """Search Google for the supplier's contact information."""
+    """Search Google for the supplier's contact information.
+
+    Runs all available queries and collects results from each
+    rather than stopping at the first hit.
+    """
     from app.agents.tools.firecrawl_scraper import search_web
 
     if not settings.firecrawl_api_key:
@@ -298,26 +343,25 @@ async def _tier5_google_search(supplier: DiscoveredSupplier) -> dict:
         domain = _extract_domain(supplier.website)
         if domain:
             queries.append(f"site:{domain} contact email")
+            queries.append(f'"{supplier.name}" "{domain}" contact email phone')
 
-    logger.info("  Tier 5: Google search for contacts of %s", supplier.name)
+    logger.info("  Tier 5: Google search for contacts of %s (%d queries)", supplier.name, len(queries))
 
     all_emails: list[str] = []
     all_phones: list[str] = []
 
-    for query in queries[:2]:  # Limit to 2 searches to conserve credits
-        results = await search_web(query, max_results=3)
+    phone_pattern = re.compile(r"[\+]?[(]?[0-9]{1,4}[)]?[-\s\./0-9]{7,15}")
+
+    # Run all queries — don't break early, collect everything
+    for query in queries:
+        results = await search_web(query, max_results=5)
         for result in results:
             content = result.get("content", "")
             found_emails = EMAIL_REGEX.findall(content)
             all_emails.extend(found_emails)
 
-            # Basic phone extraction from search results
-            phone_pattern = re.compile(r"[\+]?[(]?[0-9]{1,4}[)]?[-\s\./0-9]{7,15}")
             found_phones = phone_pattern.findall(content)
             all_phones.extend(found_phones)
-
-        if all_emails:
-            break  # Found something, stop searching
 
     # Filter to emails that look like they belong to this supplier
     domain = _extract_domain(supplier.website) if supplier.website else None
@@ -328,11 +372,15 @@ async def _tier5_google_search(supplier: DiscoveredSupplier) -> dict:
             all_emails = domain_emails
 
     emails = list({e.lower() for e in all_emails if _is_valid_email(e)})
-    phones = list(set(all_phones))[:3]  # Limit phones to avoid noise
+    phones = list(set(all_phones))[:5]  # Limit phones to avoid noise
 
     logger.info("  Tier 5 (Google search): %d emails, %d phones", len(emails), len(phones))
     return {"emails": emails, "phones": phones, "source": "google_search"}
 
+
+# ── Cheap tiers (always run both) ────────────────────────────────
+
+CHEAP_TIERS = {"contact_page_scrape", "firecrawl_extract"}
 
 # ── Main enrichment orchestrator ──────────────────────────────────
 
@@ -342,13 +390,14 @@ async def enrich_supplier_contacts(
 ) -> DiscoveredSupplier:
     """Run the waterfall contact enrichment pipeline on a single supplier.
 
-    Tries progressively more expensive methods until an email is found.
+    Always runs Tiers 1 & 2 (cheap) to accumulate the best possible email.
+    Only short-circuits at Tier 3+ (expensive) once a valid email is found.
     Updates the supplier's email, phone, and enrichment fields in-place.
 
     Args:
         supplier: The supplier to enrich.
         aggressive: If True, try all tiers including paid APIs.
-                    If False, only try free tiers (1, 2, 5).
+                    If False, only try cheap tiers (1, 2).
 
     Returns:
         The supplier with updated contact info and enrichment metadata.
@@ -374,14 +423,15 @@ async def enrich_supplier_contacts(
         ("firecrawl_extract", _tier2_firecrawl_extract),
     ]
 
-    if aggressive and settings.browserless_api_key:
-        tiers.append(("visual_analysis", _tier3_visual_analysis))
+    if aggressive:
+        if settings.browserless_api_key:
+            tiers.append(("visual_analysis", _tier3_visual_analysis))
 
-    if aggressive and settings.hunter_api_key:
-        tiers.append(("hunter_io", _tier4_hunter_io))
+        if settings.hunter_api_key:
+            tiers.append(("hunter_io", _tier4_hunter_io))
 
-    # Google search is free but uses Firecrawl credits
-    tiers.append(("google_search", _tier5_google_search))
+        # Google search uses Firecrawl credits
+        tiers.append(("google_search", _tier5_google_search))
 
     # Run the waterfall
     for tier_name, tier_fn in tiers:
@@ -402,8 +452,9 @@ async def enrich_supplier_contacts(
         if phones:
             result.phones_found.extend(phones)
 
-        # Short-circuit: found a valid email
-        if emails:
+        # Cheap tiers (1 & 2): always run both to accumulate best emails.
+        # Expensive tiers (3+): short-circuit once we have a valid email.
+        if tier_name not in CHEAP_TIERS and result.emails_found:
             best = _pick_best_email(result.emails_found)
             if best:
                 result.best_email = best
@@ -412,10 +463,25 @@ async def enrich_supplier_contacts(
                     50.0 + (len(result.sources_succeeded) * 15),
                 )
                 logger.info(
-                    "  Found email via %s: %s (confidence: %.0f)",
+                    "  Found email via %s: %s (confidence: %.0f) — stopping waterfall",
                     tier_name, best, result.enrichment_confidence,
                 )
                 break
+
+    # After all tiers, pick the best email from everything collected
+    if not result.best_email and result.emails_found:
+        result.best_email = _pick_best_email(result.emails_found)
+    elif result.emails_found:
+        # Re-evaluate best email now that all cheap tiers have contributed
+        better = _pick_best_email(result.emails_found)
+        if better:
+            result.best_email = better
+
+    if result.best_email:
+        result.enrichment_confidence = max(
+            result.enrichment_confidence,
+            min(95.0, 50.0 + (len(result.sources_succeeded) * 15)),
+        )
 
     # Set best phone from all collected
     if result.phones_found:

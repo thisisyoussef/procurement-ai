@@ -2,12 +2,16 @@
 
 Uses Browserless API to take screenshots of supplier websites,
 then feeds them to Claude Vision for contact information extraction.
+Also extracts the rendered page HTML for regex-based email extraction
+(catches JS-rendered content that static scrapers miss).
 Falls back gracefully when API key is not configured.
 """
 
+import asyncio
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -19,8 +23,13 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 BROWSERLESS_SCREENSHOT_URL = "https://chrome.browserless.io/screenshot"
+BROWSERLESS_CONTENT_URL = "https://chrome.browserless.io/content"
 
 VISION_PROMPT = (Path(__file__).parent.parent / "prompts" / "contact_enrichment.md").read_text()
+
+EMAIL_REGEX = re.compile(
+    r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
+)
 
 
 async def screenshot_page(url: str, full_page: bool = False) -> bytes | None:
@@ -64,6 +73,53 @@ async def screenshot_page(url: str, full_page: bool = False) -> bytes | None:
         except (httpx.HTTPError, Exception) as e:
             logger.warning("  Screenshot failed for %s: %s", url, e)
             return None
+
+
+async def get_rendered_html(url: str) -> str | None:
+    """Fetch the fully rendered HTML of a page via Browserless /content endpoint.
+
+    This returns the DOM after JavaScript execution — useful for extracting
+    emails from JS-rendered websites that static scrapers (httpx) cannot see.
+
+    Returns:
+        Rendered HTML string, or None on failure.
+    """
+    if not settings.browserless_api_key:
+        return None
+
+    logger.info("  Fetching rendered HTML: %s", url)
+    params = {"token": settings.browserless_api_key}
+    body = {
+        "url": url,
+        "gotoOptions": {
+            "waitUntil": "networkidle2",
+            "timeout": 15000,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                BROWSERLESS_CONTENT_URL,
+                params=params,
+                json=body,
+            )
+            resp.raise_for_status()
+            html = resp.text
+            logger.info("  Rendered HTML: %d chars from %s", len(html), url)
+            return html
+        except (httpx.HTTPError, Exception) as e:
+            logger.warning("  Rendered HTML fetch failed for %s: %s", url, e)
+            return None
+
+
+def _extract_emails_from_html(html: str) -> list[str]:
+    """Regex-extract email addresses from raw HTML content."""
+    if not html:
+        return []
+    found = EMAIL_REGEX.findall(html)
+    # Deduplicate and lowercase
+    return list({e.lower() for e in found})
 
 
 async def extract_contacts_from_screenshot(
@@ -134,12 +190,18 @@ async def extract_contacts_from_screenshot(
 
 
 async def browse_for_contacts(url: str) -> dict:
-    """Screenshot a supplier's contact page(s) and extract contact info via vision.
+    """Screenshot a supplier's contact page(s) and extract contact info via
+    vision AND rendered HTML regex scanning.
 
-    Tries the main URL first, then common contact page paths.
+    For each candidate URL:
+    1. Takes a screenshot -> Claude Vision extraction
+    2. Fetches rendered HTML -> regex email extraction
+
+    This dual approach catches both visually-rendered emails (images, Canvas)
+    and JS-rendered text emails that static scrapers miss.
 
     Returns:
-        Dict with aggregated contact info from visual analysis.
+        Dict with aggregated contact info from visual + HTML analysis.
     """
     if not settings.browserless_api_key:
         return {"emails": [], "phones": [], "error": "browserless_not_configured"}
@@ -159,21 +221,36 @@ async def browse_for_contacts(url: str) -> dict:
     best_confidence = 0
 
     for candidate_url in candidates:
-        screenshot = await screenshot_page(candidate_url)
-        if not screenshot:
-            continue
+        # Run screenshot and HTML fetch in parallel for the same URL
+        screenshot_task = screenshot_page(candidate_url)
+        html_task = get_rendered_html(candidate_url)
+        screenshot, rendered_html = await asyncio.gather(screenshot_task, html_task)
 
-        result = await extract_contacts_from_screenshot(screenshot, candidate_url)
-        emails = result.get("emails", [])
-        phones = result.get("phones", [])
-        confidence = result.get("confidence", 0)
+        # Extract from rendered HTML via regex (catches JS-rendered emails)
+        if rendered_html:
+            html_emails = _extract_emails_from_html(rendered_html)
+            all_emails.extend(html_emails)
+            if html_emails:
+                logger.info("  Rendered HTML regex: %d emails from %s", len(html_emails), candidate_url)
 
-        all_emails.extend(emails)
-        all_phones.extend(phones)
-        best_confidence = max(best_confidence, confidence)
+        # Extract from screenshot via Claude Vision
+        if screenshot:
+            result = await extract_contacts_from_screenshot(screenshot, candidate_url)
+            emails = result.get("emails", [])
+            phones = result.get("phones", [])
+            confidence = result.get("confidence", 0)
 
-        # Short-circuit if we found good contact info
-        if emails and confidence >= 70:
+            all_emails.extend(emails)
+            all_phones.extend(phones)
+            best_confidence = max(best_confidence, confidence)
+
+            # Short-circuit if we found good contact info
+            if emails and confidence >= 70:
+                break
+
+        # If HTML regex already found emails, still try vision for confidence
+        # but don't need to check more pages
+        if all_emails and not screenshot:
             break
 
     return {
