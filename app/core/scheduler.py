@@ -19,6 +19,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
+from app.services.communication_monitor import (
+    ensure_monitor,
+    mark_inbound_message_parsed,
+    record_inbound_email,
+    record_inbox_check,
+    record_outbound_email,
+)
+from app.services.project_contact import resolve_project_owner_email
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -234,6 +242,34 @@ class OutreachScheduler:
             recommendation["recommendations"] = kept
             project["recommendation_result"] = recommendation
 
+    def _match_supplier_from_token(
+        self,
+        outreach,
+        discovery_results,
+        matched_token: str | None,
+    ) -> tuple[int | None, str | None]:
+        if not matched_token:
+            return None, None
+
+        token = matched_token.lower()
+        for supplier_status in outreach.supplier_statuses:
+            if supplier_status.excluded:
+                continue
+            idx = supplier_status.supplier_index
+            if not (0 <= idx < len(discovery_results.suppliers)):
+                continue
+            supplier = discovery_results.suppliers[idx]
+            if supplier.email and supplier.email.lower() in token:
+                return idx, supplier.name
+            if supplier.website:
+                try:
+                    domain = urlparse(supplier.website).netloc.replace("www.", "").lower()
+                except Exception:  # noqa: BLE001
+                    domain = ""
+                if domain and domain in token:
+                    return idx, supplier.name
+        return None, None
+
     # ── Loop 1: Email Queue Processor ─────────────────────────────
 
     async def _process_email_queues(self):
@@ -250,6 +286,8 @@ class OutreachScheduler:
                 continue
             if outreach.auto_config.mode not in ("auto", "semi_auto"):
                 continue
+            owner_email = await resolve_project_owner_email(project)
+            ensure_monitor(outreach, owner_email=owner_email)
 
             queued = [
                 d
@@ -292,6 +330,21 @@ class OutreachScheduler:
                         supplier_status.email_sent = False
                         supplier_status.delivery_status = "failed"
                         supplier_status.send_error = "No supplier email found"
+                    record_outbound_email(
+                        outreach,
+                        supplier_index=draft.supplier_index,
+                        supplier_name=draft.supplier_name,
+                        to_email=None,
+                        from_email=settings.from_email,
+                        cc_emails=[owner_email] if owner_email else [],
+                        subject=draft.subject,
+                        body=draft.body,
+                        resend_email_id=None,
+                        delivery_status="failed",
+                        source="scheduler_auto_queue",
+                        event_type="send_failed",
+                        details={"reason": "missing_email", "project_id": project_id},
+                    )
                     logger.warning(
                         "Scheduler: No email for %s — marking failed",
                         draft.supplier_name,
@@ -302,6 +355,9 @@ class OutreachScheduler:
                     to=recipient,
                     subject=draft.subject,
                     body_html=draft.body,
+                    cc=[owner_email] if owner_email else [],
+                    reply_to=settings.from_email,
+                    headers={"X-Tamkin-Project-ID": project_id},
                 )
 
                 if result.get("sent"):
@@ -315,9 +371,26 @@ class OutreachScheduler:
                             status.email_sent = True
                             status.sent_at = time.time()
                             status.email_id = email_id
+                            if email_id and email_id not in status.email_ids:
+                                status.email_ids.append(email_id)
                             status.delivery_status = "sent"
                             status.send_error = None
                             break
+                    record_outbound_email(
+                        outreach,
+                        supplier_index=draft.supplier_index,
+                        supplier_name=draft.supplier_name,
+                        to_email=recipient,
+                        from_email=result.get("from") or settings.from_email,
+                        cc_emails=result.get("cc") or ([owner_email] if owner_email else []),
+                        subject=draft.subject,
+                        body=draft.body,
+                        resend_email_id=email_id,
+                        delivery_status="sent",
+                        source="scheduler_auto_queue",
+                        event_type="email_sent",
+                        details={"project_id": project_id},
+                    )
 
                     outreach.events.append(OutreachEvent(
                         event_type="auto_email_sent",
@@ -336,6 +409,21 @@ class OutreachScheduler:
                         supplier_status.email_sent = False
                         supplier_status.delivery_status = "failed"
                         supplier_status.send_error = result.get("error", "unknown")
+                    record_outbound_email(
+                        outreach,
+                        supplier_index=draft.supplier_index,
+                        supplier_name=draft.supplier_name,
+                        to_email=recipient,
+                        from_email=settings.from_email,
+                        cc_emails=[owner_email] if owner_email else [],
+                        subject=draft.subject,
+                        body=draft.body,
+                        resend_email_id=None,
+                        delivery_status="failed",
+                        source="scheduler_auto_queue",
+                        event_type="send_failed",
+                        details={"project_id": project_id, "error": result.get("error", "unknown")},
+                    )
                     outreach.events.append(OutreachEvent(
                         event_type="auto_email_failed",
                         supplier_index=draft.supplier_index,
@@ -365,12 +453,16 @@ class OutreachScheduler:
         for project in projects:
             project_id = str(project.get("id", ""))
             outreach = self._get_outreach_state(project)
-            if not outreach or not outreach.auto_config:
+            if not outreach:
                 continue
-            if outreach.auto_config.mode != "auto":
+            if not outreach.auto_config and outreach.quick_approval_decision != "approved":
                 continue
+            if outreach.auto_config and outreach.auto_config.mode not in ("auto", "semi_auto"):
+                continue
+            owner_email = await resolve_project_owner_email(project)
+            ensure_monitor(outreach, owner_email=owner_email)
 
-            schedule = outreach.auto_config.follow_up_schedule  # [3, 7, 14]
+            schedule = outreach.auto_config.follow_up_schedule if outreach.auto_config else [3, 7, 14]
             needs_follow_up = False
 
             for status in outreach.supplier_statuses:
@@ -426,12 +518,30 @@ class OutreachScheduler:
 
                     if not recipient:
                         fu.status = "failed"
+                        record_outbound_email(
+                            outreach,
+                            supplier_index=fu.supplier_index,
+                            supplier_name=fu.supplier_name,
+                            to_email=None,
+                            from_email=settings.from_email,
+                            cc_emails=[owner_email] if owner_email else [],
+                            subject=fu.subject,
+                            body=fu.body,
+                            resend_email_id=None,
+                            delivery_status="failed",
+                            source="scheduler_followup",
+                            event_type="followup_send_failed",
+                            details={"reason": "missing_email", "project_id": project_id},
+                        )
                         continue
 
                     send_result = await send_email(
                         to=recipient,
                         subject=fu.subject,
                         body_html=fu.body,
+                        cc=[owner_email] if owner_email else [],
+                        reply_to=settings.from_email,
+                        headers={"X-Tamkin-Project-ID": project_id},
                     )
 
                     if send_result.get("sent"):
@@ -442,7 +552,32 @@ class OutreachScheduler:
                             if s.supplier_index == fu.supplier_index:
                                 s.follow_ups_sent += 1
                                 s.last_follow_up_at = now
+                                email_id = send_result.get("id", "")
+                                if email_id:
+                                    s.email_id = email_id
+                                    if email_id not in s.email_ids:
+                                        s.email_ids.append(email_id)
+                                s.delivery_status = "sent"
+                                s.send_error = None
                                 break
+                        record_outbound_email(
+                            outreach,
+                            supplier_index=fu.supplier_index,
+                            supplier_name=fu.supplier_name,
+                            to_email=recipient,
+                            from_email=send_result.get("from") or settings.from_email,
+                            cc_emails=send_result.get("cc") or ([owner_email] if owner_email else []),
+                            subject=fu.subject,
+                            body=fu.body,
+                            resend_email_id=send_result.get("id"),
+                            delivery_status="sent",
+                            source="scheduler_followup",
+                            event_type="followup_sent",
+                            details={
+                                "project_id": project_id,
+                                "follow_up_number": fu.follow_up_number,
+                            },
+                        )
 
                         outreach.events.append(OutreachEvent(
                             event_type="auto_followup_sent",
@@ -457,6 +592,31 @@ class OutreachScheduler:
                         )
                     else:
                         fu.status = "failed"
+                        for s in outreach.supplier_statuses:
+                            if s.supplier_index == fu.supplier_index:
+                                s.email_sent = False
+                                s.delivery_status = "failed"
+                                s.send_error = send_result.get("error", "unknown")
+                                break
+                        record_outbound_email(
+                            outreach,
+                            supplier_index=fu.supplier_index,
+                            supplier_name=fu.supplier_name,
+                            to_email=recipient,
+                            from_email=settings.from_email,
+                            cc_emails=[owner_email] if owner_email else [],
+                            subject=fu.subject,
+                            body=fu.body,
+                            resend_email_id=None,
+                            delivery_status="failed",
+                            source="scheduler_followup",
+                            event_type="followup_send_failed",
+                            details={
+                                "project_id": project_id,
+                                "error": send_result.get("error", "unknown"),
+                                "follow_up_number": fu.follow_up_number,
+                            },
+                        )
 
                     await asyncio.sleep(2.0)
 
@@ -482,10 +642,16 @@ class OutreachScheduler:
         for project in projects:
             project_id = str(project.get("id", ""))
             outreach = self._get_outreach_state(project)
-            if not outreach or not outreach.auto_config:
+            if not outreach:
                 continue
-            if outreach.auto_config.mode != "auto":
+
+            auto_mode = outreach.auto_config.mode if outreach.auto_config else None
+            monitor_enabled = auto_mode in ("auto", "semi_auto") or outreach.quick_approval_decision == "approved"
+            if not monitor_enabled:
                 continue
+
+            owner_email = await resolve_project_owner_email(project)
+            ensure_monitor(outreach, owner_email=owner_email)
 
             # Need at least one email sent
             sent_suppliers = [
@@ -505,7 +671,8 @@ class OutreachScheduler:
             supplier_emails = []
             supplier_domains = []
 
-            for idx in outreach.selected_suppliers:
+            supplier_indices = outreach.selected_suppliers or [s.supplier_index for s in sent_suppliers]
+            for idx in supplier_indices:
                 if idx in outreach.excluded_suppliers:
                     continue
                 if idx < len(dr.suppliers):
@@ -535,8 +702,14 @@ class OutreachScheduler:
                 )
 
                 self._stats["inbox_checks"] += 1
+                record_inbox_check(
+                    outreach,
+                    source="scheduler_inbox_monitor",
+                    message_count=len(messages),
+                )
 
                 if not messages:
+                    await self._save_outreach_state(project, outreach)
                     continue
 
                 outreach.events.append(OutreachEvent(
@@ -547,50 +720,49 @@ class OutreachScheduler:
                 # Auto-parse each response
                 reqs_data = project.get("parsed_requirements")
                 if not reqs_data:
+                    await self._save_outreach_state(project, outreach)
                     continue
 
                 reqs = ParsedRequirements(**reqs_data)
 
                 for msg in messages:
+                    sender = msg.get("sender", "")
+                    subject = msg.get("subject")
+                    body = msg.get("body", "")
+                    snippet = msg.get("snippet")
+                    inbox_message_id = msg.get("message_id")
                     matched = msg.get("matched_supplier")
-                    if not matched:
-                        continue
+                    supplier_idx, supplier_name = self._match_supplier_from_token(outreach, dr, matched)
 
-                    # Find the supplier index
-                    supplier_idx = None
-                    supplier_name = None
-                    for s in outreach.supplier_statuses:
-                        if s.response_received:
-                            continue
-                        if s.excluded:
-                            continue
-                        idx = s.supplier_index
-                        if idx < len(dr.suppliers):
-                            sup = dr.suppliers[idx]
-                            if sup.email and sup.email.lower() in matched.lower():
-                                supplier_idx = idx
-                                supplier_name = sup.name
-                                break
-                            if sup.website:
-                                try:
-                                    domain = urlparse(sup.website).netloc.replace("www.", "")
-                                    if domain and domain.lower() in matched.lower():
-                                        supplier_idx = idx
-                                        supplier_name = sup.name
-                                        break
-                                except Exception:
-                                    pass
+                    record_inbound_email(
+                        outreach,
+                        inbox_message_id=inbox_message_id,
+                        sender=sender,
+                        subject=subject,
+                        body=body,
+                        snippet=snippet,
+                        matched_sender=matched,
+                        supplier_index=supplier_idx,
+                        supplier_name=supplier_name,
+                        source="scheduler_inbox_monitor",
+                    )
 
                     if supplier_idx is None:
                         continue
 
-                    body = msg.get("body", "")
+                    supplier_status = next(
+                        (s for s in outreach.supplier_statuses if s.supplier_index == supplier_idx),
+                        None,
+                    )
+                    if supplier_status and supplier_status.response_received:
+                        continue
+
                     if not body or len(body.strip()) < 10:
                         continue
 
                     try:
                         quote = await parse_supplier_response(
-                            supplier_name=supplier_name,
+                            supplier_name=supplier_name or dr.suppliers[supplier_idx].name,
                             supplier_index=supplier_idx,
                             response_text=body,
                             requirements=reqs,
@@ -599,12 +771,17 @@ class OutreachScheduler:
                         outreach.parsed_quotes.append(quote)
                         self._stats["responses_parsed"] += 1
 
-                        for s in outreach.supplier_statuses:
-                            if s.supplier_index == supplier_idx:
-                                s.response_received = True
-                                s.response_text = body
-                                s.parsed_quote = quote
-                                break
+                        if supplier_status:
+                            supplier_status.response_received = True
+                            supplier_status.response_text = body
+                            supplier_status.parsed_quote = quote
+                        mark_inbound_message_parsed(
+                            outreach,
+                            inbox_message_id=inbox_message_id,
+                            supplier_index=supplier_idx,
+                            confidence_score=quote.confidence_score,
+                            source="scheduler_inbox_monitor",
+                        )
 
                         if quote.can_fulfill is False or self._response_indicates_cannot_fulfill(
                             quote.fulfillment_note or quote.notes,
@@ -618,12 +795,25 @@ class OutreachScheduler:
                                 reason=quote.fulfillment_note
                                 or "Supplier indicated they cannot fulfill this request",
                             )
+                            outreach.events.append(OutreachEvent(
+                                event_type="supplier_excluded",
+                                supplier_index=supplier_idx,
+                                supplier_name=supplier_name,
+                                details={
+                                    "reason": quote.fulfillment_note
+                                    or "Supplier indicated they cannot fulfill this request",
+                                    "source": "scheduler_inbox_monitor",
+                                },
+                            ))
 
                         outreach.events.append(OutreachEvent(
                             event_type="auto_response_parsed",
                             supplier_index=supplier_idx,
                             supplier_name=supplier_name,
-                            details={"confidence": quote.confidence_score},
+                            details={
+                                "confidence": quote.confidence_score,
+                                "source": "scheduler_inbox_monitor",
+                            },
                         ))
 
                         logger.info(

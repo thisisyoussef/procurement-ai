@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.agents.followup_agent import generate_follow_ups
 from app.agents.outreach_agent import draft_outreach_emails
 from app.agents.response_parser import parse_supplier_response
+from app.core.config import get_settings
 from app.core.email_service import send_email
 from app.schemas.agent_state import (
     AutoOutreachConfig,
@@ -33,6 +34,15 @@ from app.schemas.project import (
 )
 from app.core.auth import AuthUser, get_current_auth_user
 from app.services.project_store import StoreUnavailableError, get_project_store
+from app.services.communication_monitor import (
+    ensure_monitor,
+    mark_inbound_message_parsed,
+    record_inbound_email,
+    record_inbox_check,
+    record_outbound_email,
+    set_owner_email,
+)
+from app.services.project_contact import resolve_project_owner_email
 from app.services.supplier_memory import (
     record_supplier_interaction,
     record_supplier_interactions,
@@ -40,6 +50,7 @@ from app.services.supplier_memory import (
 from app.services.project_events import record_project_event
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(prefix="/projects/{project_id}/outreach", tags=["outreach"])
 
@@ -82,6 +93,121 @@ def _get_outreach_state(project: dict) -> OutreachState:
     if not raw:
         raise HTTPException(status_code=400, detail="No outreach started for this project")
     return OutreachState(**raw) if isinstance(raw, dict) else raw
+
+
+def _owner_email_from_user(current_user: AuthUser | None) -> str | None:
+    if not current_user:
+        return None
+    email = (current_user.email or "").strip().lower()
+    return email or None
+
+
+def _cc_list(owner_email: str | None) -> list[str]:
+    return [owner_email] if owner_email else []
+
+
+def _set_supplier_delivery_success(status: SupplierOutreachStatus, email_id: str) -> None:
+    status.email_sent = True
+    status.sent_at = time.time()
+    status.email_id = email_id
+    if email_id and email_id not in status.email_ids:
+        status.email_ids.append(email_id)
+    status.delivery_status = "sent"
+    status.send_error = None
+
+
+def _set_supplier_delivery_failure(status: SupplierOutreachStatus, reason: str) -> None:
+    status.email_sent = False
+    status.delivery_status = "failed"
+    status.send_error = reason
+
+
+def _match_supplier_index_from_token(
+    outreach: OutreachState,
+    discovery: DiscoveryResults,
+    matched_token: str | None,
+) -> tuple[int | None, str | None]:
+    if not matched_token:
+        return None, None
+    token = matched_token.lower()
+    for supplier_status in outreach.supplier_statuses:
+        if supplier_status.excluded or supplier_status.response_received:
+            continue
+        idx = supplier_status.supplier_index
+        if not (0 <= idx < len(discovery.suppliers)):
+            continue
+        supplier = discovery.suppliers[idx]
+        if supplier.email and supplier.email.lower() in token:
+            return idx, supplier.name
+        if supplier.website:
+            from urllib.parse import urlparse
+
+            try:
+                domain = urlparse(supplier.website).netloc.replace("www.", "").lower()
+            except Exception:  # noqa: BLE001
+                domain = ""
+            if domain and domain in token:
+                return idx, supplier.name
+    return None, None
+
+
+async def _send_and_track_email(
+    *,
+    project: dict,
+    outreach: OutreachState,
+    supplier_index: int,
+    supplier_name: str,
+    recipient: str,
+    subject: str,
+    body: str,
+    source_label: str,
+    owner_email: str | None,
+) -> dict:
+    set_owner_email(outreach, owner_email)
+    cc = _cc_list(owner_email)
+    result = await send_email(
+        to=recipient,
+        subject=subject,
+        body_html=body,
+        cc=cc,
+        reply_to=settings.from_email,
+        headers={"X-Tamkin-Project-ID": str(project.get("id", ""))},
+    )
+
+    if result.get("sent"):
+        email_id = result.get("id", "")
+        record_outbound_email(
+            outreach,
+            supplier_index=supplier_index,
+            supplier_name=supplier_name,
+            to_email=recipient,
+            from_email=result.get("from") or settings.from_email,
+            cc_emails=result.get("cc") or cc,
+            subject=subject,
+            body=body,
+            resend_email_id=email_id,
+            delivery_status="sent",
+            source=source_label,
+            event_type="email_sent",
+            details={"project_id": project.get("id")},
+        )
+    else:
+        record_outbound_email(
+            outreach,
+            supplier_index=supplier_index,
+            supplier_name=supplier_name,
+            to_email=recipient,
+            from_email=settings.from_email,
+            cc_emails=cc,
+            subject=subject,
+            body=body,
+            resend_email_id=None,
+            delivery_status="failed",
+            source=source_label,
+            event_type="send_failed",
+            details={"error": result.get("error", "unknown"), "project_id": project.get("id")},
+        )
+    return result
 
 
 def _append_event(
@@ -216,7 +342,10 @@ async def _draft_and_send_initial_outreach(
     selected_indices: list[int],
     selected_suppliers: list[DiscoveredSupplier],
     source_label: str,
+    owner_email: str | None,
 ) -> dict:
+    set_owner_email(outreach, owner_email)
+    ensure_monitor(outreach, owner_email=owner_email)
     draft_result = await draft_outreach_emails(selected_suppliers, reqs, recs)
     _normalize_draft_supplier_indices(draft_result.drafts, selected_indices)
     drafts_by_index = {d.supplier_index: d for d in draft_result.drafts}
@@ -266,9 +395,7 @@ async def _draft_and_send_initial_outreach(
         if not recipient:
             draft.status = "failed"
             failed_count += 1
-            status.email_sent = False
-            status.delivery_status = "failed"
-            status.send_error = "No supplier email found"
+            _set_supplier_delivery_failure(status, "No supplier email found")
             _append_event(
                 outreach,
                 "send_failed",
@@ -286,21 +413,28 @@ async def _draft_and_send_initial_outreach(
             )
             continue
 
-        result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
+        result = await _send_and_track_email(
+            project=project,
+            outreach=outreach,
+            supplier_index=idx,
+            supplier_name=draft.supplier_name,
+            recipient=recipient,
+            subject=draft.subject,
+            body=draft.body,
+            source_label=source_label,
+            owner_email=owner_email,
+        )
         if result.get("sent"):
             draft.status = "sent"
             sent_count += 1
-            status.email_sent = True
-            status.sent_at = time.time()
-            status.email_id = result.get("id", "")
-            status.delivery_status = "sent"
-            status.send_error = None
+            email_id = result.get("id", "")
+            _set_supplier_delivery_success(status, email_id)
             _append_event(
                 outreach,
                 "email_sent",
                 supplier_index=idx,
                 supplier_name=draft.supplier_name,
-                email_id=result.get("id", ""),
+                email_id=email_id,
                 source=source_label,
             )
             await record_supplier_interaction(
@@ -309,17 +443,16 @@ async def _draft_and_send_initial_outreach(
                 interaction_type="rfq_sent",
                 source="outreach",
                 details={
-                    "email_id": result.get("id", ""),
+                    "email_id": email_id,
                     "recipient": recipient,
+                    "cc_owner_email": owner_email,
                     "entrypoint": source_label,
                 },
             )
         else:
             draft.status = "failed"
             failed_count += 1
-            status.email_sent = False
-            status.delivery_status = "failed"
-            status.send_error = result.get("error", "unknown")
+            _set_supplier_delivery_failure(status, result.get("error", "unknown"))
             _append_event(
                 outreach,
                 "send_failed",
@@ -398,6 +531,9 @@ async def start_outreach(
 ):
     """Select suppliers and draft personalized RFQ emails."""
     project = await _get_project(project_id, current_user)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
 
     if not project.get("recommendation_result"):
         raise HTTPException(status_code=400, detail="Pipeline must complete before outreach")
@@ -428,6 +564,8 @@ async def start_outreach(
             supplier_statuses=supplier_statuses,
             draft_emails=result.drafts,
         )
+        set_owner_email(outreach, owner_email)
+        ensure_monitor(outreach, owner_email=owner_email)
 
         _append_event(outreach, "intent_registered", details={"selected_suppliers": len(selected_indices)})
         for idx, supplier in zip(selected_indices, selected):
@@ -477,6 +615,12 @@ async def quick_outreach_approval(
 
     raw = project.get("outreach_state")
     outreach = OutreachState(**raw) if isinstance(raw, dict) else (raw or OutreachState())
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
 
     if not request.approve:
         outreach.quick_approval_decision = "declined"
@@ -514,6 +658,7 @@ async def quick_outreach_approval(
         selected_indices=selected_indices,
         selected_suppliers=selected_suppliers,
         source_label="quick_approval",
+        owner_email=owner_email,
     )
 
     outreach.quick_approval_decision = "approved"
@@ -558,6 +703,12 @@ async def approve_and_send(
     """Approve (optionally edit) and send a draft email."""
     project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
 
     if draft_index < 0 or draft_index >= len(outreach.draft_emails):
         raise HTTPException(status_code=400, detail="Invalid draft index")
@@ -587,9 +738,7 @@ async def approve_and_send(
 
     if not recipient:
         draft.status = "failed"
-        supplier_status.email_sent = False
-        supplier_status.delivery_status = "failed"
-        supplier_status.send_error = "No supplier email found"
+        _set_supplier_delivery_failure(supplier_status, "No supplier email found")
         _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason="missing_email")
         await record_supplier_interaction(
             project=project,
@@ -607,28 +756,49 @@ async def approve_and_send(
             phase="outreach",
             payload={"supplier_index": draft.supplier_index, "reason": "missing_email"},
         )
+        record_outbound_email(
+            outreach,
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+            to_email=None,
+            from_email=settings.from_email,
+            cc_emails=_cc_list(owner_email),
+            subject=draft.subject,
+            body=draft.body,
+            resend_email_id=None,
+            delivery_status="failed",
+            source="manual_approve",
+            event_type="send_failed",
+            details={"reason": "missing_email"},
+        )
         project["outreach_state"] = outreach.model_dump(mode="json")
         await _save_project(project)
         return {"sent": False, "error": f"No email address found for {draft.supplier_name}. You'll need to provide one."}
 
     _append_event(outreach, "send_attempted", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, recipient=recipient)
-    result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
+    result = await _send_and_track_email(
+        project=project,
+        outreach=outreach,
+        supplier_index=draft.supplier_index,
+        supplier_name=draft.supplier_name,
+        recipient=recipient,
+        subject=draft.subject,
+        body=draft.body,
+        source_label="manual_approve",
+        owner_email=owner_email,
+    )
 
     if result.get("sent"):
         draft.status = "sent"
         email_id = result.get("id", "")
-        supplier_status.email_sent = True
-        supplier_status.sent_at = time.time()
-        supplier_status.email_id = email_id
-        supplier_status.delivery_status = "sent"
-        supplier_status.send_error = None
+        _set_supplier_delivery_success(supplier_status, email_id)
         _append_event(outreach, "email_sent", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, email_id=email_id)
         await record_supplier_interaction(
             project=project,
             supplier_index=draft.supplier_index,
             interaction_type="rfq_sent",
             source="outreach",
-            details={"email_id": email_id, "recipient": recipient},
+            details={"email_id": email_id, "recipient": recipient, "cc_owner_email": owner_email},
         )
         await record_project_event(
             project,
@@ -641,9 +811,7 @@ async def approve_and_send(
         )
     else:
         draft.status = "failed"
-        supplier_status.email_sent = False
-        supplier_status.delivery_status = "failed"
-        supplier_status.send_error = result.get("error", "unknown")
+        _set_supplier_delivery_failure(supplier_status, result.get("error", "unknown"))
         _append_event(outreach, "send_failed", supplier_index=draft.supplier_index, supplier_name=draft.supplier_name, reason=result.get("error", "unknown"))
         await record_supplier_interaction(
             project=project,
@@ -826,6 +994,12 @@ async def send_follow_up(
     """Send an approved follow-up email."""
     project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
 
     if follow_up_index < 0 or follow_up_index >= len(outreach.follow_up_emails):
         raise HTTPException(status_code=400, detail="Invalid follow-up index")
@@ -841,6 +1015,21 @@ async def send_follow_up(
     if not recipient:
         fu.status = "failed"
         _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason="missing_email")
+        record_outbound_email(
+            outreach,
+            supplier_index=fu.supplier_index,
+            supplier_name=fu.supplier_name,
+            to_email=None,
+            from_email=settings.from_email,
+            cc_emails=_cc_list(owner_email),
+            subject=fu.subject,
+            body=fu.body,
+            resend_email_id=None,
+            delivery_status="failed",
+            source="manual_followup",
+            event_type="followup_send_failed",
+            details={"reason": "missing_email", "follow_up_number": fu.follow_up_number},
+        )
         await record_supplier_interaction(
             project=project,
             supplier_index=fu.supplier_index,
@@ -861,7 +1050,17 @@ async def send_follow_up(
         await _save_project(project)
         return {"sent": False, "error": f"No email for {fu.supplier_name}"}
 
-    result = await send_email(to=recipient, subject=fu.subject, body_html=fu.body)
+    result = await _send_and_track_email(
+        project=project,
+        outreach=outreach,
+        supplier_index=fu.supplier_index,
+        supplier_name=fu.supplier_name,
+        recipient=recipient,
+        subject=fu.subject,
+        body=fu.body,
+        source_label="manual_followup",
+        owner_email=owner_email,
+    )
 
     if result.get("sent"):
         fu.status = "sent"
@@ -869,6 +1068,13 @@ async def send_follow_up(
             if status.supplier_index == fu.supplier_index:
                 status.follow_ups_sent += 1
                 status.last_follow_up_at = time.time()
+                email_id = result.get("id", "")
+                if email_id:
+                    status.email_id = email_id
+                    if email_id not in status.email_ids:
+                        status.email_ids.append(email_id)
+                    status.delivery_status = "sent"
+                    status.send_error = None
                 break
         _append_event(outreach, "followup_sent", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name)
         await record_supplier_interaction(
@@ -876,7 +1082,12 @@ async def send_follow_up(
             supplier_index=fu.supplier_index,
             interaction_type="followup_sent",
             source="outreach",
-            details={"recipient": recipient, "follow_up_number": fu.follow_up_number},
+            details={
+                "recipient": recipient,
+                "follow_up_number": fu.follow_up_number,
+                "cc_owner_email": owner_email,
+                "email_id": result.get("id", ""),
+            },
         )
         await record_project_event(
             project,
@@ -889,6 +1100,10 @@ async def send_follow_up(
         )
     else:
         fu.status = "failed"
+        for status in outreach.supplier_statuses:
+            if status.supplier_index == fu.supplier_index:
+                _set_supplier_delivery_failure(status, result.get("error", "unknown"))
+                break
         _append_event(outreach, "followup_send_failed", supplier_index=fu.supplier_index, supplier_name=fu.supplier_name, reason=result.get("error", "unknown"))
         await record_supplier_interaction(
             project=project,
@@ -1039,6 +1254,12 @@ async def trigger_auto_send(
     """Immediately send any queued drafts for this project."""
     project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
 
     queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
     if not queued:
@@ -1058,9 +1279,22 @@ async def trigger_auto_send(
         if status.excluded or draft.supplier_index in outreach.excluded_suppliers:
             draft.status = "failed"
             failed += 1
-            status.email_sent = False
-            status.delivery_status = "failed"
-            status.send_error = status.exclusion_reason or "Supplier excluded from outreach"
+            _set_supplier_delivery_failure(status, status.exclusion_reason or "Supplier excluded from outreach")
+            record_outbound_email(
+                outreach,
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                to_email=draft.recipient_email,
+                from_email=settings.from_email,
+                cc_emails=_cc_list(owner_email),
+                subject=draft.subject,
+                body=draft.body,
+                resend_email_id=None,
+                delivery_status="failed",
+                source="auto_send_endpoint",
+                event_type="send_failed",
+                details={"reason": "supplier_excluded"},
+            )
             _append_event(
                 outreach,
                 "send_failed",
@@ -1078,9 +1312,22 @@ async def trigger_auto_send(
         if not recipient:
             draft.status = "failed"
             failed += 1
-            status.email_sent = False
-            status.delivery_status = "failed"
-            status.send_error = "No supplier email found"
+            _set_supplier_delivery_failure(status, "No supplier email found")
+            record_outbound_email(
+                outreach,
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                to_email=None,
+                from_email=settings.from_email,
+                cc_emails=_cc_list(owner_email),
+                subject=draft.subject,
+                body=draft.body,
+                resend_email_id=None,
+                delivery_status="failed",
+                source="auto_send_endpoint",
+                event_type="send_failed",
+                details={"reason": "missing_email"},
+            )
             _append_event(
                 outreach,
                 "send_failed",
@@ -1091,15 +1338,21 @@ async def trigger_auto_send(
             )
             continue
 
-        result = await send_email(to=recipient, subject=draft.subject, body_html=draft.body)
+        result = await _send_and_track_email(
+            project=project,
+            outreach=outreach,
+            supplier_index=draft.supplier_index,
+            supplier_name=draft.supplier_name,
+            recipient=recipient,
+            subject=draft.subject,
+            body=draft.body,
+            source_label="auto_send_endpoint",
+            owner_email=owner_email,
+        )
         if result.get("sent"):
             draft.status = "sent"
             sent += 1
-            status.email_sent = True
-            status.sent_at = time.time()
-            status.email_id = result.get("id", "")
-            status.delivery_status = "sent"
-            status.send_error = None
+            _set_supplier_delivery_success(status, result.get("id", ""))
             _append_event(
                 outreach,
                 "email_sent",
@@ -1111,9 +1364,7 @@ async def trigger_auto_send(
         else:
             draft.status = "failed"
             failed += 1
-            status.email_sent = False
-            status.delivery_status = "failed"
-            status.send_error = result.get("error", "unknown")
+            _set_supplier_delivery_failure(status, result.get("error", "unknown"))
             _append_event(
                 outreach,
                 "send_failed",
@@ -1188,6 +1439,12 @@ async def start_auto_outreach(
         raise HTTPException(status_code=400, detail="Set auto-config first via /auto-config")
 
     outreach = OutreachState(**raw) if isinstance(raw, dict) else raw
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
     if not outreach.auto_config:
         raise HTTPException(status_code=400, detail="Set auto-config first via /auto-config")
 
@@ -1235,6 +1492,7 @@ async def start_auto_outreach(
             selected_indices=selected_indices,
             selected_suppliers=selected_suppliers,
             source_label="auto_start",
+            owner_email=owner_email,
         )
 
         _append_event(
@@ -1340,6 +1598,25 @@ async def get_delivery_status(
     return {"total_sent": len(delivery_info), "deliveries": delivery_info}
 
 
+@router.get("/monitor")
+async def get_communication_monitor(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Get full communication monitor state for outreach."""
+    project = await _get_project(project_id, current_user)
+    outreach = _get_outreach_state(project)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
+    ensure_monitor(outreach, owner_email=owner_email)
+
+    return outreach.communication_monitor.model_dump()
+
+
 @router.post("/check-inbox")
 async def check_inbox(
     project_id: str,
@@ -1348,6 +1625,12 @@ async def check_inbox(
     """Check email inbox for supplier responses."""
     project = await _get_project(project_id, current_user)
     outreach = _get_outreach_state(project)
+    owner_email = _owner_email_from_user(current_user)
+    if owner_email:
+        project["owner_email"] = owner_email
+    else:
+        owner_email = await resolve_project_owner_email(project)
+    set_owner_email(outreach, owner_email)
 
     discovery = DiscoveryResults(**project["discovery_results"])
     supplier_emails = []
@@ -1376,15 +1659,112 @@ async def check_inbox(
             project_id=project_id,
         )
 
+        record_inbox_check(
+            outreach,
+            source="manual_check_inbox",
+            message_count=len(messages),
+        )
+
+        new_messages = 0
+        parsed_count = 0
+        parse_failures = 0
+        reqs = ParsedRequirements(**project["parsed_requirements"])
+
+        for msg in messages:
+            sender = msg.get("sender", "")
+            subject = msg.get("subject")
+            body = msg.get("body", "")
+            snippet = msg.get("snippet")
+            inbox_message_id = msg.get("message_id")
+            matched = msg.get("matched_supplier")
+            supplier_idx, supplier_name = _match_supplier_index_from_token(outreach, discovery, matched)
+
+            _, is_new = record_inbound_email(
+                outreach,
+                inbox_message_id=inbox_message_id,
+                sender=sender,
+                subject=subject,
+                body=body,
+                snippet=snippet,
+                matched_sender=matched,
+                supplier_index=supplier_idx,
+                supplier_name=supplier_name,
+                source="manual_check_inbox",
+            )
+            if is_new:
+                new_messages += 1
+
+            if supplier_idx is None or not body or len(body.strip()) < 10:
+                continue
+
+            supplier_status = next(
+                (s for s in outreach.supplier_statuses if s.supplier_index == supplier_idx),
+                None,
+            )
+            if supplier_status and supplier_status.response_received:
+                continue
+
+            try:
+                quote = await parse_supplier_response(
+                    supplier_name=supplier_name or discovery.suppliers[supplier_idx].name,
+                    supplier_index=supplier_idx,
+                    response_text=body,
+                    requirements=reqs,
+                )
+
+                outreach.parsed_quotes.append(quote)
+                if supplier_status:
+                    supplier_status.response_received = True
+                    supplier_status.response_text = body
+                    supplier_status.parsed_quote = quote
+
+                mark_inbound_message_parsed(
+                    outreach,
+                    inbox_message_id=inbox_message_id,
+                    supplier_index=supplier_idx,
+                    confidence_score=quote.confidence_score,
+                    source="manual_check_inbox",
+                )
+                parsed_count += 1
+
+                if quote.can_fulfill is False or _response_indicates_cannot_fulfill(
+                    quote.fulfillment_note or quote.notes,
+                    body,
+                ):
+                    _apply_supplier_exclusion(
+                        project=project,
+                        outreach=outreach,
+                        supplier_index=supplier_idx,
+                        supplier_name=supplier_name or discovery.suppliers[supplier_idx].name,
+                        reason=quote.fulfillment_note
+                        or "Supplier indicated they cannot fulfill this request",
+                    )
+
+                _append_event(
+                    outreach,
+                    "auto_response_parsed",
+                    supplier_index=supplier_idx,
+                    supplier_name=supplier_name,
+                    confidence=quote.confidence_score,
+                    source="manual_check_inbox",
+                )
+            except Exception:
+                parse_failures += 1
+                logger.warning("Inbox parse failed for project %s message %s", project_id, inbox_message_id, exc_info=True)
+
         _append_event(outreach, "inbox_checked", messages_found=len(messages))
         project["outreach_state"] = outreach.model_dump(mode="json")
         await _save_project(project)
 
         return {
             "messages_found": len(messages),
+            "new_messages": new_messages,
+            "parsed_quotes": parsed_count,
+            "parse_failures": parse_failures,
             "messages": messages,
             "searched_emails": supplier_emails,
             "searched_domains": supplier_domains,
+            "communication_monitor": outreach.communication_monitor.model_dump(),
         }
 
     except Exception as e:

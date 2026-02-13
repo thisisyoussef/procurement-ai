@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.config import get_settings
 from app.core.email_service import verify_webhook_signature
 from app.schemas.agent_state import EmailDeliveryEvent, OutreachState
+from app.services.communication_monitor import apply_delivery_event, ensure_monitor
 from app.services.project_store import StoreUnavailableError, get_project_store
 from app.services.supplier_memory import record_supplier_interaction
 
@@ -51,7 +52,15 @@ async def resend_webhook(request: Request):
 
     if settings.resend_webhook_secret:
         signature = request.headers.get("svix-signature", "")
-        if not verify_webhook_signature(body, signature, settings.resend_webhook_secret):
+        svix_id = request.headers.get("svix-id", "")
+        svix_timestamp = request.headers.get("svix-timestamp", "")
+        if not verify_webhook_signature(
+            body,
+            signature,
+            settings.resend_webhook_secret,
+            svix_id=svix_id,
+            svix_timestamp=svix_timestamp,
+        ):
             logger.warning("Invalid Resend webhook signature")
             raise HTTPException(status_code=401, detail="Invalid signature")
 
@@ -88,9 +97,10 @@ async def resend_webhook(request: Request):
 
     raw = project.get("outreach_state", {})
     outreach = OutreachState(**raw) if isinstance(raw, dict) else raw
+    ensure_monitor(outreach, owner_email=project.get("owner_email"))
 
     for status in outreach.supplier_statuses:
-        if status.email_id == email_id:
+        if status.email_id == email_id or email_id in status.email_ids:
             status.delivery_status = delivery_status
             status.delivery_events.append(
                 EmailDeliveryEvent(
@@ -100,6 +110,16 @@ async def resend_webhook(request: Request):
                 )
             )
             break
+
+    apply_delivery_event(
+        outreach,
+        resend_email_id=email_id,
+        event_type=event_type,
+        delivery_status=delivery_status,
+        source="webhook_resend",
+        details=data,
+        timestamp=time.time(),
+    )
 
     project["outreach_state"] = outreach.model_dump(mode="json")
     if supplier_index is not None:

@@ -1,6 +1,8 @@
 """Email service — Resend SDK wrapper with webhook verification and HTML templates."""
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import hmac
 import logging
@@ -39,7 +41,15 @@ def _send_with_resend(api_key: str, payload: dict[str, Any]) -> Any:
     return resend.Emails.send(payload)
 
 
-async def send_email(to: str, subject: str, body_html: str) -> dict:
+async def send_email(
+    to: str,
+    subject: str,
+    body_html: str,
+    *,
+    cc: list[str] | None = None,
+    reply_to: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict:
     """Send an email via Resend API.
 
     Returns the Resend response dict with 'id' and 'sent' keys.
@@ -49,7 +59,8 @@ async def send_email(to: str, subject: str, body_html: str) -> dict:
     if not settings.resend_api_key:
         logger.warning("Resend API key not configured — email not sent to %s", to)
         return {"error": "Resend API key not configured", "sent": False}
-    if settings.from_email == "sourcing@yourdomain.com":
+    from_email = (settings.from_email or "").strip() or "sourcing@asmbl.app"
+    if from_email == "sourcing@yourdomain.com":
         logger.warning("FROM_EMAIL is still placeholder value; refusing to send to %s", to)
         return {
             "error": "FROM_EMAIL is not configured (still sourcing@yourdomain.com)",
@@ -57,26 +68,61 @@ async def send_email(to: str, subject: str, body_html: str) -> dict:
         }
 
     try:
+        normalized_cc = []
+        seen: set[str] = set()
+        for candidate in cc or []:
+            value = (candidate or "").strip().lower()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized_cc.append(value)
+
         payload = {
-            "from": settings.from_email,
+            "from": from_email,
             "to": [to],
             "subject": subject,
             "html": body_html,
         }
+        if normalized_cc:
+            payload["cc"] = normalized_cc
+        if reply_to:
+            payload["reply_to"] = reply_to
+        if headers:
+            payload["headers"] = headers
+
         result = await asyncio.to_thread(_send_with_resend, settings.resend_api_key, payload)
         email_id = _extract_resend_email_id(result)
         if not email_id:
             logger.error("Resend returned no email id for %s: %r", to, result)
             return {"error": "Resend response missing email id", "sent": False}
-        logger.info("Email sent to %s: subject=%s, id=%s", to, subject[:60], email_id)
-        return {"id": email_id, "sent": True}
+        logger.info(
+            "Email sent to %s (cc=%s): subject=%s, id=%s",
+            to,
+            ",".join(normalized_cc) if normalized_cc else "-",
+            subject[:60],
+            email_id,
+        )
+        return {
+            "id": email_id,
+            "sent": True,
+            "to": to,
+            "cc": normalized_cc,
+            "from": from_email,
+        }
 
     except Exception as e:
         logger.error("Failed to send email to %s: %s", to, str(e))
         return {"error": str(e), "sent": False}
 
 
-def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
+def verify_webhook_signature(
+    payload: bytes,
+    signature: str,
+    secret: str,
+    *,
+    svix_id: str | None = None,
+    svix_timestamp: str | None = None,
+) -> bool:
     """Verify a Resend webhook signature using HMAC-SHA256.
 
     Args:
@@ -91,15 +137,50 @@ def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> boo
         return False
 
     try:
-        # Resend uses svix for webhooks — signature format: v1,<base64_sig>
-        expected = hmac.new(
-            secret.encode("utf-8"),
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
+        normalized_secret = secret.strip()
+        if normalized_secret.startswith("whsec_"):
+            normalized_secret = normalized_secret[6:]
 
-        # Simple timing-safe comparison
-        return hmac.compare_digest(expected, signature)
+        try:
+            secret_bytes = base64.b64decode(normalized_secret)
+        except (binascii.Error, ValueError):
+            # Fallback for non-base64 legacy secrets.
+            secret_bytes = secret.encode("utf-8")
+
+        # Preferred Svix verification path:
+        #   signed_content = "{svix-id}.{svix-timestamp}.{payload}"
+        #   signature header contains one or more "v1,<base64sig>" entries.
+        if svix_id and svix_timestamp:
+            signed_content = (
+                f"{svix_id}.{svix_timestamp}.{payload.decode('utf-8')}".encode("utf-8")
+            )
+            digest = hmac.new(secret_bytes, signed_content, hashlib.sha256).digest()
+            expected_b64 = base64.b64encode(digest).decode("utf-8")
+
+            candidates: list[str] = []
+            for part in signature.split():
+                token = part.strip()
+                if not token:
+                    continue
+                if "," in token:
+                    version, value = token.split(",", 1)
+                    if version == "v1":
+                        candidates.append(value)
+                else:
+                    candidates.append(token)
+
+            if any(hmac.compare_digest(expected_b64, candidate) for candidate in candidates):
+                return True
+
+        # Backward-compatible fallback for local/dev signatures.
+        expected_legacy = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(expected_legacy, signature):
+            return True
+        if signature.startswith("v1,"):
+            _, maybe_sig = signature.split(",", 1)
+            if hmac.compare_digest(expected_legacy, maybe_sig):
+                return True
+        return False
     except Exception as e:
         logger.warning("Webhook signature verification failed: %s", e)
         return False
@@ -226,6 +307,9 @@ class EmailQueue:
             to=item["to"],
             subject=item["subject"],
             body_html=item["body_html"],
+            cc=item["metadata"].get("cc"),
+            reply_to=item["metadata"].get("reply_to"),
+            headers=item["metadata"].get("headers"),
         )
 
         self._last_sent_at = time.time()

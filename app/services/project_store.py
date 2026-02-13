@@ -98,8 +98,12 @@ class InMemoryProjectStore(BaseProjectStore):
         for project in self.projects.values():
             outreach = project.get("outreach_state") or {}
             for status in outreach.get("supplier_statuses", []):
-                if status.get("email_id") == email_id:
+                if status.get("email_id") == email_id or email_id in (status.get("email_ids") or []):
                     return self._clone(project), status.get("supplier_index")
+            monitor = outreach.get("communication_monitor") or {}
+            for msg in monitor.get("messages", []):
+                if msg.get("resend_email_id") == email_id:
+                    return self._clone(project), msg.get("supplier_index")
         return None, None
 
     async def find_project_by_call_id(self, call_id: str) -> tuple[dict[str, Any] | None, int | None]:

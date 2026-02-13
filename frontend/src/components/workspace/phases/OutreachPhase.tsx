@@ -26,12 +26,65 @@ interface SupplierOutreachStatus {
   exclusion_reason?: string | null
 }
 
+interface CommunicationStatusEvent {
+  event_type: string
+  status: string
+  timestamp?: number
+  source?: string
+  details?: Record<string, unknown>
+}
+
+interface CommunicationMessage {
+  message_key: string
+  direction: 'outbound' | 'inbound' | string
+  supplier_index?: number | null
+  supplier_name?: string | null
+  to_email?: string | null
+  from_email?: string | null
+  cc_emails?: string[]
+  subject?: string | null
+  body_preview?: string | null
+  resend_email_id?: string | null
+  inbox_message_id?: string | null
+  source?: string | null
+  delivery_status?: string
+  parsed_response?: boolean
+  created_at?: number
+  updated_at?: number
+  events?: CommunicationStatusEvent[]
+}
+
+interface CommunicationMonitorState {
+  owner_email?: string | null
+  last_inbox_check_at?: number | null
+  last_inbox_check_source?: string | null
+  last_inbox_message_count?: number
+  total_outbound?: number
+  total_inbound?: number
+  total_replies?: number
+  total_failures?: number
+  messages?: CommunicationMessage[]
+}
+
 interface OutreachState {
   selected_suppliers: number[]
   supplier_statuses: SupplierOutreachStatus[]
   excluded_suppliers?: number[]
   quick_approval_decision?: 'approved' | 'declined' | null
   events?: OutreachEvent[]
+  communication_monitor?: CommunicationMonitorState
+}
+
+function formatTimeAgo(timestamp?: number | null) {
+  if (!timestamp) return 'Never'
+  const diff = Math.max(0, Date.now() - timestamp * 1000)
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
 }
 
 function eventLabel(eventType: string) {
@@ -59,6 +112,7 @@ export default function OutreachPhase() {
   const { projectId, status, refreshStatus } = useWorkspace()
   const [outreachState, setOutreachState] = useState<OutreachState | null>(null)
   const [loading, setLoading] = useState(false)
+  const [checkingInbox, setCheckingInbox] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const fetchOutreachStatus = useCallback(async () => {
@@ -169,6 +223,84 @@ export default function OutreachPhase() {
     [projectId, fetchOutreachStatus, refreshStatus]
   )
 
+  const refreshCommunicationMonitor = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/monitor`)
+      if (!res.ok) return
+      const monitor = (await res.json()) as CommunicationMonitorState
+      setOutreachState((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          communication_monitor: monitor,
+        }
+      })
+    } catch {
+      // Ignore monitor refresh failures.
+    }
+  }, [projectId])
+
+  const runInboxCheck = useCallback(async () => {
+    if (!projectId) return
+    setCheckingInbox(true)
+    setError(null)
+    trackTraceEvent('outreach_inbox_check_attempt', { project_id: projectId }, { projectId })
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/check-inbox`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try {
+          const payload = await res.json()
+          detail = payload.detail || JSON.stringify(payload)
+        } catch {
+          // Keep HTTP detail.
+        }
+        throw new Error(detail)
+      }
+      const payload = await res.json().catch(() => ({}))
+      trackTraceEvent(
+        'outreach_inbox_check_success',
+        {
+          project_id: projectId,
+          messages_found: payload?.messages_found,
+          new_messages: payload?.new_messages,
+          parsed_quotes: payload?.parsed_quotes,
+          parse_failures: payload?.parse_failures,
+        },
+        { projectId }
+      )
+      await fetchOutreachStatus()
+      await refreshCommunicationMonitor()
+      refreshStatus()
+    } catch (err: any) {
+      setError(err?.message || 'Inbox check failed.')
+      trackTraceEvent(
+        'outreach_inbox_check_error',
+        { project_id: projectId, detail: err?.message || 'unknown' },
+        { projectId, level: 'warn' }
+      )
+    } finally {
+      setCheckingInbox(false)
+    }
+  }, [projectId, fetchOutreachStatus, refreshCommunicationMonitor, refreshStatus])
+
+  useEffect(() => {
+    if (!projectId) return
+    void refreshCommunicationMonitor()
+  }, [projectId, refreshCommunicationMonitor])
+
+  const monitor = outreachState?.communication_monitor || null
+  const recentMessages = useMemo(
+    () =>
+      [...(monitor?.messages || [])]
+        .sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0))
+        .slice(0, 8),
+    [monitor?.messages]
+  )
+
   if (!projectId || !status?.recommendation) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
@@ -245,6 +377,86 @@ export default function OutreachPhase() {
           </div>
         )}
       </div>
+
+      {decision === 'approved' && (
+        <div className="card p-5 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold text-ink-2">Communication monitor</p>
+              <p className="text-[11px] text-ink-4 mt-1">
+                Track sent emails, inbox checks, and supplier replies in one feed.
+              </p>
+            </div>
+            <button
+              onClick={() => void runInboxCheck()}
+              disabled={loading || checkingInbox}
+              className="px-3 py-1.5 rounded-lg border border-surface-3 text-[11px] text-ink-3 hover:bg-surface-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {checkingInbox ? 'Checking inbox…' : 'Check inbox now'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="rounded-lg border border-surface-3 px-3 py-2">
+              <p className="text-[10px] text-ink-4">Outbound</p>
+              <p className="text-[15px] font-medium text-ink">{monitor?.total_outbound || 0}</p>
+            </div>
+            <div className="rounded-lg border border-surface-3 px-3 py-2">
+              <p className="text-[10px] text-ink-4">Inbound</p>
+              <p className="text-[15px] font-medium text-ink">{monitor?.total_inbound || 0}</p>
+            </div>
+            <div className="rounded-lg border border-surface-3 px-3 py-2">
+              <p className="text-[10px] text-ink-4">Replies parsed</p>
+              <p className="text-[15px] font-medium text-ink">{monitor?.total_replies || 0}</p>
+            </div>
+            <div className="rounded-lg border border-surface-3 px-3 py-2">
+              <p className="text-[10px] text-ink-4">Failures</p>
+              <p className="text-[15px] font-medium text-red-600">{monitor?.total_failures || 0}</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-surface-3 px-3 py-2 text-[11px] text-ink-4">
+            Last inbox check: {formatTimeAgo(monitor?.last_inbox_check_at)}{' '}
+            {monitor?.last_inbox_check_source ? `(${monitor.last_inbox_check_source})` : ''}
+            {monitor?.owner_email ? ` · CC owner: ${monitor.owner_email}` : ''}
+          </div>
+
+          {recentMessages.length > 0 ? (
+            <div className="space-y-2">
+              {recentMessages.map((msg) => (
+                <div key={msg.message_key} className="rounded-lg border border-surface-3 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full ${
+                        msg.direction === 'outbound'
+                          ? 'bg-teal/[0.08] text-teal'
+                          : 'bg-warm/10 text-warm'
+                      }`}
+                    >
+                      {msg.direction === 'outbound' ? 'Outbound' : 'Inbound'}
+                    </span>
+                    <span className="text-[10px] text-ink-4">
+                      {msg.delivery_status || 'unknown'} · {formatTimeAgo(msg.updated_at || msg.created_at)}
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-ink truncate">
+                    {msg.supplier_name || msg.to_email || msg.from_email || 'Unknown contact'}
+                  </p>
+                  {msg.subject ? <p className="text-[11px] text-ink-3 truncate">{msg.subject}</p> : null}
+                  {msg.body_preview ? <p className="text-[10px] text-ink-4 truncate">{msg.body_preview}</p> : null}
+                  {msg.direction === 'outbound' && msg.cc_emails?.length ? (
+                    <p className="text-[10px] text-ink-4 mt-1">CC: {msg.cc_emails.join(', ')}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-surface-3 px-3 py-4 text-[11px] text-ink-4">
+              No communication records yet.
+            </div>
+          )}
+        </div>
+      )}
 
       {outreachState?.supplier_statuses?.length ? (
         <div className="card p-5">

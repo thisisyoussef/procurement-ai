@@ -86,6 +86,52 @@ class EmailDeliveryEvent(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class CommunicationStatusEvent(BaseModel):
+    """Immutable status change for a communication record."""
+    event_type: str
+    status: str
+    timestamp: float = Field(default_factory=time.time)
+    source: str = "system"
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class CommunicationMessage(BaseModel):
+    """Outbound or inbound communication record."""
+    message_key: str
+    direction: str  # "outbound" | "inbound"
+    channel: str = "email"
+    supplier_index: int | None = None
+    supplier_name: str | None = None
+    to_email: str | None = None
+    from_email: str | None = None
+    cc_emails: list[str] = Field(default_factory=list)
+    subject: str | None = None
+    body_preview: str | None = None
+    resend_email_id: str | None = None
+    inbox_message_id: str | None = None
+    matched_sender: str | None = None
+    thread_key: str | None = None
+    source: str | None = None
+    delivery_status: str = "unknown"
+    parsed_response: bool = False
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+    events: list[CommunicationStatusEvent] = Field(default_factory=list)
+
+
+class CommunicationMonitorState(BaseModel):
+    """End-to-end communications monitor for outreach."""
+    owner_email: str | None = None
+    last_inbox_check_at: float | None = None
+    last_inbox_check_source: str | None = None
+    last_inbox_message_count: int = 0
+    total_outbound: int = 0
+    total_inbound: int = 0
+    total_replies: int = 0
+    total_failures: int = 0
+    messages: list[CommunicationMessage] = Field(default_factory=list)
+
+
 class PhoneCallConfig(BaseModel):
     """Configuration for AI phone calling via Retell."""
     enabled: bool = False
@@ -445,6 +491,7 @@ class SupplierOutreachStatus(BaseModel):
     email_sent: bool = False
     sent_at: float | None = None
     email_id: str | None = None  # Resend email ID for tracking
+    email_ids: list[str] = Field(default_factory=list)  # Historical Resend IDs for this supplier
     delivery_status: str = "unknown"  # "unknown", "sent", "delivered", "bounced", "opened", "clicked"
     send_error: str | None = None
     delivery_events: list[EmailDeliveryEvent] = Field(default_factory=list)
@@ -503,3 +550,4 @@ class OutreachState(BaseModel):
     supplier_plans: list[SupplierOutreachPlan] = Field(default_factory=list)
     events: list[OutreachEvent] = Field(default_factory=list)
     quick_approval_decision: str | None = None  # "approved" | "declined"
+    communication_monitor: CommunicationMonitorState = Field(default_factory=CommunicationMonitorState)

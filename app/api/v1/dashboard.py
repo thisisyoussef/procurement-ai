@@ -85,6 +85,7 @@ async def start_project_from_dashboard(
     project = {
         "id": project_id,
         "user_id": str(current_user.user_id),
+        "owner_email": (current_user.email or "").strip().lower() or None,
         "title": title,
         "product_description": request.description.strip(),
         "auto_outreach": request.auto_outreach,

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # Resend
     resend_api_key: str = ""
     resend_webhook_secret: str = ""
-    from_email: str = "sourcing@yourdomain.com"
+    from_email: str = "sourcing@asmbl.app"
 
     # Retell AI (phone calling)
     retell_api_key: str = ""

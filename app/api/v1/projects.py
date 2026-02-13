@@ -174,6 +174,7 @@ async def create_project(
         project = {
             "id": project_id,
             "user_id": user_id,
+            "owner_email": (current_user.email or "").strip().lower() or None,
             "title": request.title,
             "product_description": request.product_description,
             "auto_outreach": request.auto_outreach,
