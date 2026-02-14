@@ -18,15 +18,23 @@ interface SupplierTile {
  *
  * Shows a grid of supplier tiles. As verification events arrive,
  * each tile's progress ring fills and a checkmark appears.
+ * Driven by real-time progress events from the verifier agent.
  */
 export default function VerificationAnimation() {
-  const { events, supplierNames, progressPct, supplierCount } = useStageProgress('verifying')
+  const {
+    events,
+    supplierNames,
+    progressPct,
+    supplierCount,
+    latestSubstep,
+    latestDetail,
+    riskBreakdown,
+    isComplete,
+  } = useStageProgress('verifying')
 
   // Build tile data: all discovered suppliers, marking verified ones
   const tiles: SupplierTile[] = useMemo(() => {
-    // Use supplier names from verification events
     const verified = new Set(supplierNames)
-    // Show up to 20 tiles
     const allNames = Array.from(verified)
 
     // If we know total count from progress events, pad with placeholders
@@ -35,15 +43,15 @@ export default function VerificationAnimation() {
       ? parseInt(totalMatch.detail.match(/Verifying supplier \d+\/(\d+)/)?.[1] || '0')
       : Math.max(supplierCount, allNames.length)
 
-    const tiles: SupplierTile[] = allNames.map((name) => ({ name, verified: true }))
+    const result: SupplierTile[] = allNames.map((name) => ({ name, verified: true }))
 
     // Add remaining unverified placeholders
-    const remaining = Math.min(20, totalCount) - tiles.length
+    const remaining = Math.min(20, totalCount) - result.length
     for (let i = 0; i < remaining; i++) {
-      tiles.push({ name: `Supplier ${tiles.length + 1}`, verified: false })
+      result.push({ name: `Supplier ${result.length + 1}`, verified: false })
     }
 
-    return tiles.slice(0, 20)
+    return result.slice(0, 20)
   }, [supplierNames, events, supplierCount])
 
   const verifiedCount = tiles.filter((t) => t.verified).length
@@ -56,7 +64,7 @@ export default function VerificationAnimation() {
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DURATION.normal, ease: EASE_OUT_EXPO }}
-        className="text-center mb-6"
+        className="text-center mb-4"
       >
         <p className="text-[24px] font-semibold text-ink tabular-nums">
           <AnimatedCounter value={verifiedCount} />
@@ -64,6 +72,24 @@ export default function VerificationAnimation() {
         </p>
         <p className="text-[12px] text-ink-3 mt-0.5">suppliers verified</p>
       </m.div>
+
+      {/* Current check phase label */}
+      {latestSubstep && !isComplete && (
+        <m.div
+          key={latestSubstep}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.fast }}
+          className="mb-4 px-3 py-1 bg-surface-2 border border-surface-3 rounded-full"
+        >
+          <p className="text-[10px] font-semibold tracking-[1px] uppercase text-ink-4">
+            {latestSubstep === 'starting' && 'Starting verification'}
+            {latestSubstep === 'checking_supplier' && 'Running checks'}
+            {latestSubstep === 'complete' && 'Verification complete'}
+            {!['starting', 'checking_supplier', 'complete'].includes(latestSubstep) && latestSubstep.replace(/_/g, ' ')}
+          </p>
+        </m.div>
+      )}
 
       {/* Supplier grid */}
       <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 max-w-[480px] w-full mb-6">
@@ -136,6 +162,33 @@ export default function VerificationAnimation() {
               transition={{ duration: DURATION.normal, ease: EASE_OUT_EXPO }}
             />
           </div>
+        </m.div>
+      )}
+
+      {/* Risk breakdown summary — shown after complete */}
+      {isComplete && (riskBreakdown.low > 0 || riskBreakdown.high > 0) && (
+        <m.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.normal, delay: 0.2, ease: EASE_OUT_EXPO }}
+          className="flex gap-4 mb-4"
+        >
+          {riskBreakdown.low > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-[11px] text-ink-3">
+                {riskBreakdown.low} low risk
+              </span>
+            </div>
+          )}
+          {riskBreakdown.high > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-400" />
+              <span className="text-[11px] text-ink-3">
+                {riskBreakdown.high} high risk
+              </span>
+            </div>
+          )}
         </m.div>
       )}
 

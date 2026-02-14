@@ -373,7 +373,14 @@ In analysis_narrative, if viable suppliers are much fewer than total suppliers, 
         except Exception:
             continue
 
-    logger.info("✅ Comparison complete: %d compared | best_value=%s, best_quality=%s, best_speed=%s", len(comparisons), data.get("best_value"), data.get("best_quality"), data.get("best_speed"))
+    best_value = data.get("best_value", "")
+    best_quality = data.get("best_quality", "")
+    best_speed = data.get("best_speed", "")
+    emit_progress("comparing", "complete",
+                  f"Comparison complete: {len(comparisons)} suppliers scored. "
+                  f"Best value: {best_value}. Best quality: {best_quality}.",
+                  progress_pct=100)
+    logger.info("✅ Comparison complete: %d compared | best_value=%s, best_quality=%s, best_speed=%s", len(comparisons), best_value, best_quality, best_speed)
     analysis_narrative = data.get("analysis_narrative", "")
     if shipping_guard_adjustments:
         guard_note = (

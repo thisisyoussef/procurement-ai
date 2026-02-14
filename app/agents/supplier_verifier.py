@@ -305,5 +305,11 @@ async def verify_suppliers(
     # Sort by composite score descending
     verifications.sort(key=lambda v: v.composite_score, reverse=True)
 
+    low_risk = len([v for v in verifications if v.risk_level == "low"])
+    high_risk = len([v for v in verifications if v.risk_level == "high"])
+    emit_progress("verifying", "complete",
+                  f"Verification complete: {len(verifications)} verified. "
+                  f"{low_risk} low risk, {high_risk} high risk.",
+                  progress_pct=100)
     logger.info("✅ Verification complete: %d suppliers verified", len(verifications))
     return VerificationResults(verifications=verifications)

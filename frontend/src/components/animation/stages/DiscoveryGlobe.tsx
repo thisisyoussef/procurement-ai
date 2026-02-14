@@ -17,14 +17,24 @@ import AnimatedCounter from '../AnimatedCounter'
  * ticks up, event ticker shows latest search activity.
  */
 export default function DiscoveryGlobe() {
-  const { events, regions, supplierCount, latestDetail } = useStageProgress('discovering')
+  const {
+    events,
+    regions,
+    activeRegion,
+    supplierCount,
+    latestDetail,
+    latestSubstep,
+    progressPct,
+    isComplete,
+  } = useStageProgress('discovering')
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const { animateArc, pulseAllDots } = useGlobeTimeline(svgRef)
+  const { animateArc, pulseAllDots, finalGlow } = useGlobeTimeline(svgRef)
 
   const [dotsReady, setDotsReady] = useState(false)
   const [activeRegions, setActiveRegions] = useState<string[]>([])
   const [searchingRegion, setSearchingRegion] = useState<string | null>(null)
   const animatedArcsRef = useRef(new Set<string>())
+  const completeFired = useRef(false)
 
   // Dot ripple-in after a short delay
   useEffect(() => {
@@ -63,21 +73,49 @@ export default function DiscoveryGlobe() {
         pulseAllDots()
       }
     }
-  }, [events, animateArc, pulseAllDots])
+
+    // Fire final glow when discovery completes
+    if (isComplete && !completeFired.current) {
+      completeFired.current = true
+      finalGlow?.()
+    }
+  }, [events, isComplete, animateArc, pulseAllDots, finalGlow])
 
   useEffect(() => {
     processEvents()
   }, [processEvents])
 
-  // Also activate regions from parsed_requirements that arrive before discovery events
+  // Use the hook's activeRegion for the currently-being-searched indicator
   useEffect(() => {
-    if (regions.length > 0 && activeRegions.length === 0) {
-      // Pre-populate target regions but don't draw arcs yet — wait for events
+    if (activeRegion && !animatedArcsRef.current.has(activeRegion)) {
+      setSearchingRegion(activeRegion)
     }
-  }, [regions, activeRegions.length])
+  }, [activeRegion])
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
+      {/* Active search phase label */}
+      {latestSubstep && !isComplete && (
+        <m.div
+          key={latestSubstep}
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.fast, ease: EASE_OUT_EXPO }}
+          className="mb-3 px-3 py-1 bg-surface-2 border border-surface-3 rounded-full"
+        >
+          <p className="text-[10px] font-semibold tracking-[1px] uppercase text-ink-4">
+            {latestSubstep === 'checking_memory' && 'Checking supplier memory'}
+            {latestSubstep === 'searching_regional' && `Searching ${activeRegion || 'region'}`}
+            {latestSubstep === 'searching_google' && 'Searching Google Places'}
+            {latestSubstep === 'searching_web' && 'Searching the web'}
+            {latestSubstep === 'searching_marketplaces' && 'Searching marketplaces'}
+            {latestSubstep === 'deduplicating' && 'Removing duplicates'}
+            {latestSubstep === 'complete' && 'Discovery complete'}
+            {!['checking_memory', 'searching_regional', 'searching_google', 'searching_web', 'searching_marketplaces', 'deduplicating', 'complete'].includes(latestSubstep) && latestSubstep.replace(/_/g, ' ')}
+          </p>
+        </m.div>
+      )}
+
       {/* Globe */}
       <m.div
         initial={{ opacity: 0, scale: 0.95 }}
@@ -94,7 +132,7 @@ export default function DiscoveryGlobe() {
         />
       </m.div>
 
-      {/* Supplier counter */}
+      {/* Supplier counter + active regions */}
       <m.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -106,8 +144,30 @@ export default function DiscoveryGlobe() {
         </p>
         <p className="text-[12px] text-ink-3 mt-0.5">
           {supplierCount === 1 ? 'supplier found' : 'suppliers found'}
+          {activeRegions.length > 0 && !isComplete && (
+            <span className="text-ink-4"> across {activeRegions.length} region{activeRegions.length > 1 ? 's' : ''}</span>
+          )}
         </p>
       </m.div>
+
+      {/* Progress bar */}
+      {progressPct !== null && (
+        <m.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.fast }}
+          className="mt-3 w-full max-w-[300px]"
+        >
+          <div className="h-1 bg-surface-3 rounded-full overflow-hidden">
+            <m.div
+              className="h-full bg-teal rounded-full"
+              initial={{ width: '0%' }}
+              animate={{ width: `${progressPct}%` }}
+              transition={{ duration: DURATION.normal, ease: EASE_OUT_EXPO }}
+            />
+          </div>
+        </m.div>
+      )}
 
       {/* Event ticker */}
       <m.div

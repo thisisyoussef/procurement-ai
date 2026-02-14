@@ -1,18 +1,30 @@
 'use client'
 
-import { m } from '@/lib/motion'
+import { m, AnimatePresence } from '@/lib/motion'
 import { DURATION, EASE_OUT_EXPO, SPRING_BOUNCY, STAGGER } from '@/lib/motion/config'
 import { useStageProgress } from '../shared/useStageProgress'
+import EventTickerOverlay from '../shared/EventTickerOverlay'
+import ProgressRing from '../shared/ProgressRing'
 
 /**
  * Recommending Animation — "Podium Reveal"
  *
  * Three podium slots at center with staggered heights.
  * Cards drop into #1, #2, #3 positions with bouncy spring physics.
- * No granular progress events — purely visual.
+ * Now data-driven: progress events control substep labels, progress ring,
+ * and top pick is revealed upon completion.
  */
 export default function RecommendingAnimation() {
-  const { supplierCount } = useStageProgress('recommending')
+  const {
+    events,
+    supplierCount,
+    latestSubstep,
+    latestDetail,
+    progressPct,
+    topPick,
+    recommendationCount,
+    isComplete,
+  } = useStageProgress('recommending')
 
   const podiums = [
     { rank: 2, height: 64, delay: 0.4 },
@@ -22,19 +34,40 @@ export default function RecommendingAnimation() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
-      {/* Title */}
-      <m.p
+      {/* Progress ring + substep label */}
+      <m.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DURATION.normal, ease: EASE_OUT_EXPO }}
-        className="text-[13px] text-ink-3 mb-10"
+        className="flex flex-col items-center mb-6"
       >
-        Preparing your recommendations...
-      </m.p>
+        <ProgressRing
+          progress={progressPct ?? (isComplete ? 100 : 10)}
+          size={48}
+          strokeWidth={3}
+        />
+        <m.p
+          key={latestSubstep || 'default'}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.fast }}
+          className="text-[13px] text-ink-3 mt-3"
+        >
+          {isComplete
+            ? `${recommendationCount} recommendations ready`
+            : latestSubstep === 'synthesizing'
+              ? 'Synthesizing supplier data...'
+              : latestSubstep === 'ranking'
+                ? 'Ranking suppliers...'
+                : latestSubstep === 'lane_assignment'
+                  ? 'Assigning decision lanes...'
+                  : 'Preparing your recommendations...'}
+        </m.p>
+      </m.div>
 
       {/* Podiums */}
       <div className="flex items-end justify-center gap-4 mb-8">
-        {podiums.map((podium, i) => (
+        {podiums.map((podium) => (
           <m.div
             key={podium.rank}
             initial={{ opacity: 0, y: 40, scale: 0.9 }}
@@ -90,6 +123,25 @@ export default function RecommendingAnimation() {
         ))}
       </div>
 
+      {/* Top pick badge — shown when complete */}
+      <AnimatePresence>
+        {isComplete && topPick && (
+          <m.div
+            initial={{ opacity: 0, scale: 0.9, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: DURATION.normal, ease: EASE_OUT_EXPO }}
+            className="mb-6 flex items-center gap-2 px-4 py-2 bg-teal/10 border border-teal/20 rounded-full"
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-teal">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <path d="M22 4L12 14.01l-3-3" />
+            </svg>
+            <span className="text-[12px] font-medium text-teal">Top Pick: {topPick}</span>
+          </m.div>
+        )}
+      </AnimatePresence>
+
       {/* Confidence scores animating in */}
       <m.div
         initial={{ opacity: 0, y: 12 }}
@@ -122,16 +174,28 @@ export default function RecommendingAnimation() {
         ))}
       </m.div>
 
-      {/* Bottom status */}
+      {/* Event ticker */}
       <m.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: DURATION.normal, delay: 2 }}
-        className="mt-8 flex items-center gap-2"
+        transition={{ duration: DURATION.normal, delay: 1.8 }}
+        className="mt-6 w-full max-w-[400px]"
       >
-        <span className="status-dot bg-teal animate-pulse-dot" />
-        <p className="text-[11px] text-ink-4">Finalizing rankings...</p>
+        <EventTickerOverlay events={events} maxVisible={3} className="text-center" />
       </m.div>
+
+      {/* Bottom status */}
+      {!isComplete && (
+        <m.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: DURATION.normal, delay: 2 }}
+          className="mt-3 flex items-center gap-2"
+        >
+          <span className="status-dot bg-teal animate-pulse-dot" />
+          <p className="text-[11px] text-ink-4">Finalizing rankings...</p>
+        </m.div>
+      )}
     </div>
   )
 }
