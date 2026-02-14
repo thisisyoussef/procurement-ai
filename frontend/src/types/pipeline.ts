@@ -29,7 +29,7 @@ export interface PipelineStatus {
 
 export type Phase = 'brief' | 'search' | 'outreach' | 'compare' | 'samples' | 'order'
 
-const PHASE_ORDER: Phase[] = ['brief', 'search', 'compare', 'outreach', 'samples', 'order']
+export const PHASE_ORDER: Phase[] = ['brief', 'search', 'compare', 'outreach', 'samples', 'order']
 
 export function stageToPhase(stage: string): Phase {
   switch (stage) {

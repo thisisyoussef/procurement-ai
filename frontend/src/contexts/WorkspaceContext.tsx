@@ -14,7 +14,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { AuthUser, authFetch, clearAuthSession } from '@/lib/auth'
 import { trackTraceEvent } from '@/lib/telemetry'
-import { Phase, PipelineStatus, phaseIndex, stageToPhase } from '@/types/pipeline'
+import { Phase, PHASE_ORDER, PipelineStatus, phaseIndex, stageToPhase } from '@/types/pipeline'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const POLL_INTERVAL_MS = 1200
@@ -718,6 +718,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
   // URL -> state sync (supports browser back/forward and direct links).
   useEffect(() => {
     const urlProjectId = normalizeProjectId(searchParams.get('projectId'))
+    const urlPhase = searchParams.get('phase') as Phase | null
 
     if (urlProjectId === lastHandledUrlProjectRef.current) return
     lastHandledUrlProjectRef.current = urlProjectId
@@ -738,11 +739,17 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       {
         current_project_id: activeProjectRef.current,
         target_project_id: urlProjectId,
+        target_phase: urlPhase,
       },
       { projectId: urlProjectId }
     )
 
     activateProject(urlProjectId, { source: 'url', syncUrl: false })
+
+    // Apply phase from URL (e.g. dashboard "Review outreach →" link)
+    if (urlPhase && PHASE_ORDER.includes(urlPhase)) {
+      dispatch({ type: 'SET_ACTIVE_PHASE', phase: urlPhase, userDriven: true })
+    }
   }, [activateProject, clearPollingResources, invalidatePollingSession, searchParams])
 
   useEffect(() => {
