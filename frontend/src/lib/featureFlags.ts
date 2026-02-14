@@ -8,4 +8,5 @@ function parseBool(value: string | undefined, fallback = false): boolean {
 export const featureFlags = {
   tamkinLandingBypass: parseBool(process.env.NEXT_PUBLIC_TAMKIN_LANDING_BYPASS, false),
   tamkinClientTracing: parseBool(process.env.NEXT_PUBLIC_TAMKIN_CLIENT_TRACING, true),
+  tamkinFocusCircleSearchV1: parseBool(process.env.NEXT_PUBLIC_TAMKIN_FOCUS_CIRCLE_V1, false),
 }

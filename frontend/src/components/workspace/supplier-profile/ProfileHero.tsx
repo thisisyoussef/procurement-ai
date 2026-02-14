@@ -24,7 +24,22 @@ export default function ProfileHero({ profile }: Props) {
       {/* Top row: identity + actions */}
       <div className="flex items-start justify-between gap-8 mb-7 flex-col sm:flex-row">
         <div className="flex items-center gap-5">
-          <div className="w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center text-[22px] font-extrabold text-ink-4 shrink-0">
+          {profile.images?.[0] || (profile as any).logo_url ? (
+            <img
+              src={(profile as any).logo_url || profile.images?.[0]}
+              alt={profile.name}
+              className="w-16 h-16 rounded-2xl object-cover shrink-0 bg-surface-2"
+              loading="lazy"
+              onError={(e) => {
+                const el = e.target as HTMLImageElement
+                el.style.display = 'none'
+                el.nextElementSibling?.classList.remove('hidden')
+              }}
+            />
+          ) : null}
+          <div className={`w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center text-[22px] font-extrabold text-ink-4 shrink-0 ${
+            (profile as any).logo_url || profile.images?.[0] ? 'hidden' : ''
+          }`}>
             {getInitials(profile.name)}
           </div>
           <div>

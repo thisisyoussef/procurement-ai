@@ -3,6 +3,8 @@
 import { useState } from 'react'
 
 import { authFetch } from '@/lib/auth'
+import { featureFlags } from '@/lib/featureFlags'
+import { trackTraceEvent } from '@/lib/telemetry'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
@@ -11,6 +13,9 @@ interface ClarifyingQuestion {
   question: string
   importance: string
   suggestions: string[]
+  why_this_question?: string | null
+  if_skipped_impact?: string | null
+  suggested_default?: string | null
 }
 
 interface ClarifyingQuestionsProps {
@@ -49,6 +54,17 @@ export default function ClarifyingQuestions({
 
   const handleInputChange = (field: string, value: string) => {
     setAnswers((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const applySuggestedDefault = (question: ClarifyingQuestion) => {
+    const fallback = question.suggested_default?.trim()
+    if (!fallback) return
+    setAnswers((prev) => ({ ...prev, [question.field]: fallback }))
+    trackTraceEvent(
+      'clarification_default_applied',
+      { project_id: projectId, field: question.field, source: 'clarifying_questions_component' },
+      { projectId }
+    )
   }
 
   const handleSubmit = async () => {
@@ -148,6 +164,32 @@ export default function ClarifyingQuestions({
                   </span>
                 </div>
 
+                {featureFlags.tamkinFocusCircleSearchV1 &&
+                (q.why_this_question || q.if_skipped_impact || q.suggested_default) && (
+                  <div className="mb-3 space-y-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    {q.why_this_question ? (
+                      <p className="text-[11px] text-slate-700">
+                        <span className="font-medium text-slate-900">Why this matters:</span>{' '}
+                        {q.why_this_question}
+                      </p>
+                    ) : null}
+                    {q.if_skipped_impact ? (
+                      <p className="text-[11px] text-slate-700">
+                        <span className="font-medium text-slate-900">If skipped:</span>{' '}
+                        {q.if_skipped_impact}
+                      </p>
+                    ) : null}
+                    {q.suggested_default ? (
+                      <button
+                        onClick={() => applySuggestedDefault(q)}
+                        className="text-[11px] font-medium text-blue-700 hover:text-blue-800 transition-colors"
+                      >
+                        Use suggested default: {q.suggested_default}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+
                 {/* Suggestion chips */}
                 {q.suggestions.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
@@ -191,13 +233,20 @@ export default function ClarifyingQuestions({
 
         {/* Actions */}
         <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <button
-            onClick={handleSkip}
-            disabled={loading}
-            className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
-          >
-            Skip all &rarr;
-          </button>
+          <div>
+            <button
+              onClick={handleSkip}
+              disabled={loading}
+              className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
+            >
+              Skip all &rarr;
+            </button>
+            {featureFlags.tamkinFocusCircleSearchV1 ? (
+              <p className="text-[10px] text-slate-500 mt-1">
+                Skipping is allowed, but recommendation confidence may be lower.
+              </p>
+            ) : null}
+          </div>
           <button
             onClick={handleSubmit}
             disabled={loading}

@@ -14,7 +14,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { AuthUser, authFetch, clearAuthSession } from '@/lib/auth'
 import { trackTraceEvent } from '@/lib/telemetry'
-import { Phase, PHASE_ORDER, PipelineStatus, phaseIndex, stageToPhase } from '@/types/pipeline'
+import { DecisionLane, Phase, PHASE_ORDER, PipelineStatus, phaseIndex, stageToPhase } from '@/types/pipeline'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const POLL_INTERVAL_MS = 1200
@@ -57,6 +57,9 @@ interface WorkspaceContextValue {
     fromStage?: 'parsing' | 'discovering'
     additionalContext?: string
   }) => Promise<boolean>
+  setDecisionPreference: (
+    lanePreference: Exclude<DecisionLane, 'alternative'>
+  ) => Promise<boolean>
   handleClarifyingAnswered: () => void
   refreshStatus: () => void
   refreshProjectList: () => Promise<void>
@@ -710,6 +713,44 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
     startPollingForProject(state.projectId, 'clarifying_answered')
   }, [startPollingForProject, state.projectId])
 
+  const setDecisionPreference = useCallback(
+    async (lanePreference: Exclude<DecisionLane, 'alternative'>): Promise<boolean> => {
+      const projectId = state.projectId
+      if (!projectId) return false
+
+      try {
+        const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/decision-preference`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lane_preference: lanePreference }),
+        })
+
+        if (res.status === 401) {
+          handleUnauthorized()
+          return false
+        }
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`)
+        }
+
+        await fetchProjectStatus(projectId, pollSessionRef.current, 'decision_preference_set')
+        return true
+      } catch (err) {
+        trackTraceEvent(
+          'decision_lane_persist_failed',
+          {
+            project_id: projectId,
+            lane_preference: lanePreference,
+            detail: err instanceof Error ? err.message : String(err),
+          },
+          { projectId, level: 'warn' }
+        )
+        return false
+      }
+    },
+    [fetchProjectStatus, handleUnauthorized, state.projectId]
+  )
+
   const handleSignOut = useCallback(() => {
     clearAuthSession()
     onSignOut()
@@ -820,6 +861,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       openProject,
       cancelCurrentProject,
       restartCurrentProject,
+      setDecisionPreference,
       handleClarifyingAnswered,
       refreshStatus,
       refreshProjectList,
@@ -833,6 +875,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       handleClarifyingAnswered,
       openProject,
       restartCurrentProject,
+      setDecisionPreference,
       refreshProjectList,
       refreshStatus,
       setErrorMessage,

@@ -6,11 +6,65 @@ export interface ProgressEvent {
   timestamp: number
 }
 
+export type DecisionLane =
+  | 'best_overall'
+  | 'best_low_risk'
+  | 'best_speed_to_order'
+  | 'alternative'
+
 export interface ClarifyingQuestion {
   field: string
   question: string
   importance: string
   suggestions: string[]
+  why_this_question?: string | null
+  if_skipped_impact?: string | null
+  suggested_default?: string | null
+}
+
+export interface ParsedRequirements {
+  product_type?: string
+  material?: string | null
+  dimensions?: string | null
+  quantity?: number | null
+  customization?: string | null
+  delivery_location?: string | null
+  deadline?: string | null
+  certifications_needed?: string[]
+  budget_range?: string | null
+  missing_fields?: string[]
+  search_queries?: string[]
+  risk_tolerance?: string | null
+  priority_tradeoff?: string | null
+  minimum_supplier_count?: number | null
+  evidence_strictness?: string | null
+  clarifying_questions?: ClarifyingQuestion[]
+  [key: string]: unknown
+}
+
+export interface SupplierRecommendation {
+  rank: number
+  supplier_name: string
+  supplier_index: number
+  overall_score: number
+  confidence: string
+  reasoning: string
+  best_for: string
+  lane?: DecisionLane | null
+  why_trust?: string[]
+  uncertainty_notes?: string[]
+  verify_before_po?: string[]
+  needs_manual_verification?: boolean
+  manual_verification_reason?: string | null
+}
+
+export interface RecommendationResult {
+  recommendations: SupplierRecommendation[]
+  executive_summary?: string
+  caveats?: string[]
+  decision_checkpoint_summary?: string
+  elimination_rationale?: string | null
+  lane_coverage?: Record<string, number>
 }
 
 export interface PipelineStatus {
@@ -18,13 +72,14 @@ export interface PipelineStatus {
   status: string
   current_stage: string
   error: string | null
-  parsed_requirements: any
+  parsed_requirements: ParsedRequirements | null
   discovery_results: any
   verification_results: any
   comparison_result: any
-  recommendation: any
+  recommendation: RecommendationResult | null
   progress_events?: ProgressEvent[]
   clarifying_questions?: ClarifyingQuestion[] | null
+  decision_preference?: DecisionLane | null
 }
 
 export type Phase = 'brief' | 'search' | 'outreach' | 'compare' | 'samples' | 'order'
