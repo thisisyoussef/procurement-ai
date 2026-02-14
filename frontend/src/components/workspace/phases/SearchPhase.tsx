@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import SupplierCard from '../SupplierCard'
 
@@ -13,6 +14,8 @@ const SEARCH_STEPS = [
 
 export default function SearchPhase() {
   const { status, loading } = useWorkspace()
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<SortKey>('relevance')
@@ -240,13 +243,21 @@ export default function SearchPhase() {
 
         {/* Supplier list */}
         <div className="space-y-2">
-          {visible.map((supplier: any, i: number) => (
-            <SupplierCard
-              key={`${supplier.name}-${i}`}
-              supplier={supplier}
-              verification={verificationMap.get(supplier.name)}
-            />
-          ))}
+          {visible.map((supplier: any, i: number) => {
+            const originalIndex = suppliers.indexOf(supplier)
+            return (
+              <SupplierCard
+                key={`${supplier.name}-${i}`}
+                supplier={supplier}
+                verification={verificationMap.get(supplier.name)}
+                onViewProfile={originalIndex >= 0 ? () => {
+                  const params = new URLSearchParams(searchParams.toString())
+                  params.set('supplierIndex', String(originalIndex))
+                  router.push(`/product?${params.toString()}`)
+                } : undefined}
+              />
+            )
+          })}
         </div>
 
         {/* Show more */}

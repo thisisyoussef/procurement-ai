@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { authFetch } from '@/lib/auth'
 import { trackTraceEvent } from '@/lib/telemetry'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
@@ -82,6 +83,8 @@ function getInitials(name: string): string {
 
 export default function ComparePhase() {
   const { status, loading, projectId, setActivePhase, refreshStatus } = useWorkspace()
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [selectedSupplierIndices, setSelectedSupplierIndices] = useState<number[]>([])
   const [approvalLoading, setApprovalLoading] = useState(false)
   const [approvalError, setApprovalError] = useState<string | null>(null)
@@ -92,6 +95,12 @@ export default function ComparePhase() {
   const suppliers = status?.discovery_results?.suppliers
   const verifications = status?.verification_results
   const requirements = status?.parsed_requirements
+
+  function openSupplierProfile(supplierIndex: number) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('supplierIndex', String(supplierIndex))
+    router.push(`/product?${params.toString()}`)
+  }
 
   const verificationMap = useMemo(() => {
     const map = new Map<string, any>()
@@ -432,7 +441,7 @@ export default function ComparePhase() {
                       {getInitials(c.supplier_name)}
                     </div>
                     <div className="min-w-0">
-                      <p className="font-heading text-[15px] text-ink truncate">{c.supplier_name}</p>
+                      <p className="font-heading text-[15px] text-ink truncate cursor-pointer hover:text-teal transition-colors" onClick={() => openSupplierProfile(c.supplier_index)}>{c.supplier_name}</p>
                       {c.moq && <p className="text-[10px] text-ink-4">MOQ: {c.moq}</p>}
                     </div>
                   </div>
@@ -542,7 +551,7 @@ export default function ComparePhase() {
                         {rec.rank}
                       </div>
                       <div>
-                        <h3 className="font-heading text-lg text-ink">{rec.supplier_name}</h3>
+                        <h3 className="font-heading text-lg text-ink cursor-pointer hover:text-teal transition-colors" onClick={() => openSupplierProfile(rec.supplier_index)}>{rec.supplier_name}</h3>
                         <p className="text-[11px] text-ink-4">{rec.best_for}</p>
                       </div>
                     </div>

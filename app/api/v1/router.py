@@ -11,6 +11,7 @@ from app.api.v1.leads import router as leads_router
 from app.api.v1.outreach import router as outreach_router
 from app.api.v1.phone import router as phone_router
 from app.api.v1.projects import router as projects_router
+from app.api.v1.supplier_profile import router as supplier_profile_router
 from app.api.v1.webhooks import router as webhooks_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -22,5 +23,6 @@ api_router.include_router(events_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(chat_router)
 api_router.include_router(outreach_router)
+api_router.include_router(supplier_profile_router)
 api_router.include_router(phone_router)
 api_router.include_router(webhooks_router, prefix="/webhooks")

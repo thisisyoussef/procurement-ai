@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 
 import { authFetch } from '@/lib/auth'
 import { trackTraceEvent } from '@/lib/telemetry'
@@ -128,12 +129,20 @@ function stringifyDetailValue(value: unknown): string {
 
 export default function OutreachPhase() {
   const { projectId, status, refreshStatus, setActivePhase, restartCurrentProject } = useWorkspace()
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [outreachState, setOutreachState] = useState<OutreachState | null>(null)
   const [loading, setLoading] = useState(false)
   const [checkingInbox, setCheckingInbox] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [restartContext, setRestartContext] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  function openSupplierProfile(supplierIndex: number) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('supplierIndex', String(supplierIndex))
+    router.push(`/product?${params.toString()}`)
+  }
 
   const fetchOutreachStatus = useCallback(async () => {
     if (!projectId) return
@@ -741,7 +750,7 @@ export default function OutreachPhase() {
             {outreachState.supplier_statuses.map((supplier) => (
               <div key={supplier.supplier_index} className="rounded-lg border border-surface-3 px-3 py-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[12px] text-ink truncate">{supplier.supplier_name}</p>
+                  <p className="text-[12px] text-ink truncate cursor-pointer hover:text-teal transition-colors" onClick={() => openSupplierProfile(supplier.supplier_index)}>{supplier.supplier_name}</p>
                   {supplier.excluded && supplier.exclusion_reason && (
                     <p className="text-[10px] text-red-500 truncate">{supplier.exclusion_reason}</p>
                   )}

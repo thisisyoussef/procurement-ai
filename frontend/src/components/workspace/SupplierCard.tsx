@@ -34,6 +34,7 @@ interface SupplierCardProps {
   supplier: Supplier
   verification?: Verification
   dark?: boolean
+  onViewProfile?: () => void
 }
 
 function getRiskDot(risk: string): string {
@@ -67,6 +68,7 @@ export default function SupplierCard({
   supplier,
   verification,
   dark = false,
+  onViewProfile,
 }: SupplierCardProps) {
   const [expanded, setExpanded] = useState(false)
   const sourceLabel = getSourceLabel(supplier.source)
@@ -210,6 +212,14 @@ export default function SupplierCard({
 
             {/* Contact links */}
             <div className={`flex items-center gap-4 pt-1 text-[11px]`}>
+              {onViewProfile && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onViewProfile() }}
+                  className="text-teal hover:underline font-medium"
+                >
+                  View profile
+                </button>
+              )}
               {supplier.website && (
                 <a
                   href={supplier.website}
