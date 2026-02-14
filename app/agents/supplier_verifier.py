@@ -186,11 +186,18 @@ async def verify_supplier(
         _check_website(supplier),
         _check_google_reviews(supplier),
         _check_business_registration(supplier),
-        _extract_images_if_available(supplier),
         return_exceptions=True,
     )
 
     valid_checks = [c for c in checks if isinstance(c, VerificationCheck)]
+
+    # Image extraction runs AFTER core checks (not in parallel) so it doesn't
+    # compete for the single Browserbase session slot on the free tier.
+    # It's best-effort — failures don't affect verification scores.
+    try:
+        await _extract_images_if_available(supplier)
+    except Exception as e:
+        logger.debug("Image extraction failed for %s: %s", supplier.name, e)
 
     # Calculate weighted composite score
     weights = {"website": 0.35, "reviews": 0.35, "registration": 0.30}

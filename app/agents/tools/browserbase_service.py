@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -32,8 +33,13 @@ VISION_PROMPT = (
     Path(__file__).parent.parent / "prompts" / "contact_enrichment.md"
 ).read_text()
 
-# Global semaphore to limit concurrent Browserbase sessions
-_session_semaphore = asyncio.Semaphore(5)
+# Global semaphore — set to 1 for Browserbase free tier (1 concurrent session).
+# Bump to 3-5 on a paid plan.
+_session_semaphore = asyncio.Semaphore(1)
+
+# Max retries for 429 (rate limit) errors with short backoff
+_MAX_SESSION_RETRIES = 3
+_RETRY_BASE_DELAY_S = 3  # seconds — doubles each retry (3s, 6s, 12s)
 
 # Page load timeout in milliseconds
 PAGE_LOAD_TIMEOUT_MS = 30_000
@@ -58,14 +64,21 @@ async def _create_session(
     proxy: bool = False,
     stealth: bool = True,
 ) -> object:
-    """Create a new Browserbase session.
+    """Create a new Browserbase session with short-backoff retry on 429.
+
+    The Browserbase SDK's built-in retry waits 58+ seconds on 429 errors,
+    which stalls the pipeline. Instead we catch 429s ourselves and retry
+    with exponential backoff (3s → 6s → 12s) before giving up.
 
     Returns the session object from the Browserbase SDK with
     .id and .connect_url attributes.
     """
     from browserbase import Browserbase
 
-    bb = Browserbase(api_key=settings.browserbase_api_key)
+    bb = Browserbase(
+        api_key=settings.browserbase_api_key,
+        max_retries=0,  # Disable SDK's built-in retry — we handle it ourselves
+    )
 
     browser_settings = {
         "solveCaptchas": True,
@@ -80,12 +93,31 @@ async def _create_session(
     if proxy:
         create_kwargs["proxies"] = True
 
-    session = bb.sessions.create(**create_kwargs)
-    logger.info(
-        "Browserbase session created: %s (replay: https://browserbase.com/sessions/%s)",
-        session.id, session.id,
-    )
-    return session
+    last_error = None
+    for attempt in range(_MAX_SESSION_RETRIES):
+        try:
+            session = bb.sessions.create(**create_kwargs)
+            logger.info(
+                "Browserbase session created: %s (replay: https://browserbase.com/sessions/%s)",
+                session.id, session.id,
+            )
+            return session
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            # Check for 429 rate limit
+            if "429" in error_str or "concurrent" in error_str.lower():
+                delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
+                logger.warning(
+                    "Browserbase 429 rate limit (attempt %d/%d), retrying in %ds: %s",
+                    attempt + 1, _MAX_SESSION_RETRIES, delay, error_str[:120],
+                )
+                await asyncio.sleep(delay)
+            else:
+                # Non-retryable error — raise immediately
+                raise
+
+    raise last_error  # type: ignore[misc]
 
 
 async def _connect_playwright(session) -> tuple:
@@ -117,16 +149,24 @@ async def _close_session(session_id: str) -> None:
         logger.warning("Failed to release session %s: %s", session_id, e)
 
 
-async def _with_page(callback, *, proxy: bool = False, stealth: bool = True):
+async def _with_page(
+    callback,
+    *,
+    proxy: bool = False,
+    stealth: bool = True,
+    timeout_s: float = 60,
+):
     """Run a callback with a Browserbase page, handling lifecycle.
 
-    Acquires a session slot from the semaphore, creates a session,
-    connects Playwright, runs the callback, and cleans up.
+    Acquires a session slot from the semaphore (queues if slot is busy),
+    creates a session with 429 retry logic, connects Playwright, runs the
+    callback, and cleans up.
 
     Args:
         callback: Async function that takes (page) and returns a result.
         proxy: Enable residential proxy.
         stealth: Enable stealth mode (default True).
+        timeout_s: Max total wall-clock time for this operation (default 60s).
 
     Returns:
         The result of the callback, or None on failure.
@@ -135,31 +175,55 @@ async def _with_page(callback, *, proxy: bool = False, stealth: bool = True):
         logger.debug("Browserbase not configured — skipping")
         return None
 
-    async with _session_semaphore:
-        session = None
-        pw = None
-        browser = None
-        try:
-            session = await _create_session(proxy=proxy, stealth=stealth)
-            pw, browser, context, page = await _connect_playwright(session)
-            result = await callback(page)
-            return result
-        except Exception as e:
-            logger.error("Browserbase session error: %s", e)
+    t0 = time.monotonic()
+
+    # Wait for a semaphore slot — but don't wait forever
+    try:
+        await asyncio.wait_for(
+            _session_semaphore.acquire(),
+            timeout=timeout_s,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Browserbase semaphore timeout after %.0fs — skipping", timeout_s)
+        return None
+
+    session = None
+    pw = None
+    browser = None
+    try:
+        remaining = timeout_s - (time.monotonic() - t0)
+        if remaining <= 5:
+            logger.warning("Browserbase: not enough time left after queue wait — skipping")
             return None
-        finally:
-            if browser:
-                try:
-                    await browser.close()
-                except Exception:
-                    pass
-            if pw:
-                try:
-                    await pw.stop()
-                except Exception:
-                    pass
-            if session:
-                await _close_session(session.id)
+
+        session = await _create_session(proxy=proxy, stealth=stealth)
+        pw, browser, context, page = await _connect_playwright(session)
+
+        # Run the actual work with remaining time budget
+        remaining = timeout_s - (time.monotonic() - t0)
+        result = await asyncio.wait_for(callback(page), timeout=max(10, remaining))
+        return result
+    except asyncio.TimeoutError:
+        elapsed = time.monotonic() - t0
+        logger.warning("Browserbase operation timed out after %.1fs", elapsed)
+        return None
+    except Exception as e:
+        logger.error("Browserbase session error: %s", e)
+        return None
+    finally:
+        _session_semaphore.release()
+        if browser:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        if pw:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
+        if session:
+            await _close_session(session.id)
 
 
 # ── Public API (same signatures as browser_service.py) ───────────
