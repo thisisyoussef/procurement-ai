@@ -136,6 +136,35 @@ async def _check_business_registration(supplier: DiscoveredSupplier) -> Verifica
     )
 
 
+async def _extract_images_if_available(supplier: DiscoveredSupplier) -> None:
+    """Extract logo and product images from supplier website via Browserbase.
+
+    Updates the supplier object in-place with logo_url and product_images.
+    Returns None (not a VerificationCheck) — runs alongside verification checks
+    but doesn't contribute to the composite score.
+    """
+    if not supplier.website:
+        return None
+
+    try:
+        from app.agents.tools.image_extractor import extract_supplier_images
+        image_set = await extract_supplier_images(supplier.website)
+
+        if image_set.logo_url:
+            supplier.logo_url = image_set.logo_url
+        if image_set.product_images:
+            supplier.product_images = image_set.product_images
+
+        logger.info(
+            "  🖼️ Images extracted for %s: logo=%s, products=%d",
+            supplier.name, bool(supplier.logo_url), len(supplier.product_images),
+        )
+    except Exception as e:
+        logger.debug("Image extraction failed for %s: %s", supplier.name, e)
+
+    return None
+
+
 async def verify_supplier(
     supplier: DiscoveredSupplier,
     index: int,
@@ -157,6 +186,7 @@ async def verify_supplier(
         _check_website(supplier),
         _check_google_reviews(supplier),
         _check_business_registration(supplier),
+        _extract_images_if_available(supplier),
         return_exceptions=True,
     )
 

@@ -424,7 +424,7 @@ async def enrich_supplier_contacts(
     ]
 
     if aggressive:
-        if settings.browserless_api_key:
+        if settings.browserbase_api_key or settings.browserless_api_key:
             tiers.append(("visual_analysis", _tier3_visual_analysis))
 
         if settings.hunter_api_key:

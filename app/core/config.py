@@ -72,8 +72,12 @@ class Settings(BaseSettings):
     # Hunter.io (contact enrichment)
     hunter_api_key: str = ""
 
-    # Browserless (website screenshots)
+    # Browserless (website screenshots — legacy fallback)
     browserless_api_key: str = ""
+
+    # Browserbase (cloud headless browser sessions — replaces Browserless)
+    browserbase_api_key: str = ""
+    browserbase_project_id: str = ""
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

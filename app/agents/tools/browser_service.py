@@ -33,7 +33,7 @@ EMAIL_REGEX = re.compile(
 
 
 async def screenshot_page(url: str, full_page: bool = False) -> bytes | None:
-    """Take a screenshot of a URL via Browserless API.
+    """Take a screenshot of a URL via Browserbase (preferred) or Browserless (fallback).
 
     Args:
         url: Page URL to screenshot.
@@ -42,8 +42,13 @@ async def screenshot_page(url: str, full_page: bool = False) -> bytes | None:
     Returns:
         PNG image bytes, or None on failure.
     """
+    # Prefer Browserbase when configured
+    if settings.browserbase_api_key:
+        from .browserbase_service import screenshot_page as bb_screenshot
+        return await bb_screenshot(url, full_page)
+
     if not settings.browserless_api_key:
-        logger.debug("Browserless API key not configured — skipping screenshot")
+        logger.debug("No browser service configured — skipping screenshot")
         return None
 
     logger.info("  Taking screenshot: %s", url)
@@ -76,7 +81,7 @@ async def screenshot_page(url: str, full_page: bool = False) -> bytes | None:
 
 
 async def get_rendered_html(url: str) -> str | None:
-    """Fetch the fully rendered HTML of a page via Browserless /content endpoint.
+    """Fetch the fully rendered HTML of a page via Browserbase (preferred) or Browserless (fallback).
 
     This returns the DOM after JavaScript execution — useful for extracting
     emails from JS-rendered websites that static scrapers (httpx) cannot see.
@@ -84,6 +89,11 @@ async def get_rendered_html(url: str) -> str | None:
     Returns:
         Rendered HTML string, or None on failure.
     """
+    # Prefer Browserbase when configured
+    if settings.browserbase_api_key:
+        from .browserbase_service import get_rendered_html as bb_get_html
+        return await bb_get_html(url)
+
     if not settings.browserless_api_key:
         return None
 
@@ -190,21 +200,23 @@ async def extract_contacts_from_screenshot(
 
 
 async def browse_for_contacts(url: str) -> dict:
-    """Screenshot a supplier's contact page(s) and extract contact info via
+    """Navigate a supplier's website and extract contact info via
     vision AND rendered HTML regex scanning.
 
-    For each candidate URL:
-    1. Takes a screenshot -> Claude Vision extraction
-    2. Fetches rendered HTML -> regex email extraction
-
-    This dual approach catches both visually-rendered emails (images, Canvas)
-    and JS-rendered text emails that static scrapers miss.
+    Uses Browserbase (preferred) or Browserless (fallback).
+    Browserbase provides enhanced navigation: finds real contact links,
+    dismisses cookie banners, scrolls for lazy content.
 
     Returns:
         Dict with aggregated contact info from visual + HTML analysis.
     """
+    # Prefer Browserbase when configured
+    if settings.browserbase_api_key:
+        from .browserbase_service import browse_for_contacts as bb_browse
+        return await bb_browse(url)
+
     if not settings.browserless_api_key:
-        return {"emails": [], "phones": [], "error": "browserless_not_configured"}
+        return {"emails": [], "phones": [], "error": "browser_not_configured"}
 
     # Build candidate contact URLs
     base = url.rstrip("/")

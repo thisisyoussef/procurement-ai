@@ -252,6 +252,9 @@ class DiscoveredSupplier(BaseModel):
     intermediary_detection: IntermediaryDetection | None = None
     original_source_url: str | None = None
     language_discovered: str | None = None
+    # Images extracted via Browserbase
+    logo_url: str | None = None
+    product_images: list[str] = Field(default_factory=list)
     enrichment: ContactEnrichmentResult | None = None
     filtered_reason: str | None = Field(
         None,
@@ -510,6 +513,23 @@ class NegotiationResult(BaseModel):
     summary: str = ""
 
 
+# ── Form fill outreach ────────────────────────────────────────
+
+class FormFillResult(BaseModel):
+    """Result of attempting to fill a supplier's web quote/contact form."""
+    supplier_name: str
+    supplier_index: int
+    form_url: str = ""
+    status: str = "pending"  # pending | form_detected | filling | submitted | confirmed | failed
+    fields_filled: int = 0
+    fields_total: int = 0
+    screenshot_before_b64: str | None = None
+    screenshot_after_b64: str | None = None
+    confirmation_text: str | None = None
+    error: str | None = None
+    timestamp: float = Field(default_factory=time.time)
+
+
 # ── Outreach tracking state ───────────────────────────────────
 
 class SupplierOutreachStatus(BaseModel):
@@ -534,6 +554,9 @@ class SupplierOutreachStatus(BaseModel):
     phone_call_id: str | None = None
     phone_status: str | None = None  # "pending", "in_progress", "completed", "failed", "no_answer"
     phone_transcript: str | None = None
+    # Web form outreach
+    form_fill_status: str | None = None  # "pending", "submitted", "confirmed", "failed"
+    form_fill_url: str | None = None
 
 
 class OutreachPlanStep(BaseModel):
@@ -576,6 +599,8 @@ class OutreachState(BaseModel):
     parsed_call_results: list[ParsedCallResult] = Field(default_factory=list)
     phone_config: PhoneCallConfig | None = None
     supplier_plans: list[SupplierOutreachPlan] = Field(default_factory=list)
+    # Web form filling
+    form_fills: list[FormFillResult] = Field(default_factory=list)
     events: list[OutreachEvent] = Field(default_factory=list)
     quick_approval_decision: str | None = None  # "approved" | "declined"
     communication_monitor: CommunicationMonitorState = Field(default_factory=CommunicationMonitorState)

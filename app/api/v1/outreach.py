@@ -17,6 +17,7 @@ from app.schemas.agent_state import (
     AutoOutreachConfig,
     DiscoveredSupplier,
     DiscoveryResults,
+    FormFillResult,
     OutreachEvent,
     OutreachPlanStep,
     OutreachState,
@@ -93,6 +94,7 @@ UNFULFILLMENT_PATTERNS = [
     r"\bwe don't offer\b",
     r"\bcan't meet\b",
 ]
+DECISION_LANES = ("best_overall", "best_low_risk", "best_speed_to_order", "alternative")
 
 
 async def _get_project(project_id: str, current_user: AuthUser) -> dict:
@@ -360,6 +362,7 @@ def _get_selected_suppliers_for_quick_approval(
     outreach: OutreachState,
     max_suppliers: int,
     requested_indices: list[int] | None = None,
+    decision_preference: str | None = None,
 ) -> tuple[list[int], list[DiscoveredSupplier]]:
     selected_indices: list[int] = []
     selected_suppliers: list[DiscoveredSupplier] = []
@@ -379,7 +382,18 @@ def _get_selected_suppliers_for_quick_approval(
         if selected_suppliers:
             return selected_indices, selected_suppliers
 
-    for rec in sorted(recs.recommendations, key=lambda r: r.rank):
+    normalized_preference = (decision_preference or "").strip().lower()
+    if normalized_preference and normalized_preference not in DECISION_LANES:
+        normalized_preference = ""
+
+    ordered_recommendations = sorted(recs.recommendations, key=lambda r: r.rank)
+    if normalized_preference:
+        ordered_recommendations = (
+            [r for r in ordered_recommendations if (r.lane or "").strip().lower() == normalized_preference]
+            + [r for r in ordered_recommendations if (r.lane or "").strip().lower() != normalized_preference]
+        )
+
+    for rec in ordered_recommendations:
         idx = rec.supplier_index
         if idx in outreach.excluded_suppliers:
             continue
@@ -727,6 +741,7 @@ async def quick_outreach_approval(
         outreach=outreach,
         max_suppliers=request.max_suppliers,
         requested_indices=request.supplier_indices,
+        decision_preference=project.get("decision_preference"),
     )
     if not selected_suppliers:
         raise HTTPException(status_code=400, detail="No eligible suppliers available for outreach")
@@ -2088,3 +2103,232 @@ async def check_inbox(
     except Exception as e:
         logger.error("Inbox check failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# Web form filling — third outreach channel alongside email & phone
+# ══════════════════════════════════════════════════════════════════
+
+
+@router.post("/form-fill/{supplier_index}")
+async def fill_supplier_form(
+    project_id: str,
+    supplier_index: int,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Attempt to find and fill a quote/contact form on a supplier's website.
+
+    Uses Browserbase + Playwright to navigate the supplier's website, detect
+    quote/contact forms, map RFQ fields, fill the form, and optionally submit.
+    """
+    project = await _get_project(project_id, current_user)
+    outreach = _get_outreach_state(project)
+
+    # Get supplier data
+    discovery = project.get("discovery_results", {})
+    suppliers = discovery.get("suppliers", [])
+    if supplier_index < 0 or supplier_index >= len(suppliers):
+        raise HTTPException(status_code=404, detail="Supplier index out of range")
+
+    supplier_data = suppliers[supplier_index]
+    supplier = DiscoveredSupplier(**supplier_data) if isinstance(supplier_data, dict) else supplier_data
+    website = supplier.website
+
+    if not website:
+        raise HTTPException(status_code=400, detail="Supplier has no website URL")
+
+    # Check if Browserbase is configured
+    if not settings.browserbase_api_key:
+        raise HTTPException(status_code=503, detail="Browserbase not configured — form filling unavailable")
+
+    # Build RFQ data from parsed requirements + buyer profile
+    req_raw = project.get("parsed_requirements", {})
+    requirements = ParsedRequirements(**req_raw) if isinstance(req_raw, dict) and req_raw else None
+
+    business_profile = await _fetch_business_profile(str(current_user.user_id))
+
+    rfq_data = {}
+    if requirements:
+        rfq_data.update({
+            "product_type": requirements.product_type,
+            "material": requirements.material,
+            "dimensions": requirements.dimensions,
+            "quantity": requirements.quantity,
+            "customization": requirements.customization,
+            "delivery_location": requirements.delivery_location,
+            "budget_range": requirements.budget_range,
+            "certifications_needed": requirements.certifications_needed,
+        })
+    if business_profile:
+        rfq_data.update({
+            "company_name": business_profile.get("company_name"),
+            "contact_name": business_profile.get("contact_name"),
+            "contact_email": business_profile.get("email"),
+            "contact_phone": business_profile.get("phone"),
+        })
+
+    # Run form filling
+    from app.agents.tools.form_filler import fill_and_submit_form
+
+    result = await fill_and_submit_form(
+        website_url=website,
+        rfq_data={k: v for k, v in rfq_data.items() if v},
+        supplier_name=supplier.name,
+        supplier_index=supplier_index,
+        auto_submit=False,  # Don't auto-submit — user reviews first
+    )
+
+    # Store result in outreach state
+    outreach.form_fills = [
+        ff for ff in outreach.form_fills if ff.supplier_index != supplier_index
+    ]
+    outreach.form_fills.append(result)
+
+    # Update supplier outreach status
+    for status in outreach.supplier_statuses:
+        if status.supplier_index == supplier_index:
+            status.form_fill_status = result.status
+            status.form_fill_url = result.form_url
+            break
+
+    _append_event(
+        outreach, "form_fill_attempted",
+        supplier_index=supplier_index,
+        supplier_name=supplier.name,
+        status=result.status,
+        fields_filled=result.fields_filled,
+    )
+
+    project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
+
+    return {
+        "status": result.status,
+        "form_url": result.form_url,
+        "fields_filled": result.fields_filled,
+        "fields_total": result.fields_total,
+        "error": result.error,
+        "has_screenshot_before": result.screenshot_before_b64 is not None,
+        "has_screenshot_after": result.screenshot_after_b64 is not None,
+    }
+
+
+@router.post("/form-fill/{supplier_index}/submit")
+async def submit_filled_form(
+    project_id: str,
+    supplier_index: int,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Submit a previously filled form (after user review).
+
+    Requires that form-fill was already called and status is 'filled'.
+    Re-navigates to the form, fills fields again, and clicks submit.
+    """
+    project = await _get_project(project_id, current_user)
+    outreach = _get_outreach_state(project)
+
+    # Find existing form fill result
+    existing = next(
+        (ff for ff in outreach.form_fills if ff.supplier_index == supplier_index),
+        None,
+    )
+    if not existing or existing.status not in ("filled", "form_detected"):
+        raise HTTPException(
+            status_code=400,
+            detail="No filled form found for this supplier. Call form-fill first.",
+        )
+
+    # Get supplier data
+    discovery = project.get("discovery_results", {})
+    suppliers = discovery.get("suppliers", [])
+    supplier_data = suppliers[supplier_index]
+    supplier = DiscoveredSupplier(**supplier_data) if isinstance(supplier_data, dict) else supplier_data
+
+    # Build RFQ data
+    req_raw = project.get("parsed_requirements", {})
+    requirements = ParsedRequirements(**req_raw) if isinstance(req_raw, dict) and req_raw else None
+    business_profile = await _fetch_business_profile(str(current_user.user_id))
+
+    rfq_data = {}
+    if requirements:
+        rfq_data.update({
+            "product_type": requirements.product_type,
+            "material": requirements.material,
+            "dimensions": requirements.dimensions,
+            "quantity": requirements.quantity,
+            "customization": requirements.customization,
+            "delivery_location": requirements.delivery_location,
+            "budget_range": requirements.budget_range,
+            "certifications_needed": requirements.certifications_needed,
+        })
+    if business_profile:
+        rfq_data.update({
+            "company_name": business_profile.get("company_name"),
+            "contact_name": business_profile.get("contact_name"),
+            "contact_email": business_profile.get("email"),
+            "contact_phone": business_profile.get("phone"),
+        })
+
+    from app.agents.tools.form_filler import fill_and_submit_form
+
+    result = await fill_and_submit_form(
+        website_url=supplier.website,
+        rfq_data={k: v for k, v in rfq_data.items() if v},
+        supplier_name=supplier.name,
+        supplier_index=supplier_index,
+        auto_submit=True,  # Actually submit this time
+    )
+
+    # Update stored result
+    outreach.form_fills = [
+        ff for ff in outreach.form_fills if ff.supplier_index != supplier_index
+    ]
+    outreach.form_fills.append(result)
+
+    for status in outreach.supplier_statuses:
+        if status.supplier_index == supplier_index:
+            status.form_fill_status = result.status
+            break
+
+    _append_event(
+        outreach, "form_submitted",
+        supplier_index=supplier_index,
+        supplier_name=supplier.name,
+        status=result.status,
+        confirmation=result.confirmation_text,
+    )
+
+    project["outreach_state"] = outreach.model_dump(mode="json")
+    await _save_project(project)
+
+    return {
+        "status": result.status,
+        "confirmation_text": result.confirmation_text,
+        "error": result.error,
+    }
+
+
+@router.get("/form-fill/status")
+async def get_form_fill_status(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Get status of all form-fill attempts for a project."""
+    project = await _get_project(project_id, current_user)
+    outreach = _get_outreach_state(project)
+
+    return {
+        "form_fills": [
+            {
+                "supplier_name": ff.supplier_name,
+                "supplier_index": ff.supplier_index,
+                "form_url": ff.form_url,
+                "status": ff.status,
+                "fields_filled": ff.fields_filled,
+                "fields_total": ff.fields_total,
+                "error": ff.error,
+                "has_screenshot": ff.screenshot_after_b64 is not None,
+            }
+            for ff in outreach.form_fills
+        ],
+    }

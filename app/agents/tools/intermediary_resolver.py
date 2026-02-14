@@ -182,3 +182,119 @@ async def resolve_direct_website(
         logger.warning("  Direct website resolution failed for %s: %s", manufacturer_name, e)
 
     return None
+
+
+async def resolve_direct_website_interactive(
+    listing_url: str,
+    manufacturer_name: str | None = None,
+) -> dict | None:
+    """Navigate to a marketplace listing page with Browserbase to extract
+    the manufacturer's direct website and additional data.
+
+    On Alibaba/IndiaMART/similar pages:
+    1. Navigate to the listing page
+    2. Find "Visit Store" / "Company Website" / "Supplier Homepage" links
+    3. Click through popups/modals
+    4. Extract: direct URL, product images, MOQ, pricing hints
+
+    Args:
+        listing_url: The marketplace listing URL.
+        manufacturer_name: Optional name to help identify the right links.
+
+    Returns:
+        Dict with direct_url, product_images, etc., or None.
+    """
+    from app.agents.tools.browserbase_service import _with_page, _is_configured, _dismiss_cookie_banner, _scroll_page, PAGE_LOAD_TIMEOUT_MS
+
+    if not _is_configured():
+        logger.debug("Browserbase not configured — falling back to search-based resolution")
+        return None
+
+    logger.info("  Interactive resolution for: %s", listing_url)
+
+    async def _resolve(page):
+        await page.goto(
+            listing_url,
+            wait_until="networkidle",
+            timeout=PAGE_LOAD_TIMEOUT_MS,
+        )
+        await _dismiss_cookie_banner(page)
+        await _scroll_page(page, scroll_count=2)
+
+        result = await page.evaluate("""
+            () => {
+                const data = {
+                    direct_url: null,
+                    product_images: [],
+                    moq: null,
+                    price_range: null,
+                };
+
+                // Look for "Visit Store" / "Company Website" / "Supplier Homepage" links
+                const linkPatterns = [
+                    /visit.*(?:store|website|supplier|company)/i,
+                    /supplier.*(?:page|website|homepage)/i,
+                    /company.*(?:page|website|profile)/i,
+                    /official.*website/i,
+                    /go.*to.*store/i,
+                ];
+
+                const allLinks = document.querySelectorAll('a[href]');
+                for (const link of allLinks) {
+                    const text = (link.textContent || '').trim();
+                    const href = link.href;
+                    for (const pattern of linkPatterns) {
+                        if (pattern.test(text) && href && !href.includes('javascript:')) {
+                            data.direct_url = href;
+                            break;
+                        }
+                    }
+                    if (data.direct_url) break;
+                }
+
+                // Extract product images (large images on the page)
+                const imgs = document.querySelectorAll('img[src]');
+                const seen = new Set();
+                for (const img of imgs) {
+                    const src = img.src;
+                    if (!src || seen.has(src) || src.startsWith('data:')) continue;
+                    seen.add(src);
+                    const w = img.naturalWidth || img.width || 0;
+                    const h = img.naturalHeight || img.height || 0;
+                    if (w >= 200 && h >= 200 && data.product_images.length < 5) {
+                        data.product_images.push(src);
+                    }
+                }
+
+                // Look for MOQ text
+                const bodyText = document.body.innerText;
+                const moqMatch = bodyText.match(/(?:MOQ|Minimum Order|Min[. ]*Order)[:\\s]*([\\d,]+\\s*(?:pieces?|pcs|units?|sets?)?)/i);
+                if (moqMatch) data.moq = moqMatch[1].trim();
+
+                // Look for price range
+                const priceMatch = bodyText.match(/(?:Price|FOB)[:\\s]*(?:US\\s*)?\\$([\\d,.]+)\\s*[-–]\\s*(?:US\\s*)?\\$([\\d,.]+)/i);
+                if (priceMatch) data.price_range = `$${priceMatch[1]} - $${priceMatch[2]}`;
+
+                return data;
+            }
+        """)
+
+        if not result:
+            return None
+
+        # If we found a direct URL, verify it's not another intermediary
+        if result.get("direct_url"):
+            domain = _extract_domain(result["direct_url"])
+            if domain in KNOWN_INTERMEDIARY_DOMAINS:
+                result["direct_url"] = None
+                logger.info("  Direct URL was another intermediary — discarding")
+
+        logger.info(
+            "  Interactive resolution: url=%s, images=%d, moq=%s",
+            bool(result.get("direct_url")),
+            len(result.get("product_images", [])),
+            result.get("moq"),
+        )
+        return result
+
+    return await _with_page(_resolve)

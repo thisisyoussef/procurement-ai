@@ -25,6 +25,8 @@ interface SupplierOutreachStatus {
   send_error?: string | null
   excluded?: boolean
   exclusion_reason?: string | null
+  form_fill_status?: string | null
+  form_fill_url?: string | null
 }
 
 interface CommunicationStatusEvent {
@@ -444,6 +446,27 @@ export default function OutreachPhase() {
     setActivePhase,
   ])
 
+  const fillWebForm = useCallback(async (supplierIndex: number) => {
+    if (!projectId) return
+    setActionLoading(`form_fill_${supplierIndex}`)
+    setError(null)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/outreach/form-fill/${supplierIndex}`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data?.detail || 'Form fill failed')
+        return
+      }
+      await fetchOutreachStatus()
+    } catch (err: any) {
+      setError(err?.message || 'Could not fill web form.')
+    } finally {
+      setActionLoading(null)
+    }
+  }, [projectId, fetchOutreachStatus])
+
   useEffect(() => {
     if (!projectId) return
     void refreshCommunicationMonitor()
@@ -757,30 +780,51 @@ export default function OutreachPhase() {
                   {!supplier.excluded && supplier.delivery_status === 'failed' && supplier.send_error && (
                     <p className="text-[10px] text-red-500 truncate">{supplier.send_error}</p>
                   )}
+                  {supplier.form_fill_status && (
+                    <p className="text-[10px] text-ink-4 truncate">
+                      Form: {supplier.form_fill_status === 'confirmed' ? 'Submitted' : supplier.form_fill_status === 'submitted' ? 'Submitted' : supplier.form_fill_status === 'filled' ? 'Filled (pending submit)' : supplier.form_fill_status === 'failed' ? 'Form not found' : supplier.form_fill_status}
+                    </p>
+                  )}
                 </div>
-                <span
-                  className={`text-[10px] px-2 py-1 rounded-full ${
-                    supplier.excluded
-                      ? 'bg-red-50 text-red-600'
-                      : supplier.delivery_status === 'failed'
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Fill Web Form button — show when no email was sent and no form fill yet */}
+                  {!supplier.excluded && !supplier.email_sent && !supplier.form_fill_status && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); fillWebForm(supplier.supplier_index) }}
+                      disabled={actionLoading === `form_fill_${supplier.supplier_index}`}
+                      className="text-[10px] px-2 py-1 rounded-md bg-surface-2 text-ink-3 hover:bg-surface-3 transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading === `form_fill_${supplier.supplier_index}` ? 'Filling...' : 'Fill web form'}
+                    </button>
+                  )}
+                  <span
+                    className={`text-[10px] px-2 py-1 rounded-full ${
+                      supplier.excluded
                         ? 'bg-red-50 text-red-600'
+                        : supplier.delivery_status === 'failed'
+                          ? 'bg-red-50 text-red-600'
+                        : supplier.form_fill_status === 'confirmed' || supplier.form_fill_status === 'submitted'
+                          ? 'bg-blue-50 text-blue-600'
+                        : supplier.response_received
+                          ? 'bg-teal/[0.1] text-teal'
+                          : supplier.email_sent
+                            ? 'bg-warm/10 text-warm'
+                            : 'bg-surface-2 text-ink-4'
+                    }`}
+                  >
+                    {supplier.excluded
+                      ? 'Removed'
+                      : supplier.delivery_status === 'failed'
+                        ? 'Send failed'
+                      : supplier.form_fill_status === 'confirmed' || supplier.form_fill_status === 'submitted'
+                        ? 'Form sent'
                       : supplier.response_received
-                        ? 'bg-teal/[0.1] text-teal'
+                        ? 'Responded'
                         : supplier.email_sent
-                          ? 'bg-warm/10 text-warm'
-                          : 'bg-surface-2 text-ink-4'
-                  }`}
-                >
-                  {supplier.excluded
-                    ? 'Removed'
-                    : supplier.delivery_status === 'failed'
-                      ? 'Send failed'
-                    : supplier.response_received
-                      ? 'Responded'
-                      : supplier.email_sent
-                        ? 'Awaiting reply'
-                        : 'Queued'}
-                </span>
+                          ? 'Awaiting reply'
+                          : 'Queued'}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
