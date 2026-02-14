@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import GoogleSignIn from '@/components/GoogleSignIn'
+import OnboardingForm from '@/components/OnboardingForm'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import WorkspaceShell from '@/components/workspace/WorkspaceShell'
 import { trackTraceEvent } from '@/lib/telemetry'
@@ -50,7 +51,7 @@ function ProductPageContent() {
   }, [])
 
   useEffect(() => {
-    if (!authReady || !authUser) return
+    if (!authReady || !authUser || !authUser.onboarding_completed) return
     const projectId = searchParams.get('projectId')?.trim()
     const isNewView = searchParams.get('new') === '1'
     if (!projectId && !isNewView) {
@@ -87,6 +88,19 @@ function ProductPageContent() {
           </Link>
         </div>
       </main>
+    )
+  }
+
+  // Onboarding gate — collect business profile before entering workspace
+  if (!authUser.onboarding_completed) {
+    return (
+      <OnboardingForm
+        authUser={authUser}
+        onComplete={(updatedUser) => {
+          trackTraceEvent('onboarding_gate_passed', { user_id: updatedUser.id }, { path: '/product' })
+          setAuthUser(updatedUser)
+        }}
+      />
     )
   }
 

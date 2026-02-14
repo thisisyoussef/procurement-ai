@@ -318,9 +318,9 @@ body {
   flex-direction: column;
   gap: 6px;
   position: relative;
-  max-height: 620px;
+  max-height: 680px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding: 16px 4px 16px 0;
 }
 
 .convo::before {

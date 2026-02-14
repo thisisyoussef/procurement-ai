@@ -11,6 +11,13 @@ export interface AuthUser {
   full_name: string | null
   avatar_url: string | null
   plan?: string | null
+  onboarding_completed?: boolean
+  company_name?: string | null
+  job_title?: string | null
+  phone?: string | null
+  company_website?: string | null
+  business_address?: string | null
+  company_description?: string | null
 }
 
 export function getStoredAccessToken(): string | null {
