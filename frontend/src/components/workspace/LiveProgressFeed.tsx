@@ -3,6 +3,10 @@
 import { useMemo } from 'react'
 
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { featureFlags } from '@/lib/featureFlags'
+import { AnimatePresence, m } from '@/lib/motion'
+import { fadeUp } from '@/lib/motion/variants'
+import { DURATION, EASE_OUT_EXPO } from '@/lib/motion/config'
 
 const STAGE_LABELS: Record<string, string> = {
   parsing: 'Understanding your brief',
@@ -15,6 +19,17 @@ const STAGE_LABELS: Record<string, string> = {
   complete: 'Ready for your review',
   failed: 'Run needs attention',
   canceled: 'Run canceled',
+}
+
+const DECISION_MILESTONES: Record<string, string> = {
+  parsing: 'Shortlist quality improving',
+  clarifying: 'Shortlist quality improving',
+  discovering: 'Shortlist quality improving',
+  verifying: 'Risk confidence established',
+  comparing: 'Risk confidence established',
+  recommending: 'Ready for outreach decision',
+  outreaching: 'Ready for outreach decision',
+  complete: 'Ready for outreach decision',
 }
 
 function fallbackMessage(stage: string): string {
@@ -73,27 +88,59 @@ export default function LiveProgressFeed() {
 
   const title = STAGE_LABELS[stage] || 'Working'
   const message = latestDetail || fallbackMessage(stage)
+  const decisionMilestone = DECISION_MILESTONES[stage] || 'Shortlist quality improving'
+  const stageStartedAt = useMemo(() => {
+    const stageEvents = events.filter((event) => event.stage === stage)
+    const started = stageEvents.find((event) => event.substep === 'stage_started')
+    return started?.timestamp || stageEvents[0]?.timestamp || latest?.timestamp || null
+  }, [events, latest?.timestamp, stage])
+  const stageElapsedSec = stageStartedAt ? Math.max(0, Date.now() / 1000 - stageStartedAt) : 0
+  const focusCircleEnabled = featureFlags.tamkinFocusCircleSearchV1
+  const showExpectation =
+    focusCircleEnabled && stageElapsedSec > 45 && !['complete', 'failed', 'canceled'].includes(stage)
 
   return (
     <div className="mx-6 mt-6 card border border-surface-3 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[10px] font-semibold tracking-[1.5px] uppercase text-ink-4">
-            What Tamkin is doing now
+            {focusCircleEnabled ? 'Decision progress' : 'What Tamkin is doing now'}
           </p>
-          <p className="text-[13px] font-medium text-ink mt-1">{title}</p>
+          <p className="text-[13px] font-medium text-ink mt-1">
+            {focusCircleEnabled ? decisionMilestone : title}
+          </p>
+          {focusCircleEnabled ? (
+            <p className="text-[11px] text-ink-4 mt-1">
+              {title}
+              {latest?.timestamp ? ` · ${formatAgo(latest.timestamp)}` : ''}
+            </p>
+          ) : null}
           <p className="text-[12px] text-ink-3 mt-1">{message}</p>
+          {showExpectation ? (
+            <p className="text-[11px] text-ink-4 mt-2">
+              Still running normally. Expect a recommendation-quality update next.
+            </p>
+          ) : null}
         </div>
         <span className="status-dot bg-teal animate-pulse-dot mt-1 shrink-0" />
       </div>
 
       {recent.length > 1 && (
         <div className="mt-3 space-y-1.5 border-t border-surface-3 pt-3">
-          {recent.slice(1).map((event, index) => (
-            <p key={`${event.stage}-${event.substep}-${index}`} className="text-[11px] text-ink-4">
-              {event.detail || fallbackMessage(event.stage)} · {formatAgo(event.timestamp)}
-            </p>
-          ))}
+          <AnimatePresence>
+            {recent.slice(1).map((event, index) => (
+              <m.p
+                key={`${event.stage}-${event.substep}-${event.timestamp}-${index}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: DURATION.fast, ease: EASE_OUT_EXPO }}
+                className="text-[11px] text-ink-4"
+              >
+                {event.detail || fallbackMessage(event.stage)} · {formatAgo(event.timestamp)}
+              </m.p>
+            ))}
+          </AnimatePresence>
         </div>
       )}
     </div>

@@ -7,6 +7,9 @@ import { useEffect, useRef, useState } from 'react'
 import { tamkinClient } from '@/lib/api/tamkinClient'
 import { featureFlags } from '@/lib/featureFlags'
 import { trackTraceEvent } from '@/lib/telemetry'
+import { m, AnimatePresence } from '@/lib/motion'
+import { fadeUp, staggerContainer, cardEntrance } from '@/lib/motion/variants'
+import { useScrollTimeline } from '@/lib/motion/useScrollTimeline'
 
 import './tamkin-landing.css'
 
@@ -209,6 +212,95 @@ export default function HomePage() {
     return () => observer.disconnect()
   }, [])
 
+  // GSAP ScrollTrigger for the "Four steps" section
+  useScrollTimeline((gsap, ScrollTrigger) => {
+    const steps = document.querySelectorAll('.step')
+    const stepsHeader = document.querySelector('.steps-header')
+
+    // Stagger each step's entrance as user scrolls
+    if (stepsHeader) {
+      gsap.fromTo(
+        stepsHeader,
+        { opacity: 0, y: 40 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.8,
+          ease: 'power3.out',
+          scrollTrigger: {
+            trigger: stepsHeader,
+            start: 'top 85%',
+            toggleActions: 'play none none none',
+          },
+        }
+      )
+    }
+
+    steps.forEach((step, i) => {
+      gsap.fromTo(
+        step,
+        { opacity: 0, y: 50, scale: 0.97 },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: 0.7,
+          ease: 'power3.out',
+          delay: i * 0.1,
+          scrollTrigger: {
+            trigger: step,
+            start: 'top 80%',
+            toggleActions: 'play none none none',
+          },
+        }
+      )
+
+      // Animate the step number
+      const stepNum = step.querySelector('.step-n')
+      if (stepNum) {
+        gsap.fromTo(
+          stepNum,
+          { opacity: 0, scale: 0.5 },
+          {
+            opacity: 1,
+            scale: 1,
+            duration: 0.5,
+            ease: 'back.out(2)',
+            scrollTrigger: {
+              trigger: step,
+              start: 'top 80%',
+              toggleActions: 'play none none none',
+            },
+          }
+        )
+      }
+    })
+
+    // Manifesto parallax-style entrance
+    const manifesto = document.querySelector('.manifesto')
+    if (manifesto) {
+      gsap.fromTo(
+        manifesto,
+        { opacity: 0, y: 60 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 1,
+          ease: 'power2.out',
+          scrollTrigger: {
+            trigger: manifesto,
+            start: 'top 85%',
+            toggleActions: 'play none none none',
+          },
+        }
+      )
+    }
+
+    return () => {
+      ScrollTrigger.getAll().forEach((t) => t.kill())
+    }
+  })
+
   if (featureFlags.tamkinLandingBypass) return null
 
   const track = async (eventName: string, payload: Record<string, unknown> = {}) => {
@@ -356,25 +448,43 @@ export default function HomePage() {
               if (block.kind === 'message') {
                 if (block.role === 'u') {
                   return (
-                    <div key={`${block.kind}-${idx}`} className="m u">
+                    <m.div
+                      key={`${block.kind}-${idx}`}
+                      className="m u"
+                      initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                    >
                       <div className="m-bub">{block.text}</div>
-                    </div>
+                    </m.div>
                   )
                 }
 
                 return (
-                  <div key={`${block.kind}-${idx}`} className="m a">
+                  <m.div
+                    key={`${block.kind}-${idx}`}
+                    className="m a"
+                    initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                  >
                     <div className="m-av ag"><AgentAvatar /></div>
                     <div className="m-bub">{block.text}</div>
-                  </div>
+                  </m.div>
                 )
               }
 
               return (
-                <div key={`${block.kind}-${idx}`} className="status">
+                <m.div
+                  key={`${block.kind}-${idx}`}
+                  className="status"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                >
                   <div className="status-h"><span className="dot-pulse" /> Agent status</div>
                   <div className="status-line"><span className="ck">&#10003;</span> {block.text}</div>
-                </div>
+                </m.div>
               )
             })}
 

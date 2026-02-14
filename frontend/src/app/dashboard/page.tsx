@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import GoogleSignIn from '@/components/GoogleSignIn'
 import OnboardingForm from '@/components/OnboardingForm'
 import { dashboardClient } from '@/lib/api/dashboardClient'
+import { m } from '@/lib/motion'
+import { staggerContainer, cardEntrance, fadeUp, slideInLeft } from '@/lib/motion/variants'
 import {
   AuthUser,
   authFetch,
@@ -323,13 +325,21 @@ function DashboardPageContent() {
         {tab !== 'contacts' && (
           <div className="dash-attention">
             <div className="dash-section-label">Needs your attention</div>
-            <div className="dash-att-cards">
+            <m.div
+              className="dash-att-cards"
+              variants={staggerContainer}
+              initial="hidden"
+              animate="visible"
+            >
               {(summary?.attention || []).map((item) => (
-                <button
+                <m.button
                   type="button"
                   key={item.id}
+                  variants={slideInLeft}
                   className="dash-att-card"
                   onClick={() => openProject(item.project_id, item.target_phase)}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
                 >
                   <div className={`dash-att-dot ${item.priority === 'high' ? 'teal' : 'warm'}`} />
                   <div className="dash-att-info">
@@ -337,25 +347,33 @@ function DashboardPageContent() {
                     <div className="dash-att-sub">{item.subtitle}</div>
                   </div>
                   <div className="dash-att-action">{item.cta} →</div>
-                </button>
+                </m.button>
               ))}
               {summary && summary.attention.length === 0 && (
                 <div className="dash-empty">No actions needed right now.</div>
               )}
-            </div>
+            </m.div>
           </div>
         )}
 
         {tab !== 'contacts' && (
           <div className="dash-projects">
             <div className="dash-section-label">Your projects</div>
-            <div className="dash-proj-grid">
+            <m.div
+              className="dash-proj-grid"
+              variants={staggerContainer}
+              initial="hidden"
+              animate="visible"
+            >
               {(summary?.projects || []).map((project) => (
-                <button
+                <m.button
                   type="button"
                   key={project.id}
+                  variants={cardEntrance}
                   className="dash-proj-card"
                   onClick={() => openProject(project.id)}
+                  whileHover={{ y: -3 }}
+                  whileTap={{ scale: 0.98 }}
                 >
                   <div className={`dash-proj-visual ${visualClass(project.visual_variant)}`}>
                     <div className="dash-proj-phase">{project.phase_label}</div>
@@ -386,38 +404,50 @@ function DashboardPageContent() {
 
                     <div className={`dash-proj-status ${statusClass(project)}`}>{project.status_note}</div>
                   </div>
-                </button>
+                </m.button>
               ))}
 
-              <button type="button" className="dash-proj-card empty" onClick={goToNewProjectView}>
+              <m.button
+                type="button"
+                className="dash-proj-card empty"
+                onClick={goToNewProjectView}
+                variants={cardEntrance}
+                whileHover={{ y: -3 }}
+                whileTap={{ scale: 0.98 }}
+              >
                 <div className="dash-proj-empty-inner">
                   <div className="dash-proj-empty-icon">+</div>
                   <div className="dash-proj-empty-t">Start a new project</div>
                   <div className="dash-proj-empty-s">Tell Tamkin what you need made and it handles the rest.</div>
                 </div>
-              </button>
-            </div>
+              </m.button>
+            </m.div>
           </div>
         )}
 
         {tab !== 'contacts' && (
           <div className="dash-activity">
             <div className="dash-section-label">Recent activity</div>
-            <div className="dash-acts">
+            <m.div
+              className="dash-acts"
+              variants={staggerContainer}
+              initial="hidden"
+              animate="visible"
+            >
               {activityRows.map((event) => (
-                <div className="dash-act-row" key={event.id}>
+                <m.div className="dash-act-row" key={event.id} variants={cardEntrance}>
                   <div className="dash-act-time">{event.time_label}</div>
                   <div>
                     <div className="dash-act-title">{event.title}</div>
                     <div className="dash-act-desc">{event.description}</div>
                     {event.project_name ? <div className="dash-act-project">{event.project_name}</div> : null}
                   </div>
-                </div>
+                </m.div>
               ))}
               {summary && activityRows.length === 0 && (
                 <div className="dash-empty">No activity yet. Start a project to see updates.</div>
               )}
-            </div>
+            </m.div>
           </div>
         )}
 

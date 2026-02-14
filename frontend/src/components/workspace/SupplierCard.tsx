@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { AnimatePresence, m } from '@/lib/motion'
+import { EASE_OUT_EXPO, DURATION } from '@/lib/motion/config'
 
 interface Supplier {
   name: string
@@ -20,6 +22,8 @@ interface Supplier {
   google_review_count: number | null
   is_intermediary: boolean
   language_discovered: string | null
+  logo_url?: string | null
+  product_images?: string[]
 }
 
 interface Verification {
@@ -87,11 +91,20 @@ export default function SupplierCard({
     >
       {/* ── Collapsed Row ─────────────────────── */}
       <div className="flex items-center gap-4 px-5 py-4">
-        {/* Avatar */}
+        {/* Avatar — logo or initials fallback */}
+        {supplier.logo_url ? (
+          <img
+            src={supplier.logo_url}
+            alt={supplier.name}
+            className="w-9 h-9 rounded-full object-cover shrink-0 bg-surface-2"
+            loading="lazy"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden') }}
+          />
+        ) : null}
         <div
           className={`w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
             dark ? 'bg-white/10 text-white' : 'bg-surface-2 text-ink-3'
-          }`}
+          } ${supplier.logo_url ? 'hidden' : ''}`}
         >
           {getInitials(supplier.name)}
         </div>
@@ -126,138 +139,154 @@ export default function SupplierCard({
       </div>
 
       {/* ── Expanded Detail ───────────────────── */}
-      {expanded && (
-        <div className={`px-5 pb-5 pt-0 border-t ${border} animate-fin`}>
-          <div className="pt-4 space-y-4">
-            {/* Description */}
-            {supplier.description && (
-              <p className={`text-[12px] leading-relaxed ${textSecondary}`}>
-                {supplier.description}
-              </p>
-            )}
-
-            {/* Specs grid */}
-            <div className="grid grid-cols-2 gap-x-8 gap-y-2">
-              {sourceLabel && (
-                <div>
-                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Source</p>
-                  <p className={`text-[12px] ${textSecondary}`}>{sourceLabel}</p>
-                </div>
-              )}
-              {supplier.google_rating && (
-                <div>
-                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Google Rating</p>
-                  <p className={`text-[12px] ${textSecondary}`}>
-                    {supplier.google_rating}/5
-                    {supplier.google_review_count ? ` (${supplier.google_review_count} reviews)` : ''}
+      <AnimatePresence>
+        {expanded && (
+          <m.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: DURATION.normal, ease: EASE_OUT_EXPO }}
+            className="overflow-hidden"
+          >
+            <div className={`px-5 pb-5 pt-0 border-t ${border}`}>
+              <div className="pt-4 space-y-4">
+                {/* Description */}
+                {supplier.description && (
+                  <p className={`text-[12px] leading-relaxed ${textSecondary}`}>
+                    {supplier.description}
                   </p>
-                </div>
-              )}
-              {supplier.estimated_shipping_cost && (
-                <div>
-                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Est. Shipping</p>
-                  <p className={`text-[12px] ${textSecondary}`}>{supplier.estimated_shipping_cost}</p>
-                </div>
-              )}
-              {supplier.is_intermediary && (
-                <div>
-                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Type</p>
-                  <p className={`text-[12px] ${textSecondary}`}>Intermediary</p>
-                </div>
-              )}
-              {supplier.language_discovered && supplier.language_discovered !== 'en' && (
-                <div>
-                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Language</p>
-                  <p className={`text-[12px] ${textSecondary}`}>{supplier.language_discovered}</p>
-                </div>
-              )}
-            </div>
+                )}
 
-            {/* Score bar */}
-            {verification && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Composite Score</p>
-                  <p className={`text-[11px] font-semibold ${textPrimary}`}>{Math.round(verification.composite_score)}/100</p>
+                {/* Specs grid */}
+                <div className="grid grid-cols-2 gap-x-8 gap-y-2">
+                  {sourceLabel && (
+                    <div>
+                      <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Source</p>
+                      <p className={`text-[12px] ${textSecondary}`}>{sourceLabel}</p>
+                    </div>
+                  )}
+                  {supplier.google_rating && (
+                    <div>
+                      <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Google Rating</p>
+                      <p className={`text-[12px] ${textSecondary}`}>
+                        {supplier.google_rating}/5
+                        {supplier.google_review_count ? ` (${supplier.google_review_count} reviews)` : ''}
+                      </p>
+                    </div>
+                  )}
+                  {supplier.estimated_shipping_cost && (
+                    <div>
+                      <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Est. Shipping</p>
+                      <p className={`text-[12px] ${textSecondary}`}>{supplier.estimated_shipping_cost}</p>
+                    </div>
+                  )}
+                  {supplier.is_intermediary && (
+                    <div>
+                      <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Type</p>
+                      <p className={`text-[12px] ${textSecondary}`}>Intermediary</p>
+                    </div>
+                  )}
+                  {supplier.language_discovered && supplier.language_discovered !== 'en' && (
+                    <div>
+                      <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Language</p>
+                      <p className={`text-[12px] ${textSecondary}`}>{supplier.language_discovered}</p>
+                    </div>
+                  )}
                 </div>
-                <div className={`score-bar ${dark ? '!bg-white/10' : ''}`}>
-                  <div
-                    className={`score-bar-fill ${dark ? '!bg-teal' : ''}`}
-                    style={{ width: `${Math.min(verification.composite_score, 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
 
-            {/* Certifications */}
-            {supplier.certifications.length > 0 && (
-              <div>
-                <p className={`text-[9px] uppercase tracking-wider ${textMuted} mb-1.5`}>Certifications</p>
-                <div className="flex gap-1.5 flex-wrap">
-                  {supplier.certifications.map((cert) => (
-                    <span
-                      key={cert}
-                      className={`text-[10px] px-2 py-0.5 rounded-full ${
-                        dark
-                          ? 'bg-teal/10 text-teal border border-teal/20'
-                          : 'bg-teal/5 text-teal border border-teal/15'
-                      }`}
+                {/* Score bar */}
+                {verification && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className={`text-[9px] uppercase tracking-wider ${textMuted}`}>Composite Score</p>
+                      <p className={`text-[11px] font-semibold ${textPrimary}`}>{Math.round(verification.composite_score)}/100</p>
+                    </div>
+                    <div className={`score-bar ${dark ? '!bg-white/10' : ''}`}>
+                      <m.div
+                        className={`score-bar-fill ${dark ? '!bg-teal' : ''}`}
+                        initial={{ scaleX: 0 }}
+                        animate={{ scaleX: 1 }}
+                        transition={{ duration: 0.6, ease: EASE_OUT_EXPO, delay: 0.15 }}
+                        style={{
+                          width: `${Math.min(verification.composite_score, 100)}%`,
+                          transformOrigin: 'left',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Certifications */}
+                {supplier.certifications.length > 0 && (
+                  <div>
+                    <p className={`text-[9px] uppercase tracking-wider ${textMuted} mb-1.5`}>Certifications</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {supplier.certifications.map((cert) => (
+                        <span
+                          key={cert}
+                          className={`text-[10px] px-2 py-0.5 rounded-full ${
+                            dark
+                              ? 'bg-teal/10 text-teal border border-teal/20'
+                              : 'bg-teal/5 text-teal border border-teal/15'
+                          }`}
+                        >
+                          {cert}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Contact links */}
+                <div className={`flex items-center gap-4 pt-1 text-[11px]`}>
+                  {onViewProfile && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onViewProfile() }}
+                      className="text-teal hover:underline font-medium"
                     >
-                      {cert}
-                    </span>
-                  ))}
+                      View profile
+                    </button>
+                  )}
+                  {supplier.website && (
+                    <a
+                      href={supplier.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-teal hover:underline"
+                    >
+                      Website
+                    </a>
+                  )}
+                  {supplier.product_page_url && (
+                    <a
+                      href={supplier.product_page_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-teal hover:underline"
+                    >
+                      Product Page
+                    </a>
+                  )}
+                  {supplier.email && (
+                    <a
+                      href={`mailto:${supplier.email}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-teal hover:underline"
+                    >
+                      Email
+                    </a>
+                  )}
+                  {supplier.phone && (
+                    <span className={textSecondary}>{supplier.phone}</span>
+                  )}
                 </div>
               </div>
-            )}
-
-            {/* Contact links */}
-            <div className={`flex items-center gap-4 pt-1 text-[11px]`}>
-              {onViewProfile && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onViewProfile() }}
-                  className="text-teal hover:underline font-medium"
-                >
-                  View profile
-                </button>
-              )}
-              {supplier.website && (
-                <a
-                  href={supplier.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-teal hover:underline"
-                >
-                  Website
-                </a>
-              )}
-              {supplier.product_page_url && (
-                <a
-                  href={supplier.product_page_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-teal hover:underline"
-                >
-                  Product Page
-                </a>
-              )}
-              {supplier.email && (
-                <a
-                  href={`mailto:${supplier.email}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-teal hover:underline"
-                >
-                  Email
-                </a>
-              )}
-              {supplier.phone && (
-                <span className={textSecondary}>{supplier.phone}</span>
-              )}
             </div>
-          </div>
-        </div>
-      )}
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

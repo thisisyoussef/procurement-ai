@@ -9,10 +9,13 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@rive-app/react-canvas-lite": "^4.27.0",
+    "gsap": "^3.14.2",
+    "lucide-react": "^0.469.0",
+    "motion": "^12.34.0",
     "next": "^15.1.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "lucide-react": "^0.469.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

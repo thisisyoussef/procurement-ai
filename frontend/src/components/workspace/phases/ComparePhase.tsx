@@ -3,10 +3,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { authFetch } from '@/lib/auth'
+import { featureFlags } from '@/lib/featureFlags'
 import { trackTraceEvent } from '@/lib/telemetry'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { DecisionLane } from '@/types/pipeline'
+import { m, AnimatePresence } from '@/lib/motion'
+import { staggerContainer, cardEntrance } from '@/lib/motion/variants'
+import { EASE_OUT_EXPO, DURATION } from '@/lib/motion/config'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
+const PRIMARY_LANES: Array<Exclude<DecisionLane, 'alternative'>> = [
+  'best_overall',
+  'best_low_risk',
+  'best_speed_to_order',
+]
+const LANE_LABELS: Record<Exclude<DecisionLane, 'alternative'>, string> = {
+  best_overall: 'Best overall',
+  best_low_risk: 'Best low risk',
+  best_speed_to_order: 'Best speed to order',
+}
 
 function normalizeStarScore(score: number): number {
   if (!Number.isFinite(score)) return 0
@@ -66,7 +81,14 @@ function ScoreBar({ score, label }: { score: number; label: string }) {
         <span className="font-medium text-ink-2">{stars.toFixed(1)}/5</span>
       </div>
       <div className="score-bar">
-        <div className="score-bar-fill" style={{ width: `${widthPct}%` }} />
+        <m.div
+          className="score-bar-fill"
+          style={{ width: `${widthPct}%`, transformOrigin: 'left' }}
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, ease: EASE_OUT_EXPO, delay: 0.15 }}
+        />
       </div>
     </div>
   )
@@ -81,11 +103,29 @@ function getInitials(name: string): string {
     .toUpperCase()
 }
 
+function arraysEqual(left: number[], right: number[]): boolean {
+  if (left.length !== right.length) return false
+  return left.every((value, idx) => value === right[idx])
+}
+
 export default function ComparePhase() {
-  const { status, loading, projectId, setActivePhase, refreshStatus } = useWorkspace()
+  const {
+    status,
+    loading,
+    projectId,
+    setActivePhase,
+    refreshStatus,
+    setDecisionPreference,
+  } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
   const [selectedSupplierIndices, setSelectedSupplierIndices] = useState<number[]>([])
+  const [selectedLane, setSelectedLane] = useState<Exclude<DecisionLane, 'alternative'>>(
+    'best_overall'
+  )
+  const [laneSaving, setLaneSaving] = useState(false)
+  const [expandedTrustPanels, setExpandedTrustPanels] = useState<Record<number, boolean>>({})
+  const [dismissedManualVerification, setDismissedManualVerification] = useState<Record<number, boolean>>({})
   const [approvalLoading, setApprovalLoading] = useState(false)
   const [approvalError, setApprovalError] = useState<string | null>(null)
   const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null)
@@ -95,6 +135,15 @@ export default function ComparePhase() {
   const suppliers = status?.discovery_results?.suppliers
   const verifications = status?.verification_results
   const requirements = status?.parsed_requirements
+  const persistedLanePreference = status?.decision_preference
+
+  useEffect(() => {
+    if (!featureFlags.tamkinFocusCircleSearchV1) return
+    if (!persistedLanePreference) return
+    if (!PRIMARY_LANES.includes(persistedLanePreference as Exclude<DecisionLane, 'alternative'>)) return
+    const persisted = persistedLanePreference as Exclude<DecisionLane, 'alternative'>
+    setSelectedLane((prev) => (prev === persisted ? prev : persisted))
+  }, [persistedLanePreference])
 
   function openSupplierProfile(supplierIndex: number) {
     const params = new URLSearchParams(searchParams.toString())
@@ -118,48 +167,33 @@ export default function ComparePhase() {
     return map
   }, [comparison])
 
-  // Loading
-  if (!comparison && !recommendation) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
-        {loading ? (
-          <>
-            <span className="status-dot bg-teal animate-pulse-dot mb-4" style={{ width: 10, height: 10 }} />
-            <p className="text-[14px] text-ink-2 font-medium">
-              {status?.current_stage === 'comparing'
-                ? 'Comparing suppliers side by side...'
-                : status?.current_stage === 'recommending'
-                ? 'Generating recommendations...'
-                : 'Working...'}
-            </p>
-          </>
-        ) : (
-          <p className="text-ink-4 text-[13px]">
-            Comparison results will appear here after supplier verification.
-          </p>
-        )}
-      </div>
-    )
-  }
-
   const sorted = comparison?.comparisons
     ? [...comparison.comparisons].sort((a: any, b: any) => b.overall_score - a.overall_score)
     : []
 
-  const recommendationDefaults = useMemo(
-    () =>
-      (recommendation?.recommendations || [])
-        .slice(0, 3)
-        .map((rec: any) => rec.supplier_index)
-        .filter((idx: number) => Number.isInteger(idx)),
-    [recommendation?.recommendations]
-  )
+  const recommendationDefaults = useMemo(() => {
+    const recommendations = recommendation?.recommendations || []
+    const orderedRecommendations =
+      featureFlags.tamkinFocusCircleSearchV1
+        ? [
+            ...recommendations.filter((rec: any) => rec?.lane === selectedLane),
+            ...recommendations.filter((rec: any) => rec?.lane !== selectedLane),
+          ]
+        : recommendations
+    return orderedRecommendations
+      .slice(0, 3)
+      .map((rec: any) => rec.supplier_index)
+      .filter((idx: number) => Number.isInteger(idx))
+  }, [recommendation?.recommendations, selectedLane])
 
   useEffect(() => {
-    if (selectedSupplierIndices.length > 0) return
     if (!recommendationDefaults.length) return
-    setSelectedSupplierIndices(recommendationDefaults)
-  }, [recommendationDefaults, selectedSupplierIndices.length])
+    setSelectedSupplierIndices((prev) => {
+      if (!featureFlags.tamkinFocusCircleSearchV1 && prev.length > 0) return prev
+      if (arraysEqual(prev, recommendationDefaults)) return prev
+      return recommendationDefaults
+    })
+  }, [recommendationDefaults])
 
   const selectedSuppliers = useMemo(
     () =>
@@ -182,6 +216,49 @@ export default function ComparePhase() {
     setApprovalError(null)
     setApprovalSuccess(null)
   }, [])
+
+  const handleLaneSelection = useCallback(
+    async (lane: Exclude<DecisionLane, 'alternative'>) => {
+      if (!featureFlags.tamkinFocusCircleSearchV1) return
+      setSelectedLane(lane)
+      if (!projectId) return
+
+      trackTraceEvent(
+        'decision_lane_selected',
+        { project_id: projectId, lane_preference: lane },
+        { projectId }
+      )
+
+      setLaneSaving(true)
+      const persisted = await setDecisionPreference(lane)
+      if (!persisted) {
+        trackTraceEvent(
+          'decision_lane_persist_failed',
+          { project_id: projectId, lane_preference: lane },
+          { projectId, level: 'warn' }
+        )
+      }
+      setLaneSaving(false)
+    },
+    [projectId, setDecisionPreference]
+  )
+
+  const toggleTrustPanel = useCallback((supplierIndex: number) => {
+    setExpandedTrustPanels((prev) => ({ ...prev, [supplierIndex]: !prev[supplierIndex] }))
+  }, [])
+
+  const dismissManualVerificationBadge = useCallback(
+    (supplierIndex: number) => {
+      if (!projectId) return
+      setDismissedManualVerification((prev) => ({ ...prev, [supplierIndex]: true }))
+      trackTraceEvent(
+        'manual_verification_badge_dismissed',
+        { project_id: projectId, supplier_index: supplierIndex },
+        { projectId }
+      )
+    },
+    [projectId]
+  )
 
   const approveAndSendOutreach = useCallback(async () => {
     if (!projectId) return
@@ -265,6 +342,35 @@ export default function ComparePhase() {
       return `Tamkin will ask ${supplierName} for a quote on ${product}, around ${quantity}, within ${budget}, delivered to ${location} by ${deadline}. It will request MOQ, unit price, lead time, and sample readiness.`
     })
   }, [requirements, selectedSuppliers])
+
+  const missingPrimaryLanes = useMemo(() => {
+    if (!featureFlags.tamkinFocusCircleSearchV1 || !recommendation?.lane_coverage) return []
+    return PRIMARY_LANES.filter((lane) => (recommendation.lane_coverage?.[lane] || 0) < 1)
+  }, [recommendation?.lane_coverage])
+
+  // Loading / empty state (must come after hooks so hook order is stable across renders)
+  if (!comparison && !recommendation) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
+        {loading ? (
+          <>
+            <span className="status-dot bg-teal animate-pulse-dot mb-4" style={{ width: 10, height: 10 }} />
+            <p className="text-[14px] text-ink-2 font-medium">
+              {status?.current_stage === 'comparing'
+                ? 'Comparing suppliers side by side...'
+                : status?.current_stage === 'recommending'
+                ? 'Generating recommendations...'
+                : 'Working...'}
+            </p>
+          </>
+        ) : (
+          <p className="text-ink-4 text-[13px]">
+            Comparison results will appear here after supplier verification.
+          </p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-10">
@@ -410,14 +516,21 @@ export default function ComparePhase() {
           </div>
 
           {/* Side-by-side editorial cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <m.div
+            className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4"
+            variants={staggerContainer}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+          >
             {sorted.slice(0, 4).map((c: any, i: number) => {
               const isRecommended = i === 0
               const supplier = suppliers?.[c.supplier_index]
               const imageUrl = getSupplierImageUrl(supplier)
               return (
-                <div
+                <m.div
                   key={i}
+                  variants={cardEntrance}
                   className={`card p-5 ${isRecommended ? 'border-t-[2px] border-t-teal' : ''}`}
                 >
                   {isRecommended && (
@@ -496,10 +609,10 @@ export default function ComparePhase() {
                     <span className="text-[10px] text-ink-4">Overall</span>
                     <span className="font-heading text-xl text-ink">{Math.round(c.overall_score)}</span>
                   </div>
-                </div>
+                </m.div>
               )
             })}
-          </div>
+          </m.div>
 
           {/* Narrative */}
           {comparison.analysis_narrative && (
@@ -518,6 +631,48 @@ export default function ComparePhase() {
         <div>
           <h2 className="font-heading text-2xl text-ink mb-4">Recommendation</h2>
 
+          {featureFlags.tamkinFocusCircleSearchV1 && (
+            <div className="card p-5 mb-5 space-y-4">
+              <div>
+                <p className="text-[10px] font-semibold tracking-[1.2px] uppercase text-ink-4">
+                  Decision Checkpoint
+                </p>
+                <p className="text-[13px] text-ink-2 mt-1">
+                  {recommendation.decision_checkpoint_summary ||
+                    'Review the lane fit, trust notes, and verification checklist before outreach.'}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {PRIMARY_LANES.map((lane) => (
+                  <button
+                    key={lane}
+                    onClick={() => void handleLaneSelection(lane)}
+                    className={`px-3 py-1.5 rounded-full border text-[11px] transition-colors ${
+                      selectedLane === lane
+                        ? 'border-teal bg-teal/10 text-teal'
+                        : 'border-surface-3 text-ink-4 hover:border-teal hover:text-teal'
+                    }`}
+                  >
+                    {LANE_LABELS[lane]}
+                  </button>
+                ))}
+              </div>
+              {laneSaving ? <p className="text-[10px] text-ink-4">Saving lane preference…</p> : null}
+            </div>
+          )}
+
+          {featureFlags.tamkinFocusCircleSearchV1 &&
+          (recommendation.elimination_rationale || missingPrimaryLanes.length > 0) ? (
+            <div className="mb-5 rounded-xl border border-warm/40 bg-warm/10 px-4 py-3">
+              <p className="text-[11px] font-medium text-ink-2 mb-1">Why fewer options are shown</p>
+              <p className="text-[11px] text-ink-3">
+                {recommendation.elimination_rationale ||
+                  `Lane coverage is incomplete for: ${missingPrimaryLanes.map((lane) => LANE_LABELS[lane]).join(', ')}.`}
+              </p>
+            </div>
+          ) : null}
+
           {/* Executive summary with teal left line */}
           {recommendation.executive_summary && (
             <div className="border-l-[2px] border-l-teal pl-5 mb-8">
@@ -528,15 +683,22 @@ export default function ComparePhase() {
           )}
 
           {/* Ranked picks */}
-          <div className="space-y-4">
+          <m.div
+            className="space-y-4"
+            variants={staggerContainer}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+          >
             {recommendation.recommendations.map((rec: any) => {
               const supplier = suppliers?.[rec.supplier_index]
               const comp = comparisonMap.get(rec.supplier_name)
               const imageUrl = getSupplierImageUrl(supplier)
 
               return (
-                <div
+                <m.div
                   key={rec.rank}
+                  variants={cardEntrance}
                   className={`card p-5 ${rec.rank === 1 ? 'border-t-[2px] border-t-teal' : ''}`}
                 >
                   <div className="flex items-start justify-between">
@@ -567,6 +729,24 @@ export default function ComparePhase() {
                     {rec.reasoning}
                   </p>
 
+                  {featureFlags.tamkinFocusCircleSearchV1 &&
+                  rec.needs_manual_verification &&
+                  !dismissedManualVerification[rec.supplier_index] ? (
+                    <div className="mt-3 inline-flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5">
+                      <span className="text-[10px] text-amber-700 font-semibold">Needs manual verification</span>
+                      {rec.manual_verification_reason ? (
+                        <span className="text-[10px] text-amber-700">{rec.manual_verification_reason}</span>
+                      ) : null}
+                      <button
+                        onClick={() => dismissManualVerificationBadge(rec.supplier_index)}
+                        className="text-[10px] text-amber-700 hover:text-amber-800"
+                        aria-label="Dismiss manual verification badge"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  ) : null}
+
                   {imageUrl ? (
                     <div className="mt-3 h-24 rounded-lg overflow-hidden border border-surface-3">
                       <img
@@ -593,6 +773,79 @@ export default function ComparePhase() {
                     </div>
                   )}
 
+                  {featureFlags.tamkinFocusCircleSearchV1 ? (
+                    <div className="mt-3 rounded-lg border border-surface-3 bg-surface-2/30 px-3 py-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-[1px] text-ink-4">
+                          Decision Confidence
+                        </p>
+                        <button
+                          onClick={() => toggleTrustPanel(rec.supplier_index)}
+                          className="text-[10px] text-teal hover:text-teal-700 transition-colors"
+                        >
+                          {expandedTrustPanels[rec.supplier_index] ? 'Collapse details' : 'Expand details'}
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <p className="text-[10px] font-medium text-ink-2 mb-1">Why trust</p>
+                          {(expandedTrustPanels[rec.supplier_index]
+                            ? rec.why_trust || []
+                            : (rec.why_trust || []).slice(0, 1)
+                          ).length > 0 ? (
+                            (expandedTrustPanels[rec.supplier_index]
+                              ? rec.why_trust || []
+                              : (rec.why_trust || []).slice(0, 1)
+                            ).map((item: string, idx: number) => (
+                              <p key={`${rec.supplier_index}-trust-${idx}`} className="text-[11px] text-ink-3">
+                                • {item}
+                              </p>
+                            ))
+                          ) : (
+                            <p className="text-[11px] text-ink-4">No trust notes were generated.</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-medium text-ink-2 mb-1">Key uncertainties</p>
+                          {(expandedTrustPanels[rec.supplier_index]
+                            ? rec.uncertainty_notes || []
+                            : (rec.uncertainty_notes || []).slice(0, 1)
+                          ).length > 0 ? (
+                            (expandedTrustPanels[rec.supplier_index]
+                              ? rec.uncertainty_notes || []
+                              : (rec.uncertainty_notes || []).slice(0, 1)
+                            ).map((item: string, idx: number) => (
+                              <p key={`${rec.supplier_index}-uncertainty-${idx}`} className="text-[11px] text-ink-3">
+                                • {item}
+                              </p>
+                            ))
+                          ) : (
+                            <p className="text-[11px] text-ink-4">No uncertainty notes were provided.</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-medium text-ink-2 mb-1">Verify before PO</p>
+                          {(expandedTrustPanels[rec.supplier_index]
+                            ? rec.verify_before_po || []
+                            : (rec.verify_before_po || []).slice(0, 1)
+                          ).length > 0 ? (
+                            (expandedTrustPanels[rec.supplier_index]
+                              ? rec.verify_before_po || []
+                              : (rec.verify_before_po || []).slice(0, 1)
+                            ).map((item: string, idx: number) => (
+                              <p key={`${rec.supplier_index}-verify-${idx}`} className="text-[11px] text-ink-3">
+                                • {item}
+                              </p>
+                            ))
+                          ) : (
+                            <p className="text-[11px] text-ink-4">No manual checklist provided.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {/* Contact */}
                   {supplier && (
                     <div className="mt-3 flex items-center gap-3 text-[11px]">
@@ -611,17 +864,17 @@ export default function ComparePhase() {
                       )}
                     </div>
                   )}
-                </div>
+                </m.div>
               )
             })}
-          </div>
+          </m.div>
 
           {/* Caveats */}
-          {recommendation.caveats?.length > 0 && (
+          {(recommendation.caveats?.length || 0) > 0 && (
             <div className="mt-6 card border-l-[2px] border-l-warm px-5 py-4">
               <p className="text-[9px] uppercase tracking-wider text-ink-4 mb-2">Caveats</p>
               <div className="space-y-1.5">
-                {recommendation.caveats.map((caveat: string, i: number) => (
+                {(recommendation.caveats || []).map((caveat: string, i: number) => (
                   <p key={i} className="text-[12px] text-ink-3 flex items-start gap-2">
                     <span className="text-warm mt-0.5 shrink-0">·</span>
                     {caveat}

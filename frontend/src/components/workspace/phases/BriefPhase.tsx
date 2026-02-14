@@ -2,6 +2,10 @@
 
 import { useState } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { featureFlags } from '@/lib/featureFlags'
+import { trackTraceEvent } from '@/lib/telemetry'
+import { m } from '@/lib/motion'
+import { staggerContainerFast, cardEntrance } from '@/lib/motion/variants'
 
 const SUGGESTIONS = [
   'Custom enamel pins for my streetwear brand',
@@ -79,30 +83,39 @@ export default function BriefPhase() {
                          placeholder:text-ink-4 focus:outline-none"
             />
             <div className="flex justify-end px-2 pb-2">
-              <button
+              <m.button
                 onClick={() => onSubmit(input)}
                 disabled={!input.trim() || loading}
+                whileTap={{ scale: 0.97 }}
                 className="px-5 py-2 bg-teal text-white rounded-lg text-[13px] font-medium
                            hover:bg-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 Start sourcing
-              </button>
+              </m.button>
             </div>
           </div>
 
           {/* Suggestion chips */}
-          <div className="flex flex-wrap gap-2 mt-4 justify-center">
+          <m.div
+            className="flex flex-wrap gap-2 mt-4 justify-center"
+            variants={staggerContainerFast}
+            initial="hidden"
+            animate="visible"
+          >
             {SUGGESTIONS.map((s) => (
-              <button
+              <m.button
                 key={s}
+                variants={cardEntrance}
                 onClick={() => onSubmit(s)}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.97 }}
                 className="text-[11px] px-3 py-1.5 rounded-full border border-surface-3
                            text-ink-4 hover:border-teal hover:text-teal transition-colors"
               >
                 {s}
-              </button>
+              </m.button>
             ))}
-          </div>
+          </m.div>
         </div>
 
         {/* Error */}
@@ -226,7 +239,15 @@ function ClarifyingQuestionsInline({
   projectId,
   onAnswered,
 }: {
-  questions: { field: string; question: string; importance: string; suggestions: string[] }[]
+  questions: {
+    field: string
+    question: string
+    importance: string
+    suggestions: string[]
+    why_this_question?: string | null
+    if_skipped_impact?: string | null
+    suggested_default?: string | null
+  }[]
   projectId: string
   onAnswered: () => void
 }) {
@@ -252,6 +273,20 @@ function ClarifyingQuestionsInline({
     }
   }
 
+  const applySuggestedDefault = (question: {
+    field: string
+    suggested_default?: string | null
+  }) => {
+    const value = question.suggested_default?.trim()
+    if (!value) return
+    setAnswers((prev) => ({ ...prev, [question.field]: value }))
+    trackTraceEvent(
+      'clarification_default_applied',
+      { project_id: projectId, field: question.field, source: 'brief_phase_inline' },
+      { projectId }
+    )
+  }
+
   return (
     <div className="card p-6">
       <h2 className="font-heading text-lg text-ink mb-1">A few quick questions</h2>
@@ -261,6 +296,31 @@ function ClarifyingQuestionsInline({
         {questions.map((q) => (
           <div key={q.field}>
             <label className="text-[13px] text-ink-2 font-medium block mb-2">{q.question}</label>
+            {featureFlags.tamkinFocusCircleSearchV1 &&
+            (q.why_this_question || q.if_skipped_impact || q.suggested_default) && (
+              <div className="mb-2 space-y-1 rounded-lg border border-surface-3 bg-cream/40 px-3 py-2">
+                {q.why_this_question ? (
+                  <p className="text-[11px] text-ink-3">
+                    <span className="font-medium text-ink-2">Why this matters:</span>{' '}
+                    {q.why_this_question}
+                  </p>
+                ) : null}
+                {q.if_skipped_impact ? (
+                  <p className="text-[11px] text-ink-3">
+                    <span className="font-medium text-ink-2">If skipped:</span>{' '}
+                    {q.if_skipped_impact}
+                  </p>
+                ) : null}
+                {q.suggested_default ? (
+                  <button
+                    onClick={() => applySuggestedDefault(q)}
+                    className="text-[11px] font-medium text-teal hover:text-teal-600 transition-colors"
+                  >
+                    Use suggested default: {q.suggested_default}
+                  </button>
+                ) : null}
+              </div>
+            )}
             {q.suggestions.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {q.suggestions.map((s) => (
@@ -298,6 +358,11 @@ function ClarifyingQuestionsInline({
       >
         {submitting ? 'Submitting...' : 'Continue'}
       </button>
+      {featureFlags.tamkinFocusCircleSearchV1 ? (
+        <p className="mt-2 text-[10px] text-ink-4">
+          You can leave answers blank and continue, but recommendations may be less tailored.
+        </p>
+      ) : null}
     </div>
   )
 }

@@ -10,6 +10,17 @@ import SamplesPhase from './phases/SamplesPhase'
 import OrderPhase from './phases/OrderPhase'
 import LiveProgressFeed from './LiveProgressFeed'
 import SupplierProfileView from './supplier-profile/SupplierProfileView'
+import { AnimatePresence, m } from '@/lib/motion'
+import { phaseTransition } from '@/lib/motion/variants'
+
+const PHASE_COMPONENTS: Record<string, React.ComponentType> = {
+  brief: BriefPhase,
+  search: SearchPhase,
+  outreach: OutreachPhase,
+  compare: ComparePhase,
+  samples: SamplesPhase,
+  order: OrderPhase,
+}
 
 export default function CenterStage() {
   const { activePhase, backendOk } = useWorkspace()
@@ -17,6 +28,8 @@ export default function CenterStage() {
   const supplierIndex = searchParams.get('supplierIndex')
   const supplierName = searchParams.get('supplierName')
   const showProfile = supplierIndex != null || supplierName != null
+
+  const PhaseComponent = PHASE_COMPONENTS[activePhase]
 
   return (
     <>
@@ -38,14 +51,18 @@ export default function CenterStage() {
         />
       ) : (
         <>
-          {/* Phase content */}
           <LiveProgressFeed />
-          {activePhase === 'brief' && <BriefPhase />}
-          {activePhase === 'search' && <SearchPhase />}
-          {activePhase === 'outreach' && <OutreachPhase />}
-          {activePhase === 'compare' && <ComparePhase />}
-          {activePhase === 'samples' && <SamplesPhase />}
-          {activePhase === 'order' && <OrderPhase />}
+          <AnimatePresence mode="wait">
+            <m.div
+              key={activePhase}
+              variants={phaseTransition}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              {PhaseComponent && <PhaseComponent />}
+            </m.div>
+          </AnimatePresence>
         </>
       )}
     </>

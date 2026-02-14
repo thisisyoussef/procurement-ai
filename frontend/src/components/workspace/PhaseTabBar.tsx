@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { Phase, phaseIndex, stageToPhase } from '@/types/pipeline'
+import { m } from '@/lib/motion'
 
 const PHASES: { key: Phase; label: string }[] = [
   { key: 'brief', label: 'Brief' },
@@ -123,7 +124,11 @@ export default function PhaseTabBar() {
                 {phase.label}
               </span>
               {isActive && (
-                <span className="absolute bottom-0 left-4 right-4 h-[1.5px] bg-teal rounded-full" />
+                <m.span
+                  layoutId="phase-indicator"
+                  className="absolute bottom-0 left-4 right-4 h-[1.5px] bg-teal rounded-full"
+                  transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                />
               )}
             </button>
           )

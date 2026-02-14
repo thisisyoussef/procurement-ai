@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { DM_Serif_Text, Manrope } from 'next/font/google'
 import RouteTrace from '@/components/RouteTrace'
+import { LazyMotionProvider } from '@/lib/motion'
 import './globals.css'
 
 const dmSerif = DM_Serif_Text({
@@ -29,8 +30,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${dmSerif.variable} ${manrope.variable} font-body antialiased`}>
-        <RouteTrace />
-        {children}
+        <LazyMotionProvider>
+          <RouteTrace />
+          {children}
+        </LazyMotionProvider>
       </body>
     </html>
   )

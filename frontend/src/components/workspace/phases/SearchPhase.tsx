@@ -4,6 +4,9 @@ import { useState, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import SupplierCard from '../SupplierCard'
+import { m } from '@/lib/motion'
+import { staggerContainer, cardEntrance } from '@/lib/motion/variants'
+import AnimatedCounter from '@/components/animation/AnimatedCounter'
 
 type SortKey = 'relevance' | 'rating' | 'verification' | 'name'
 
@@ -97,14 +100,28 @@ export default function SearchPhase() {
   if (!status?.discovery_results) {
     return (
       <div className="bg-white min-h-[80vh] -mx-0 flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Breathing glow */}
-        <div
-          className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-teal/10 animate-breathe pointer-events-none"
-          style={{ filter: 'blur(80px)' }}
+        {/* Breathing glow — Motion-driven */}
+        <m.div
+          className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-teal/10 pointer-events-none"
+          style={{ filter: 'blur(80px)', x: '-50%', y: '-50%' }}
+          animate={{
+            scale: [1, 1.15, 1],
+            opacity: [0.6, 1, 0.6],
+          }}
+          transition={{
+            duration: 4,
+            ease: 'easeInOut',
+            repeat: Infinity,
+          }}
         />
 
         {loading ? (
-          <div className="relative z-10 text-center px-6">
+          <m.div
+            className="relative z-10 text-center px-6"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          >
             <p className="text-ink font-heading text-2xl mb-2">
               Searching the world for{' '}
               <em className="text-teal">{productType}</em>
@@ -115,7 +132,7 @@ export default function SearchPhase() {
 
             {/* Progress steps */}
             <div className="flex flex-col items-start gap-4 max-w-xs mx-auto">
-              {SEARCH_STEPS.map((step) => {
+              {SEARCH_STEPS.map((step, idx) => {
                 const isDone =
                   step.stage === 'discovering'
                     ? !!status?.discovery_results
@@ -125,15 +142,30 @@ export default function SearchPhase() {
                 const isActive = currentStage === step.stage
 
                 return (
-                  <div key={step.stage} className="flex items-center gap-3">
-                    <span
+                  <m.div
+                    key={step.stage}
+                    className="flex items-center gap-3"
+                    initial={{ opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.3 + idx * 0.15, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <m.span
                       className={`status-dot ${
                         isDone
                           ? 'bg-teal/40'
                           : isActive
-                          ? 'bg-teal animate-pulse-dot'
+                          ? 'bg-teal'
                           : 'bg-surface-3'
                       }`}
+                      animate={isActive ? {
+                        scale: [1, 1.4, 1],
+                        opacity: [1, 0.5, 1],
+                      } : {}}
+                      transition={isActive ? {
+                        duration: 2,
+                        ease: 'easeInOut',
+                        repeat: Infinity,
+                      } : {}}
                     />
                     <span
                       className={`text-[12px] ${
@@ -142,21 +174,27 @@ export default function SearchPhase() {
                     >
                       {step.label}
                     </span>
-                  </div>
+                  </m.div>
                 )
               })}
             </div>
 
             {/* Large counter */}
             {suppliers.length > 0 && (
-              <div className="mt-10">
-                <span className="text-5xl font-heading text-teal">
-                  {suppliers.length}
-                </span>
+              <m.div
+                className="mt-10"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+              >
+                <AnimatedCounter
+                  value={suppliers.length}
+                  className="text-5xl font-heading text-teal"
+                />
                 <p className="text-ink-4 text-[11px] mt-1">suppliers found</p>
-              </div>
+              </m.div>
             )}
-          </div>
+          </m.div>
         ) : (
           <div className="relative z-10 text-center px-6">
             <p className="text-ink-4 text-[13px]">
@@ -242,23 +280,29 @@ export default function SearchPhase() {
         </div>
 
         {/* Supplier list */}
-        <div className="space-y-2">
+        <m.div
+          className="space-y-2"
+          variants={staggerContainer}
+          initial="hidden"
+          animate="visible"
+        >
           {visible.map((supplier: any, i: number) => {
             const originalIndex = suppliers.indexOf(supplier)
             return (
-              <SupplierCard
-                key={`${supplier.name}-${i}`}
-                supplier={supplier}
-                verification={verificationMap.get(supplier.name)}
-                onViewProfile={originalIndex >= 0 ? () => {
-                  const params = new URLSearchParams(searchParams.toString())
-                  params.set('supplierIndex', String(originalIndex))
-                  router.push(`/product?${params.toString()}`)
-                } : undefined}
-              />
+              <m.div key={`${supplier.name}-${i}`} variants={cardEntrance}>
+                <SupplierCard
+                  supplier={supplier}
+                  verification={verificationMap.get(supplier.name)}
+                  onViewProfile={originalIndex >= 0 ? () => {
+                    const params = new URLSearchParams(searchParams.toString())
+                    params.set('supplierIndex', String(originalIndex))
+                    router.push(`/product?${params.toString()}`)
+                  } : undefined}
+                />
+              </m.div>
             )
           })}
-        </div>
+        </m.div>
 
         {/* Show more */}
         {filtered.length > 12 && (
