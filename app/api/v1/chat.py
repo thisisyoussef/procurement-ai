@@ -196,7 +196,12 @@ async def _execute_chat_action(
             if not selected:
                 return "No valid suppliers selected for outreach"
 
-            result = await draft_outreach_emails(selected, reqs, recs)
+            business_profile = None
+            if project.get("user_id"):
+                from app.api.v1.outreach import _fetch_business_profile
+                business_profile = await _fetch_business_profile(str(project["user_id"]))
+
+            result = await draft_outreach_emails(selected, reqs, recs, business_profile=business_profile)
 
             outreach = project.get("outreach_state") or {}
             outreach["selected_suppliers"] = supplier_indices

@@ -274,7 +274,7 @@ class OutreachScheduler:
 
     async def _process_email_queues(self):
         """Find auto_queued drafts across all projects and send them."""
-        from app.core.email_service import send_email
+        from app.core.email_service import build_rfq_html, send_email
         from app.schemas.agent_state import OutreachEvent
 
         projects = await self._list_projects()
@@ -354,7 +354,7 @@ class OutreachScheduler:
                 result = await send_email(
                     to=recipient,
                     subject=draft.subject,
-                    body_html=draft.body,
+                    body_html=build_rfq_html(draft.body),
                     cc=[owner_email] if owner_email else [],
                     reply_to=settings.from_email,
                     headers={"X-Tamkin-Project-ID": project_id},
@@ -441,7 +441,7 @@ class OutreachScheduler:
     async def _check_and_send_follow_ups(self):
         """Check if any suppliers need follow-ups and generate/send them."""
         from app.agents.followup_agent import generate_follow_ups
-        from app.core.email_service import send_email
+        from app.core.email_service import build_rfq_html, send_email
         from app.schemas.agent_state import (
             OutreachEvent,
             ParsedRequirements,
@@ -538,7 +538,7 @@ class OutreachScheduler:
                     send_result = await send_email(
                         to=recipient,
                         subject=fu.subject,
-                        body_html=fu.body,
+                        body_html=build_rfq_html(fu.body),
                         cc=[owner_email] if owner_email else [],
                         reply_to=settings.from_email,
                         headers={"X-Tamkin-Project-ID": project_id},

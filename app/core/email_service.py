@@ -226,85 +226,59 @@ def verify_webhook_signature(
         return False
 
 
-def build_rfq_html(
-    supplier_name: str,
-    company_name: str,
-    body: str,
-    requirements_summary: str | None = None,
-) -> str:
-    """Build a branded HTML email template for RFQ outreach.
+def build_rfq_html(body: str) -> str:
+    """Wrap a plain-text RFQ email body in a clean, responsive HTML template.
+
+    Converts the LLM-drafted plain-text body into proper HTML paragraphs.
+    Designed to render well across Gmail, Outlook, Apple Mail, and mobile clients.
 
     Args:
-        supplier_name: Name of the supplier being contacted
-        company_name: Name of the buying company
-        body: The email body content (can contain HTML)
-        requirements_summary: Optional requirements summary block
+        body: Plain-text email body from the LLM draft (may contain \\n line breaks)
 
     Returns:
         Full HTML email string with inline CSS
     """
-    requirements_block = ""
-    if requirements_summary:
-        requirements_block = f"""
-        <div style="background-color: #f8f9fa; border-left: 4px solid #4a90d9;
-                    padding: 16px; margin: 20px 0; border-radius: 4px;">
-            <h3 style="margin: 0 0 8px 0; color: #333; font-size: 14px;">
-                Requirements Summary
-            </h3>
-            <p style="margin: 0; color: #555; font-size: 13px; white-space: pre-line;">
-                {requirements_summary}
-            </p>
-        </div>
-        """
+    import html as html_lib
 
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont,
-                 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f5;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background-color: #ffffff; border-radius: 8px;
-                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden;">
-                <!-- Header -->
-                <div style="background-color: #1a365d; padding: 24px 32px;">
-                    <h1 style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 600;">
-                        {company_name}
-                    </h1>
-                    <p style="margin: 4px 0 0 0; color: #a0bce0; font-size: 13px;">
-                        Request for Quotation
-                    </p>
-                </div>
+    # Escape HTML entities, then convert double-newlines to paragraphs
+    escaped = html_lib.escape(body)
+    paragraphs = [p.strip() for p in escaped.split("\n\n") if p.strip()]
+    body_html = "\n".join(
+        f'<p style="margin: 0 0 16px 0;">{p.replace(chr(10), "<br>")}</p>'
+        for p in paragraphs
+    )
 
-                <!-- Body -->
-                <div style="padding: 32px;">
-                    <p style="color: #333; font-size: 14px; line-height: 1.6; margin: 0;">
-                        Dear {supplier_name} Team,
-                    </p>
+    return f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFQ</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f9f9f7;
+             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+             'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 24px 16px;">
+        <div style="background-color: #ffffff; border-radius: 8px;
+                    border: 1px solid #e8e6e3; overflow: hidden;">
 
-                    <div style="color: #333; font-size: 14px; line-height: 1.6;
-                                margin: 16px 0; white-space: pre-line;">
-                        {body}
-                    </div>
+            <!-- Body -->
+            <div style="padding: 32px 28px; color: #222222; font-size: 15px;
+                        line-height: 1.7;">
+                {body_html}
+            </div>
 
-                    {requirements_block}
-                </div>
-
-                <!-- Footer -->
-                <div style="background-color: #f8f9fa; padding: 16px 32px;
-                            border-top: 1px solid #e2e8f0;">
-                    <p style="margin: 0; color: #888; font-size: 11px;">
-                        Sent via Tamkin &middot; AI-Powered Procurement
-                    </p>
-                </div>
+            <!-- Footer -->
+            <div style="padding: 14px 28px; border-top: 1px solid #eee;">
+                <p style="margin: 0; color: #aaa; font-size: 11px;">
+                    Sent via Tamkin
+                </p>
             </div>
         </div>
-    </body>
-    </html>
-    """
+    </div>
+</body>
+</html>"""
 
 
 class EmailQueue:

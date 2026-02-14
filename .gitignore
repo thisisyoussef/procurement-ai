@@ -33,3 +33,6 @@ Thumbs.db
 
 # Docker
 *.log
+
+# Agentic suite artifacts
+agentic_suite_outputs/

@@ -12,7 +12,7 @@ from app.agents.followup_agent import generate_follow_ups
 from app.agents.outreach_agent import draft_outreach_emails
 from app.agents.response_parser import parse_supplier_response
 from app.core.config import get_settings
-from app.core.email_service import send_email
+from app.core.email_service import build_rfq_html, send_email
 from app.schemas.agent_state import (
     AutoOutreachConfig,
     DiscoveredSupplier,
@@ -50,9 +50,35 @@ from app.services.supplier_memory import (
     record_supplier_interactions,
 )
 from app.services.project_events import record_project_event
+from app.core.database import async_session_factory
+from app.repositories.user_repository import get_user_by_id
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+async def _fetch_business_profile(user_id: str) -> dict[str, str | None] | None:
+    """Load the user's business profile for email personalization."""
+    try:
+        async with async_session_factory() as session:
+            user = await get_user_by_id(session, user_id)
+    except Exception:
+        logger.warning("Failed to load business profile for user %s", user_id, exc_info=True)
+        return None
+
+    if user is None or not user.onboarding_completed:
+        return None
+
+    return {
+        "company_name": user.company_name,
+        "contact_name": user.full_name,
+        "job_title": user.job_title,
+        "email": user.email,
+        "phone": user.phone,
+        "company_website": user.company_website,
+        "business_address": user.business_address,
+        "company_description": user.company_description,
+    }
 
 router = APIRouter(prefix="/projects/{project_id}/outreach", tags=["outreach"])
 
@@ -167,10 +193,11 @@ async def _send_and_track_email(
 ) -> dict:
     set_owner_email(outreach, owner_email)
     cc = _cc_list(owner_email)
+    body_html = build_rfq_html(body)
     result = await send_email(
         to=recipient,
         subject=subject,
-        body_html=body,
+        body_html=body_html,
         cc=cc,
         reply_to=settings.from_email,
         headers={"X-Tamkin-Project-ID": str(project.get("id", ""))},
@@ -394,10 +421,11 @@ async def _draft_and_send_initial_outreach(
     selected_suppliers: list[DiscoveredSupplier],
     source_label: str,
     owner_email: str | None,
+    business_profile: dict[str, str | None] | None = None,
 ) -> dict:
     set_owner_email(outreach, owner_email)
     ensure_monitor(outreach, owner_email=owner_email)
-    draft_result = await draft_outreach_emails(selected_suppliers, reqs, recs)
+    draft_result = await draft_outreach_emails(selected_suppliers, reqs, recs, business_profile=business_profile)
     _normalize_draft_supplier_indices(draft_result.drafts, selected_indices)
     drafts_by_index = {d.supplier_index: d for d in draft_result.drafts}
 
@@ -605,7 +633,8 @@ async def start_outreach(
         if not selected:
             raise HTTPException(status_code=400, detail="No valid supplier indices provided")
 
-        result = await draft_outreach_emails(selected, reqs, recs)
+        business_profile = await _fetch_business_profile(current_user.user_id)
+        result = await draft_outreach_emails(selected, reqs, recs, business_profile=business_profile)
         _normalize_draft_supplier_indices(result.drafts, selected_indices)
 
         supplier_statuses = [SupplierOutreachStatus(supplier_name=s.name, supplier_index=idx) for idx, s in zip(selected_indices, selected)]
@@ -702,6 +731,8 @@ async def quick_outreach_approval(
     if not selected_suppliers:
         raise HTTPException(status_code=400, detail="No eligible suppliers available for outreach")
 
+    business_profile = await _fetch_business_profile(current_user.user_id)
+
     batch_result = await _draft_and_send_initial_outreach(
         project=project,
         outreach=outreach,
@@ -711,6 +742,7 @@ async def quick_outreach_approval(
         selected_suppliers=selected_suppliers,
         source_label="quick_approval",
         owner_email=owner_email,
+        business_profile=business_profile,
     )
 
     outreach.quick_approval_decision = "approved"
@@ -1762,6 +1794,8 @@ async def start_auto_outreach(
                 "selected_suppliers": [],
             }
 
+        business_profile = await _fetch_business_profile(current_user.user_id)
+
         batch_result = await _draft_and_send_initial_outreach(
             project=project,
             outreach=outreach,
@@ -1771,6 +1805,7 @@ async def start_auto_outreach(
             selected_suppliers=selected_suppliers,
             source_label="auto_start",
             owner_email=owner_email,
+            business_profile=business_profile,
         )
 
         _append_event(

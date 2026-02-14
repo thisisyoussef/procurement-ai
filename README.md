@@ -5,6 +5,7 @@ Tamkin is an AI-assisted sourcing platform for finding, vetting, comparing, and 
 ## Repository Layout
 - `app/`: FastAPI backend, agents, persistence, and orchestration.
 - `frontend/`: Next.js product and landing experience.
+- `agentic_suite/`: External LangChain evaluation and continuous-improvement runner.
 - `alembic/`: Database migrations.
 - `tests/`: API and agent tests.
 - `docs/`: Engineering plans, cleanup roadmap, and architecture notes.
@@ -24,4 +25,5 @@ Tamkin is an AI-assisted sourcing platform for finding, vetting, comparing, and 
 ## Documentation Index
 - `docs/REFACTORING_PLAN.md`
 - `docs/REFACTORING_TRACKER.md`
+- `docs/AGENTIC_SUITE_PRD.md`
 - Directory READMEs under `app/`, `frontend/src/`, `tests/`, and `alembic/`.

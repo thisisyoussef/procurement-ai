@@ -1,4 +1,4 @@
-"""Authentication endpoints (Google sign-in + current user)."""
+"""Authentication endpoints (Google sign-in + current user + business profile)."""
 
 from __future__ import annotations
 
@@ -10,13 +10,36 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.auth import AuthUser, create_access_token, get_current_auth_user
 from app.core.config import get_settings
 from app.core.database import async_session_factory
-from app.repositories.user_repository import get_user_by_id, upsert_google_user
-from app.schemas.auth import AuthTokenResponse, AuthUserResponse, GoogleAuthRequest
+from app.models.user import User
+from app.repositories.user_repository import get_user_by_id, update_user_profile, upsert_google_user
+from app.schemas.auth import (
+    AuthTokenResponse,
+    AuthUserResponse,
+    BusinessProfileRequest,
+    GoogleAuthRequest,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _user_to_response(user: User) -> AuthUserResponse:
+    return AuthUserResponse(
+        id=str(user.id),
+        email=user.email,
+        full_name=user.full_name,
+        avatar_url=user.avatar_url,
+        plan=user.plan,
+        onboarding_completed=user.onboarding_completed,
+        company_name=user.company_name,
+        job_title=user.job_title,
+        phone=user.phone,
+        company_website=user.company_website,
+        business_address=user.business_address,
+        company_description=user.company_description,
+    )
 
 
 async def _verify_google_id_token(id_token: str) -> dict:
@@ -110,13 +133,7 @@ async def authenticate_with_google(request: GoogleAuthRequest):
     return AuthTokenResponse(
         access_token=access_token,
         expires_in=expires_in,
-        user=AuthUserResponse(
-            id=str(user.id),
-            email=user.email,
-            full_name=user.full_name,
-            avatar_url=user.avatar_url,
-            plan=user.plan,
-        ),
+        user=_user_to_response(user),
     )
 
 
@@ -138,10 +155,39 @@ async def me(current_user: AuthUser = Depends(get_current_auth_user)):
             plan=None,
         )
 
-    return AuthUserResponse(
-        id=str(user.id),
-        email=user.email,
-        full_name=user.full_name,
-        avatar_url=user.avatar_url,
-        plan=user.plan,
-    )
+    return _user_to_response(user)
+
+
+@router.put("/profile", response_model=AuthUserResponse)
+async def save_business_profile(
+    body: BusinessProfileRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Save the user's business profile (onboarding step)."""
+    try:
+        async with async_session_factory() as session:
+            user = await update_user_profile(
+                session,
+                current_user.user_id,
+                company_name=body.company_name,
+                job_title=body.job_title,
+                phone=body.phone,
+                company_website=body.company_website,
+                business_address=body.business_address,
+                company_description=body.company_description,
+            )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to save business profile")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not save profile",
+        ) from exc
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return _user_to_response(user)

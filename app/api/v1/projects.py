@@ -289,6 +289,7 @@ async def _run_pipeline_task(project_id: str, description: str):
         "progress_events": [],
         "user_answers": None,
         "auto_outreach_enabled": bool(project.get("auto_outreach")),
+        "user_id": project.get("user_id"),
     }
 
     steps = [

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     project_store_backend: str = "database"
     project_store_fallback_inmemory: bool = True
     auth_jwt_ttl_hours: int = 720
+    feature_focus_circle_search_v1: bool = False
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/procurement"

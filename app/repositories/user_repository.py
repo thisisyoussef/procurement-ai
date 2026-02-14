@@ -58,3 +58,29 @@ async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     except ValueError:
         return None
     return await session.get(User, normalized)
+
+
+async def update_user_profile(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    company_name: str,
+    job_title: str,
+    phone: str | None = None,
+    company_website: str | None = None,
+    business_address: str | None = None,
+    company_description: str | None = None,
+) -> User | None:
+    user = await get_user_by_id(session, user_id)
+    if user is None:
+        return None
+
+    user.company_name = company_name
+    user.job_title = job_title
+    user.phone = phone or user.phone
+    user.company_website = company_website or user.company_website
+    user.business_address = business_address or user.business_address
+    user.company_description = company_description or user.company_description
+    user.onboarding_completed = True
+    await session.flush()
+    return user

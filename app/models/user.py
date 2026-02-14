@@ -21,6 +21,12 @@ class User(Base):
     full_name: Mapped[str | None] = mapped_column(String(500))
     avatar_url: Mapped[str | None] = mapped_column(String(2000))
     company_name: Mapped[str | None] = mapped_column(String(500))
+    job_title: Mapped[str | None] = mapped_column(String(300))
+    phone: Mapped[str | None] = mapped_column(String(50))
+    company_website: Mapped[str | None] = mapped_column(String(1000))
+    business_address: Mapped[str | None] = mapped_column(String(1000))
+    company_description: Mapped[str | None] = mapped_column(String(2000))
+    onboarding_completed: Mapped[bool] = mapped_column(default=False)
     plan: Mapped[str] = mapped_column(String(50), default="free_trial")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

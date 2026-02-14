@@ -35,6 +35,7 @@ async def draft_outreach_emails(
     selected_suppliers: list[DiscoveredSupplier],
     requirements: ParsedRequirements,
     recommendations: RecommendationResult,
+    business_profile: dict[str, str | None] | None = None,
 ) -> OutreachResult:
     """Draft personalized RFQ emails for selected suppliers."""
     logger.info("Drafting outreach emails for %d suppliers", len(selected_suppliers))
@@ -49,6 +50,7 @@ async def draft_outreach_emails(
             "email": s.email,
             "city": s.city,
             "country": s.country,
+            "language": s.language_discovered,
             "description": s.description,
             "categories": s.categories,
             "certifications": s.certifications,
@@ -69,8 +71,22 @@ async def draft_outreach_emails(
         "budget_range": requirements.budget_range,
     }
 
-    prompt = f"""Draft personalized RFQ emails for these suppliers based on the product requirements.
+    # Build buyer context from business profile
+    buyer_section = ""
+    if business_profile:
+        bp = {k: v for k, v in business_profile.items() if v}
+        if bp:
+            buyer_section = f"""
+## Buyer Information
+{json.dumps(bp, indent=2)}
 
+Use the buyer's real company name, description, and contact details in each email.
+The opening should introduce the buyer's company by name. The sign-off should include
+the contact person's name, title, phone, and website if available.
+"""
+
+    prompt = f"""Draft personalized RFQ emails for these suppliers based on the product requirements.
+{buyer_section}
 ## Product Requirements
 {json.dumps(req_context, indent=2)}
 
@@ -79,6 +95,12 @@ async def draft_outreach_emails(
 
 Draft one email per supplier. Personalize each email by referencing the supplier's
 specific capabilities, certifications, or specialties from their profile.
+
+**Language & Localization**: If a supplier's `language` field is set (e.g. "Chinese", "Turkish",
+"Vietnamese"), write the ENTIRE email body in that language — subject line included. Use culturally
+appropriate greetings, tone, and business conventions for that locale. If language is null or
+"English", write in English. The buyer's sign-off name and company name should remain in their
+original form (do not transliterate).
 
 Return JSON matching the output format in your instructions."""
 
@@ -218,10 +240,12 @@ async def execute_outreach_batch(
                 logger.warning("No email for %s — skipping", draft.supplier_name)
                 continue
 
+            from app.core.email_service import build_rfq_html
+
             result = await email_service.send_email(  # type: ignore[attr-defined]
                 to=recipient,
                 subject=draft.subject,
-                body_html=draft.body,
+                body_html=build_rfq_html(draft.body),
             )
 
             if result.get("sent"):

@@ -54,6 +54,9 @@ class GraphState(TypedDict, total=False):
     # Auto-outreach flag — when True, pipeline auto-drafts and queues RFQ emails
     auto_outreach_enabled: bool
 
+    # Owner user_id — used to fetch business profile for outreach personalization
+    user_id: str | None
+
 
 # ── Graph Nodes ──────────────────────────────────────────────────
 
@@ -234,8 +237,18 @@ async def outreach_node(state: GraphState) -> GraphState:
                 "error": None,
             }
 
+        # Fetch business profile for email personalization
+        business_profile = None
+        owner_user_id = state.get("user_id")
+        if owner_user_id:
+            try:
+                from app.api.v1.outreach import _fetch_business_profile
+                business_profile = await _fetch_business_profile(owner_user_id)
+            except Exception:
+                logger.warning("Could not fetch business profile for outreach", exc_info=True)
+
         # Draft emails
-        result = await draft_outreach_emails(selected, requirements, recommendations)
+        result = await draft_outreach_emails(selected, requirements, recommendations, business_profile=business_profile)
 
         # Mark all drafts as auto_queued (the scheduler will send them)
         for draft in result.drafts:

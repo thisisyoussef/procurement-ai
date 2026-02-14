@@ -33,6 +33,9 @@ class ClarifyingQuestion(BaseModel):
     question: str = Field(description="Human-readable question text")
     importance: str = "recommended"  # "critical", "recommended", "optional"
     suggestions: list[str] = Field(default_factory=list)
+    why_this_question: str | None = None
+    if_skipped_impact: str | None = None
+    suggested_default: str | None = None
 
 
 class ProgressEvent(BaseModel):
@@ -204,6 +207,22 @@ class ParsedRequirements(BaseModel):
         description="Preferred sourcing country/region — e.g. 'Egypt', 'domestic only'. "
                     "Distinct from delivery_location.",
     )
+    risk_tolerance: str | None = Field(
+        None,
+        description="Buyer's risk tolerance for sourcing decisions: low, medium, or high.",
+    )
+    priority_tradeoff: str | None = Field(
+        None,
+        description="Primary tradeoff priority: e.g. lowest_cost, fastest_delivery, highest_quality.",
+    )
+    minimum_supplier_count: int | None = Field(
+        None,
+        description="Minimum number of supplier options buyer wants before choosing.",
+    )
+    evidence_strictness: str | None = Field(
+        None,
+        description="How strict evidence requirements should be: relaxed, balanced, strict.",
+    )
 
 
 # ── Agent B: Discovery output ────────────────────────────────────
@@ -331,6 +350,12 @@ class SupplierRecommendation(BaseModel):
     confidence: str  # high, medium, low
     reasoning: str
     best_for: str  # e.g. "best overall", "budget pick", "fastest delivery"
+    lane: str | None = None  # best_overall | best_low_risk | best_speed_to_order | alternative
+    why_trust: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+    verify_before_po: list[str] = Field(default_factory=list)
+    needs_manual_verification: bool = False
+    manual_verification_reason: str | None = None
 
 
 class RecommendationResult(BaseModel):
@@ -338,6 +363,9 @@ class RecommendationResult(BaseModel):
     recommendations: list[SupplierRecommendation] = Field(default_factory=list)
     executive_summary: str = ""
     caveats: list[str] = Field(default_factory=list)
+    decision_checkpoint_summary: str = ""
+    elimination_rationale: str | None = None
+    lane_coverage: dict[str, int] = Field(default_factory=dict)
 
 
 # ── Master Pipeline State ────────────────────────────────────────
