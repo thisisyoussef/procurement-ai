@@ -180,9 +180,19 @@ def _tokenize_product_terms(text: str) -> list[str]:
 
 
 def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
+    """Extract anchor terms for product-type relevance matching.
+
+    Priority ordering:
+    1. product_type tokens (strongest signal — these define the product)
+    2. material tokens (secondary signal)
+    Search queries are intentionally excluded because they contain
+    generic B2B terms ("manufacturer", "OEM", "factory") that would
+    match nearly any supplier and defeat the purpose of filtering.
+    """
     anchors: list[str] = []
     seen: set[str] = set()
-    for phrase in [requirements.product_type or "", requirements.material or "", *requirements.search_queries[:2]]:
+    # Only use product_type and material — NOT search_queries
+    for phrase in [requirements.product_type or "", requirements.material or ""]:
         for token in _tokenize_product_terms(phrase):
             if token in seen:
                 continue
@@ -192,6 +202,14 @@ def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
 
 
 def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) -> bool:
+    """Check whether a supplier's text matches product anchor terms.
+
+    Uses a tiered matching strategy:
+    - If there are 1-2 anchor terms, require at least 1 match (any).
+    - If there are 3+ anchor terms, require at least 2 matches to prevent
+      single-token false positives (e.g. "rubber" matching a tire company
+      when looking for "gumball machine rubber balls").
+    """
     if not anchors:
         return True
     blob = " ".join(
@@ -204,7 +222,10 @@ def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) ->
     ).lower()
     if not blob.strip():
         return True
-    return any(anchor in blob for anchor in anchors)
+    hits = sum(1 for anchor in anchors if anchor in blob)
+    # Require stronger match when we have more anchor terms available
+    min_required = 2 if len(anchors) >= 3 else 1
+    return hits >= min_required
 
 
 # ── Product Page URL Validation ──────────────────────────────────
@@ -711,7 +732,8 @@ PRODUCT PAGE URL RULES:
 - NEVER fabricate or guess URLs. If unsure, set product_page_url to null.
 
 Include estimated_shipping_cost for international suppliers based on typical freight from their country.
-Return ALL qualifying suppliers (relevance_score >= 20) as a JSON array — do NOT cap at an arbitrary number.
+Return ALL qualifying suppliers (relevance_score >= 35) as a JSON array — do NOT cap at an arbitrary number.
+A supplier that is in a completely different industry from the requested product MUST score below 20 regardless of other factors.
 
 CRITICAL SCORING RULES:
 1. PRODUCT TYPE is king — a supplier MUST make the actual product requested to score above 50. Material match alone is NOT enough.
@@ -978,8 +1000,8 @@ async def discover_suppliers(
     for s in suppliers:
         reason = None
 
-        # Check low relevance
-        if s.relevance_score < 30:
+        # Check low relevance — raised threshold to catch more off-category suppliers
+        if s.relevance_score < 35:
             reason = "low_relevance"
         # In industrial mode, remove consumer-merch results aggressively.
         elif industrial_mode:

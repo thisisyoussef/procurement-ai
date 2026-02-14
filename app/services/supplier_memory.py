@@ -87,11 +87,15 @@ def _terms_from_requirements(requirements: ParsedRequirements) -> list[str]:
 
 
 def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
+    """Extract anchor terms from product_type and material only.
+
+    Search queries are excluded because they contain generic B2B terms
+    that would match nearly any supplier in memory.
+    """
     raw_terms = [
         requirements.product_type or "",
         requirements.material or "",
     ]
-    raw_terms.extend(requirements.search_queries[:2])
     anchors: list[str] = []
     seen: set[str] = set()
     for phrase in raw_terms:
@@ -104,10 +108,18 @@ def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
 
 
 def _matches_product_anchors(supplier_text: str, anchors: list[str]) -> bool:
+    """Check if supplier text matches enough product anchor terms.
+
+    With 3+ anchors, requires at least 2 matches to avoid single-token
+    false positives (e.g. 'rubber' matching a tire company when searching
+    for gumball machines).
+    """
     if not anchors:
         return True
     blob = supplier_text.lower()
-    return any(anchor in blob for anchor in anchors)
+    hits = sum(1 for anchor in anchors if anchor in blob)
+    min_required = 2 if len(anchors) >= 3 else 1
+    return hits >= min_required
 
 
 def _memory_relevance_score(
