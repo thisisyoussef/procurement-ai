@@ -15,6 +15,8 @@ export default function CenterStage() {
   const { activePhase, backendOk } = useWorkspace()
   const searchParams = useSearchParams()
   const supplierIndex = searchParams.get('supplierIndex')
+  const supplierName = searchParams.get('supplierName')
+  const showProfile = supplierIndex != null || supplierName != null
 
   return (
     <>
@@ -28,9 +30,12 @@ export default function CenterStage() {
         </div>
       )}
 
-      {/* Supplier profile view (when supplierIndex is in URL) */}
-      {supplierIndex != null ? (
-        <SupplierProfileView supplierIndex={parseInt(supplierIndex, 10)} />
+      {/* Supplier profile view (when supplierIndex or supplierName is in URL) */}
+      {showProfile ? (
+        <SupplierProfileView
+          supplierIndex={supplierIndex != null ? parseInt(supplierIndex, 10) : undefined}
+          supplierName={supplierName || undefined}
+        />
       ) : (
         <>
           {/* Phase content */}

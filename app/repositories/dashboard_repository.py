@@ -120,27 +120,56 @@ async def list_supplier_contacts_for_user(
     project_count = func.count(func.distinct(SupplierInteraction.project_id)).label("project_count")
     last_interaction = func.max(SupplierInteraction.created_at).label("last_interaction_at")
 
+    # Get the project_id of the most recent interaction per supplier
+    # We use max(project_id) filtered by the latest timestamp via a correlated trick:
+    # Since project_id is a UUID we can't simply max() it meaningfully, so we use
+    # a window-function subquery approach. For simplicity, we'll do a separate
+    # subquery that finds the most recent project_id per supplier.
+    from sqlalchemy import literal_column
+    from sqlalchemy.orm import aliased
+
+    latest_interaction = (
+        select(
+            SupplierInteraction.supplier_id.label("si_supplier_id"),
+            SupplierInteraction.project_id.label("last_project_id"),
+            func.row_number()
+            .over(
+                partition_by=SupplierInteraction.supplier_id,
+                order_by=SupplierInteraction.created_at.desc(),
+            )
+            .label("rn"),
+        )
+        .where(SupplierInteraction.project_id.is_not(None))
+        .subquery("latest_interaction")
+    )
+
     stmt = (
         select(
             Supplier,
             interaction_count,
             project_count,
             last_interaction,
+            latest_interaction.c.last_project_id,
         )
         .join(SupplierInteraction, SupplierInteraction.supplier_id == Supplier.id)
         .join(
             RuntimeProject,
             RuntimeProject.id == SupplierInteraction.project_id,
         )
+        .outerjoin(
+            latest_interaction,
+            (latest_interaction.c.si_supplier_id == Supplier.id)
+            & (latest_interaction.c.rn == 1),
+        )
         .where(RuntimeProject.user_id == user_uuid)
-        .group_by(Supplier.id)
+        .group_by(Supplier.id, latest_interaction.c.last_project_id)
         .order_by(interaction_count.desc(), last_interaction.desc())
         .limit(max(1, min(limit, 200)))
     )
 
     rows = (await session.execute(stmt)).all()
     suppliers: list[dict[str, Any]] = []
-    for supplier, interactions, projects, last_at in rows:
+    for supplier, interactions, projects, last_at, last_proj_id in rows:
         suppliers.append(
             {
                 "supplier_id": str(supplier.id),
@@ -153,6 +182,7 @@ async def list_supplier_contacts_for_user(
                 "interaction_count": int(interactions or 0),
                 "project_count": int(projects or 0),
                 "last_interaction_at": _to_epoch(last_at),
+                "last_project_id": str(last_proj_id) if last_proj_id else None,
             }
         )
     return suppliers

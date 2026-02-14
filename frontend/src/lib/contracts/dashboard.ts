@@ -85,6 +85,7 @@ export interface DashboardSupplierContact {
   interaction_count: number
   project_count: number
   last_interaction_at?: number | null
+  last_project_id?: string | null
 }
 
 export interface DashboardContactsResponse {

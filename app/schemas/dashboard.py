@@ -92,6 +92,7 @@ class DashboardSupplierContact(BaseModel):
     interaction_count: int
     project_count: int
     last_interaction_at: float | None = None
+    last_project_id: str | None = None
 
 
 class DashboardContactsResponse(BaseModel):

@@ -434,17 +434,34 @@ function DashboardPageContent() {
                   <div>Interactions</div>
                   <div>Last activity</div>
                 </div>
-                {contacts.suppliers.map((supplier) => (
-                  <div className="dash-contact-row" key={supplier.supplier_id}>
-                    <div>
-                      <div className="dash-contact-name">{supplier.name}</div>
-                      <div>{supplier.email || supplier.website || 'No contact listed'}</div>
+                {contacts.suppliers.map((supplier) => {
+                  const canLink = !!supplier.last_project_id
+                  const handleClick = canLink
+                    ? () => {
+                        const params = new URLSearchParams({
+                          projectId: supplier.last_project_id!,
+                          supplierName: supplier.name,
+                        })
+                        router.push(`/product?${params.toString()}`)
+                      }
+                    : undefined
+
+                  return (
+                    <div
+                      className={`dash-contact-row${canLink ? ' cursor-pointer hover:bg-black/[.02] transition-colors' : ''}`}
+                      key={supplier.supplier_id}
+                      onClick={handleClick}
+                    >
+                      <div>
+                        <div className={`dash-contact-name${canLink ? ' hover:text-teal transition-colors' : ''}`}>{supplier.name}</div>
+                        <div>{supplier.email || supplier.website || 'No contact listed'}</div>
+                      </div>
+                      <div>{[supplier.city, supplier.country].filter(Boolean).join(', ') || 'Unknown'}</div>
+                      <div>{supplier.interaction_count} across {supplier.project_count} projects</div>
+                      <div>{supplier.last_interaction_at ? new Date(supplier.last_interaction_at * 1000).toLocaleDateString() : 'N/A'}</div>
                     </div>
-                    <div>{[supplier.city, supplier.country].filter(Boolean).join(', ') || 'Unknown'}</div>
-                    <div>{supplier.interaction_count} across {supplier.project_count} projects</div>
-                    <div>{supplier.last_interaction_at ? new Date(supplier.last_interaction_at * 1000).toLocaleDateString() : 'N/A'}</div>
-                  </div>
-                ))}
+                  )
+                })}
                 {contacts.count === 0 && <div className="dash-contact-row"><div>No supplier contacts yet.</div></div>}
               </div>
             )}

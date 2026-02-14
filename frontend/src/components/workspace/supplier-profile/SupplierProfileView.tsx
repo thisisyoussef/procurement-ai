@@ -18,10 +18,11 @@ import ProfileCommunicationLog from './ProfileCommunicationLog'
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 interface Props {
-  supplierIndex: number
+  supplierIndex?: number
+  supplierName?: string
 }
 
-export default function SupplierProfileView({ supplierIndex }: Props) {
+export default function SupplierProfileView({ supplierIndex, supplierName }: Props) {
   const { projectId, status } = useWorkspace()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -31,15 +32,20 @@ export default function SupplierProfileView({ supplierIndex }: Props) {
 
   useEffect(() => {
     if (!projectId) return
+    if (supplierIndex == null && !supplierName) return
     let cancelled = false
 
     async function load() {
       setLoading(true)
       setError(null)
       try {
-        const res = await authFetch(
-          `${API_BASE}/api/v1/projects/${projectId}/supplier/${supplierIndex}/profile`
-        )
+        let url: string
+        if (supplierIndex != null) {
+          url = `${API_BASE}/api/v1/projects/${projectId}/supplier/${supplierIndex}/profile`
+        } else {
+          url = `${API_BASE}/api/v1/projects/${projectId}/supplier/by-name/profile?name=${encodeURIComponent(supplierName!)}`
+        }
+        const res = await authFetch(url)
         if (!res.ok) {
           throw new Error(res.status === 404 ? 'Supplier not found' : `HTTP ${res.status}`)
         }
@@ -54,11 +60,12 @@ export default function SupplierProfileView({ supplierIndex }: Props) {
 
     load()
     return () => { cancelled = true }
-  }, [projectId, supplierIndex])
+  }, [projectId, supplierIndex, supplierName])
 
   function goBack() {
     const params = new URLSearchParams(searchParams.toString())
     params.delete('supplierIndex')
+    params.delete('supplierName')
     router.push(`/product?${params.toString()}`)
   }
 

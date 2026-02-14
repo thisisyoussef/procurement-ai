@@ -101,25 +101,10 @@ def _derive_response_time(messages: list[dict], supplier_index: int) -> float | 
     return None
 
 
-# ── Endpoint ───────────────────────────────────────────────────
+# ── Profile builder ────────────────────────────────────────────
 
 
-@router.get("/{supplier_index}/profile", response_model=SupplierProfileResponse)
-async def get_supplier_profile(
-    project_id: str,
-    supplier_index: int,
-    current_user: AuthUser = Depends(get_current_auth_user),
-) -> SupplierProfileResponse:
-    project = await _get_project_or_404(project_id)
-    _enforce_ownership(project, current_user)
-
-    # ── Discovery (required) ──────────────────────────────────
-    discovery = project.get("discovery_results") or {}
-    suppliers = discovery.get("suppliers") or []
-
-    if supplier_index < 0 or supplier_index >= len(suppliers):
-        raise HTTPException(status_code=404, detail="Supplier not found at given index")
-
+def _build_profile(project: dict, suppliers: list[dict], supplier_index: int) -> SupplierProfileResponse:
     supplier = suppliers[supplier_index]
 
     # ── Verification ──────────────────────────────────────────
@@ -152,7 +137,6 @@ async def get_supplier_profile(
     supplier_messages.sort(key=lambda m: m.get("created_at", 0), reverse=True)
 
     # ── Build hero stats ──────────────────────────────────────
-    # Prefer quoted price over estimate
     unit_price = None
     price_source = "estimate"
     if parsed_quote and parsed_quote.get("unit_price"):
@@ -315,3 +299,50 @@ async def get_supplier_profile(
         images=_extract_images(supplier),
         score_breakdown=score_breakdown,
     )
+
+
+# ── Endpoints ──────────────────────────────────────────────────
+
+
+@router.get("/by-name/profile", response_model=SupplierProfileResponse)
+async def get_supplier_profile_by_name(
+    project_id: str,
+    name: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+) -> SupplierProfileResponse:
+    """Resolve a supplier by name within a project, then return the full profile."""
+    project = await _get_project_or_404(project_id)
+    _enforce_ownership(project, current_user)
+
+    discovery = project.get("discovery_results") or {}
+    suppliers = discovery.get("suppliers") or []
+
+    name_lower = name.lower().strip()
+    supplier_index: int | None = None
+    for idx, s in enumerate(suppliers):
+        if (s.get("name") or "").lower().strip() == name_lower:
+            supplier_index = idx
+            break
+
+    if supplier_index is None:
+        raise HTTPException(status_code=404, detail="Supplier not found by name in this project")
+
+    return _build_profile(project, suppliers, supplier_index)
+
+
+@router.get("/{supplier_index}/profile", response_model=SupplierProfileResponse)
+async def get_supplier_profile(
+    project_id: str,
+    supplier_index: int,
+    current_user: AuthUser = Depends(get_current_auth_user),
+) -> SupplierProfileResponse:
+    project = await _get_project_or_404(project_id)
+    _enforce_ownership(project, current_user)
+
+    discovery = project.get("discovery_results") or {}
+    suppliers = discovery.get("suppliers") or []
+
+    if supplier_index < 0 or supplier_index >= len(suppliers):
+        raise HTTPException(status_code=404, detail="Supplier not found at given index")
+
+    return _build_profile(project, suppliers, supplier_index)
