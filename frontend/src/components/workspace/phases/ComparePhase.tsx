@@ -10,6 +10,7 @@ import { DecisionLane } from '@/types/pipeline'
 import { m, AnimatePresence } from '@/lib/motion'
 import { staggerContainer, cardEntrance } from '@/lib/motion/variants'
 import { EASE_OUT_EXPO, DURATION } from '@/lib/motion/config'
+import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const PRIMARY_LANES: Array<Exclude<DecisionLane, 'alternative'>> = [
@@ -350,24 +351,12 @@ export default function ComparePhase() {
 
   // Loading / empty state (must come after hooks so hook order is stable across renders)
   if (!comparison && !recommendation) {
+    if (loading) return <StageAnimationRouter />
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
-        {loading ? (
-          <>
-            <span className="status-dot bg-teal animate-pulse-dot mb-4" style={{ width: 10, height: 10 }} />
-            <p className="text-[14px] text-ink-2 font-medium">
-              {status?.current_stage === 'comparing'
-                ? 'Comparing suppliers side by side...'
-                : status?.current_stage === 'recommending'
-                ? 'Generating recommendations...'
-                : 'Working...'}
-            </p>
-          </>
-        ) : (
-          <p className="text-ink-4 text-[13px]">
-            Comparison results will appear here after supplier verification.
-          </p>
-        )}
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <p className="text-ink-4 text-[13px]">
+          Comparison results will appear here after supplier verification.
+        </p>
       </div>
     )
   }

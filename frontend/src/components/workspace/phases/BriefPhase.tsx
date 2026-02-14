@@ -6,6 +6,7 @@ import { featureFlags } from '@/lib/featureFlags'
 import { trackTraceEvent } from '@/lib/telemetry'
 import { m } from '@/lib/motion'
 import { staggerContainerFast, cardEntrance } from '@/lib/motion/variants'
+import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
 
 const SUGGESTIONS = [
   'Custom enamel pins for my streetwear brand',
@@ -131,23 +132,7 @@ export default function BriefPhase() {
 
   // ─── State 2: Parsing / waiting ──────────────────────
   if (loading && !parsed && !isClarifying) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] px-6">
-        <span className="status-dot bg-teal animate-pulse-dot mb-4" style={{ width: 10, height: 10 }} />
-        <p className="text-[14px] text-ink-2 font-medium">
-          {currentStage === 'parsing'
-            ? 'Analyzing your requirements...'
-            : currentStage === 'discovering'
-            ? 'Brief parsed. Searching for suppliers...'
-            : 'Processing...'}
-        </p>
-        {status?.progress_events && status.progress_events.length > 0 && (
-          <p className="mt-3 text-[12px] text-ink-4">
-            {status.progress_events[status.progress_events.length - 1]?.detail}
-          </p>
-        )}
-      </div>
-    )
+    return <StageAnimationRouter />
   }
 
   // ─── State 3: Parsed + optional clarifying questions ──
