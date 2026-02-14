@@ -164,6 +164,82 @@
   font-weight: 600;
 }
 
+.dash-search-wrap {
+  margin-bottom: 48px;
+}
+
+.dash-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 6px 6px 6px 22px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.dash-search-bar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 201, 167, 0.08);
+}
+
+.dash-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  padding: 10px 0;
+}
+
+.dash-search-input::placeholder {
+  color: var(--text4);
+}
+
+.dash-search-input:disabled {
+  opacity: 0.6;
+}
+
+.dash-search-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.dash-search-btn:hover:not(:disabled) {
+  transform: scale(1.04);
+}
+
+.dash-search-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dash-search-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: dashSpin 0.6s linear infinite;
+}
+
+@keyframes dashSpin {
+  to { transform: rotate(360deg); }
+}
+
 .dash-section-label {
   font-size: 9.5px;
   font-weight: 700;

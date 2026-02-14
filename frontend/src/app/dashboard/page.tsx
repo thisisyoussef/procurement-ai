@@ -5,9 +5,11 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import GoogleSignIn from '@/components/GoogleSignIn'
+import OnboardingForm from '@/components/OnboardingForm'
 import { dashboardClient } from '@/lib/api/dashboardClient'
 import {
   AuthUser,
+  authFetch,
   clearAuthSession,
   fetchCurrentUser,
   getStoredAccessToken,
@@ -54,6 +56,10 @@ function DashboardPageContent() {
   const [contactsError, setContactsError] = useState<string | null>(null)
 
   const [tab, setTab] = useState<TabKey>('home')
+
+  const [searchInput, setSearchInput] = useState('')
+  const [searchSubmitting, setSearchSubmitting] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
 
   useEffect(() => {
     const initAuth = async () => {
@@ -156,6 +162,51 @@ function DashboardPageContent() {
     router.push('/product?new=1')
   }
 
+  const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
+
+  const handleSearchSubmit = async () => {
+    const trimmed = searchInput.trim()
+    if (!trimmed || searchSubmitting) return
+
+    setSearchSubmitting(true)
+    setSearchError(null)
+    trackTraceEvent('dashboard_search_submit', { description_length: trimmed.length }, { path: '/dashboard' })
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: trimmed.slice(0, 80),
+          product_description: trimmed,
+        }),
+      })
+
+      if (res.status === 401) {
+        clearAuthSession()
+        setAuthUser(null)
+        return
+      }
+
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try {
+          const payload = (await res.json()) as { detail?: string }
+          detail = payload.detail || detail
+        } catch { /* keep */ }
+        throw new Error(detail)
+      }
+
+      const data = (await res.json()) as { project_id: string }
+      trackTraceEvent('dashboard_search_started', { project_id: data.project_id }, { path: '/dashboard' })
+      router.push(`/product?projectId=${data.project_id}`)
+    } catch (err: any) {
+      const detail = err?.message || 'Could not start project. Try again.'
+      setSearchError(detail)
+      setSearchSubmitting(false)
+    }
+  }
+
   const firstLetter = useMemo(
     () => (authUser?.full_name?.[0] || authUser?.email?.[0] || 'Y').toUpperCase(),
     [authUser]
@@ -180,6 +231,19 @@ function DashboardPageContent() {
           </Link>
         </div>
       </main>
+    )
+  }
+
+  // Onboarding gate — collect business profile before showing dashboard
+  if (!authUser.onboarding_completed) {
+    return (
+      <OnboardingForm
+        authUser={authUser}
+        onComplete={(updatedUser) => {
+          trackTraceEvent('onboarding_gate_passed', { user_id: updatedUser.id }, { path: '/dashboard' })
+          setAuthUser(updatedUser)
+        }}
+      />
     )
   }
 
@@ -220,6 +284,38 @@ function DashboardPageContent() {
             {greeting?.body || 'Tamkin is running your sourcing pipeline and outreach in the background.'}
           </p>
         </div>
+
+        {/* Search bar */}
+        {tab !== 'contacts' && (
+          <div className="dash-search-wrap">
+            <div className="dash-search-bar">
+              <input
+                className="dash-search-input"
+                placeholder="What do you need made?"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSearchSubmit()
+                }}
+                disabled={searchSubmitting}
+              />
+              <button
+                className="dash-search-btn"
+                onClick={handleSearchSubmit}
+                disabled={searchSubmitting || !searchInput.trim()}
+              >
+                {searchSubmitting ? (
+                  <span className="dash-search-spinner" />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            {searchError && <div className="dash-error" style={{ marginTop: 8 }}>{searchError}</div>}
+          </div>
+        )}
 
         {summaryError && <div className="dash-error">Dashboard error: {summaryError}</div>}
         {summaryLoading && !summary && <div className="dash-empty">Loading dashboard...</div>}

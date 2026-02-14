@@ -567,64 +567,60 @@ body {
   font-weight: 700;
 }
 
-.convo-input {
+.convo-placeholder {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: #fff;
-  border: 1.5px solid rgba(0, 0, 0, 0.06);
-  border-radius: 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
-  margin-top: 4px;
-  transition: border-color 0.2s;
-}
-
-.convo-input:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 4px 20px rgba(0, 201, 167, 0.08);
-}
-
-.convo-input.input-exit {
-  opacity: 0;
-  transform: translateY(8px);
-  transition: all 0.3s var(--ease);
-  pointer-events: none;
-}
-
-.convo-input input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  font-family: 'Manrope', sans-serif;
-  font-size: 13.5px;
-  color: var(--ink);
-}
-
-.convo-input input::placeholder { color: var(--ink5); }
-
-.convo-send {
-  width: 30px;
-  height: 30px;
-  background: var(--accent);
-  border: none;
-  border-radius: 50%;
-  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s var(--ease);
-  box-shadow: 0 2px 8px rgba(0, 201, 167, 0.2);
+  gap: 12px;
+  padding: 40px 20px;
+  opacity: 0.4;
 }
 
-.convo-send:hover {
-  transform: scale(1.08);
-  box-shadow: 0 4px 16px rgba(0, 201, 167, 0.3);
+.convo-placeholder-icon {
+  width: 36px;
+  height: 36px;
 }
 
-.convo-send svg { width: 12px; height: 12px; }
+.convo-placeholder-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.convo-placeholder p {
+  font-size: 12px;
+  color: var(--ink4);
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px !important;
+  min-height: 0 !important;
+}
+
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.4;
+  animation: typingDot 1.2s ease-in-out infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingDot {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1); }
+}
 
 .manifesto {
   padding: clamp(100px, 14vw, 200px) clamp(20px, 5vw, 72px);

@@ -6,13 +6,76 @@ import { useEffect, useRef, useState } from 'react'
 
 import { tamkinClient } from '@/lib/api/tamkinClient'
 import { featureFlags } from '@/lib/featureFlags'
-import { getTraceSessionId, trackTraceEvent } from '@/lib/telemetry'
+import { trackTraceEvent } from '@/lib/telemetry'
 
 import './tamkin-landing.css'
 
 type ConvoBlock =
   | { kind: 'message'; role: 'u' | 'a'; text: string }
   | { kind: 'status'; text: string }
+
+interface DemoScenario {
+  userMessage: string
+  steps: ConvoBlock[]
+}
+
+const DEMO_SCENARIOS: DemoScenario[] = [
+  {
+    userMessage: 'Need 500 heavyweight hoodies with embroidery, budget $15-20/unit, ship to LA in 6 weeks.',
+    steps: [
+      { kind: 'message', role: 'a', text: 'Got it — heavyweight cut-and-sew hoodies, 500 units, embroidered, $15-20 range, Los Angeles delivery in 6 weeks.' },
+      { kind: 'status', text: 'Parsing requirements...' },
+      { kind: 'status', text: 'Searching 12,400+ manufacturers across 47 countries' },
+      { kind: 'message', role: 'a', text: 'Found 23 verified manufacturers matching your specs. Top 3 are in Portugal, Pakistan, and China — all with 4.5+ ratings and MOQs under 300.' },
+      { kind: 'status', text: 'Verifying business registration and reviews' },
+      { kind: 'message', role: 'a', text: 'Verification complete. Reaching out to your top matches for real quotes now.' },
+    ],
+  },
+  {
+    userMessage: 'I\'m launching a skincare line — need recyclable packaging: mailer boxes, tissue paper, stickers. About 5,000 units.',
+    steps: [
+      { kind: 'message', role: 'a', text: 'Skincare packaging set — mailer boxes, tissue paper, and stickers, all recyclable, 5,000 units. Let me find the best options.' },
+      { kind: 'status', text: 'Parsing requirements...' },
+      { kind: 'status', text: 'Scanning packaging manufacturers globally' },
+      { kind: 'message', role: 'a', text: 'Found 18 eco-certified packaging suppliers. Best matches are in the US, UK, and India with competitive pricing for your volume.' },
+      { kind: 'status', text: 'Verifying sustainability certifications' },
+      { kind: 'message', role: 'a', text: 'Top 5 verified — all FSC certified with recyclable materials. Sending quote requests now.' },
+    ],
+  },
+  {
+    userMessage: 'We need 200 canvas tote bags with our nonprofit logo for a fundraiser. Trying to stay under $5 each.',
+    steps: [
+      { kind: 'message', role: 'a', text: 'Canvas tote bags, 200 units, single logo print, under $5/unit for a nonprofit fundraiser. I\'ll find you the best deal.' },
+      { kind: 'status', text: 'Parsing requirements...' },
+      { kind: 'status', text: 'Searching promotional product suppliers' },
+      { kind: 'message', role: 'a', text: 'Found 14 suppliers that can hit your price point. 3 domestic options can deliver in 2 weeks with screen printing included.' },
+      { kind: 'status', text: 'Comparing quotes and lead times' },
+      { kind: 'message', role: 'a', text: 'Best match: $3.80/unit with free shipping for nonprofits, 10-day turnaround. Want me to get a sample?' },
+    ],
+  },
+  {
+    userMessage: 'Need a certified stamping supplier for an automotive mounting bracket — 10,000 units/month, must be IATF 16949.',
+    steps: [
+      { kind: 'message', role: 'a', text: 'Automotive stamping — mounting brackets, 10K/month production volume, IATF 16949 certification required. Searching now.' },
+      { kind: 'status', text: 'Parsing requirements...' },
+      { kind: 'status', text: 'Filtering for IATF 16949 certified facilities' },
+      { kind: 'message', role: 'a', text: 'Found 9 IATF-certified stamping facilities. Top matches in Mexico, China, and Germany with capacity for 10K+/month.' },
+      { kind: 'status', text: 'Verifying certifications and production capacity' },
+      { kind: 'message', role: 'a', text: 'All 9 verified — certifications confirmed, references checked. Ready to compare pricing and lead times side by side.' },
+    ],
+  },
+  {
+    userMessage: 'Custom enamel pins for my streetwear brand — 1,000 units, soft enamel, 3 colorways, butterfly clutch backing.',
+    steps: [
+      { kind: 'message', role: 'a', text: 'Soft enamel pins, 1,000 units across 3 colorways, butterfly clutch. Classic choice for merch drops. Searching now.' },
+      { kind: 'status', text: 'Parsing requirements...' },
+      { kind: 'status', text: 'Searching enamel pin manufacturers worldwide' },
+      { kind: 'message', role: 'a', text: 'Found 31 manufacturers. Best pricing at this MOQ comes from suppliers in Dongguan and Shenzhen — as low as $0.35/unit.' },
+      { kind: 'status', text: 'Verifying quality samples and reviews' },
+      { kind: 'message', role: 'a', text: 'Top 4 verified with 500+ positive reviews each. Quote requests sent — expect responses within 24 hours.' },
+    ],
+  },
+]
 
 function AgentAvatar() {
   return (
@@ -67,10 +130,8 @@ function CaseIconFour() {
 export default function HomePage() {
   const router = useRouter()
 
-  const [liveInput, setLiveInput] = useState('')
-  const [isStartingIntake, setIsStartingIntake] = useState(false)
-  const [intakeError, setIntakeError] = useState<string | null>(null)
   const [blocks, setBlocks] = useState<ConvoBlock[]>([])
+  const [demoTyping, setDemoTyping] = useState(false)
 
   const [leadEmail, setLeadEmail] = useState('')
   const [leadNote, setLeadNote] = useState('')
@@ -79,6 +140,7 @@ export default function HomePage() {
   const [leadSuccess, setLeadSuccess] = useState<string | null>(null)
 
   const convoRef = useRef<HTMLDivElement | null>(null)
+  const demoStartedRef = useRef(false)
 
   useEffect(() => {
     if (featureFlags.tamkinLandingBypass) {
@@ -91,6 +153,47 @@ export default function HomePage() {
     if (!convoRef.current) return
     convoRef.current.scrollTop = convoRef.current.scrollHeight
   }, [blocks])
+
+  // Auto-play a random demo scenario when the convo section scrolls into view
+  useEffect(() => {
+    if (demoStartedRef.current) return
+
+    const convoEl = document.getElementById('convo')
+    if (!convoEl) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !demoStartedRef.current) {
+            demoStartedRef.current = true
+            observer.disconnect()
+            void runDemo()
+          }
+        })
+      },
+      { threshold: 0.3 }
+    )
+
+    observer.observe(convoEl)
+    return () => observer.disconnect()
+  }, [])
+
+  const runDemo = async () => {
+    const scenario = DEMO_SCENARIOS[Math.floor(Math.random() * DEMO_SCENARIOS.length)]
+
+    // Show user message
+    setBlocks([{ kind: 'message', role: 'u', text: scenario.userMessage }])
+
+    // Drip in each step with realistic delays
+    for (let i = 0; i < scenario.steps.length; i++) {
+      const step = scenario.steps[i]
+      const delay = step.kind === 'status' ? 800 : 1200
+      setDemoTyping(true)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      setDemoTyping(false)
+      setBlocks((prev) => [...prev, step])
+    }
+  }
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -110,51 +213,6 @@ export default function HomePage() {
 
   const track = async (eventName: string, payload: Record<string, unknown> = {}) => {
     trackTraceEvent(eventName, payload, { path: '/' })
-  }
-
-  const startIntake = async () => {
-    if (isStartingIntake) return
-
-    const message =
-      liveInput.trim() ||
-      'Need 500 heavyweight hoodies with embroidery, target budget $15-20 per unit, shipping to Los Angeles in 6 weeks.'
-
-    setIsStartingIntake(true)
-    setIntakeError(null)
-    setBlocks((prev) => [
-      ...prev,
-      { kind: 'message', role: 'u', text: message },
-      {
-        kind: 'message',
-        role: 'a',
-        text: 'Got it. I am starting your sourcing mission now and moving this into your product workspace.',
-      },
-      { kind: 'status', text: 'Starting mission and preparing your product workspace...' },
-    ])
-
-    await track('hero_intake_submit', { location: 'scene_chat' })
-
-    try {
-      const traceSessionId = getTraceSessionId() || undefined
-      const result = await tamkinClient.startIntake({
-        message,
-        source: 'landing_hero',
-        session_id: traceSessionId,
-      })
-      router.push(result.redirect_path)
-    } catch (err: any) {
-      const detail = err?.message || 'Could not start your mission. Please try again.'
-      setIntakeError(detail)
-      setBlocks((prev) => [
-        ...prev,
-        {
-          kind: 'message',
-          role: 'a',
-          text: `I could not start your mission right now: ${detail}`,
-        },
-      ])
-      setIsStartingIntake(false)
-    }
   }
 
   const submitLead = async (e: React.FormEvent) => {
@@ -285,23 +343,14 @@ export default function HomePage() {
           </div>
 
           <div className="convo rv" id="convo" ref={convoRef}>
-            <div className="convo-input" id="inputWrap">
-              <input
-                id="liveInput"
-                placeholder="Describe what you need - in your own words..."
-                value={liveInput}
-                onChange={(e) => setLiveInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void startIntake()
-                }}
-                disabled={isStartingIntake}
-              />
-              <button className="convo-send" id="sendBtn" onClick={startIntake} aria-label="Start intake" disabled={isStartingIntake}>
-                <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path d="M3 8h10M9 4l4 4-4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </div>
+            {blocks.length === 0 && (
+              <div className="convo-placeholder">
+                <div className="convo-placeholder-icon">
+                  <AgentAvatar />
+                </div>
+                <p>Watch Tamkin work...</p>
+              </div>
+            )}
 
             {blocks.map((block, idx) => {
               if (block.kind === 'message') {
@@ -309,7 +358,6 @@ export default function HomePage() {
                   return (
                     <div key={`${block.kind}-${idx}`} className="m u">
                       <div className="m-bub">{block.text}</div>
-                      <div className="m-av me">Y</div>
                     </div>
                   )
                 }
@@ -325,14 +373,17 @@ export default function HomePage() {
               return (
                 <div key={`${block.kind}-${idx}`} className="status">
                   <div className="status-h"><span className="dot-pulse" /> Agent status</div>
-                  <div className="status-line"><span className="ck">✓</span> {block.text}</div>
+                  <div className="status-line"><span className="ck">&#10003;</span> {block.text}</div>
                 </div>
               )
             })}
 
-            {intakeError && (
-              <div className="reco" role="alert">
-                <strong>Could not start mission.</strong> {intakeError}
+            {demoTyping && (
+              <div className="m a">
+                <div className="m-av ag"><AgentAvatar /></div>
+                <div className="m-bub typing-indicator">
+                  <span /><span /><span />
+                </div>
               </div>
             )}
           </div>
