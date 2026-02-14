@@ -214,6 +214,25 @@ export default function HomePage() {
 
       <section className="hero">
         <div className="hero-arabic">تمكين</div>
+
+        {/* ── Hero decorations ── */}
+        <svg className="deco deco-hex" width="120" height="120" viewBox="0 0 120 120" fill="none" aria-hidden>
+          <path d="M60 10L105 35V85L60 110L15 85V35L60 10Z" stroke="var(--accent)" strokeWidth="0.7" opacity="0.12" />
+          <path d="M60 28L90 45V79L60 96L30 79V45L60 28Z" stroke="var(--accent)" strokeWidth="0.5" opacity="0.08" />
+        </svg>
+        <svg className="deco deco-circle" width="80" height="80" viewBox="0 0 80 80" fill="none" aria-hidden>
+          <circle cx="40" cy="40" r="36" stroke="var(--accent)" strokeWidth="0.7" opacity="0.1" />
+          <circle cx="40" cy="40" r="20" stroke="var(--accent)" strokeWidth="0.5" opacity="0.06" strokeDasharray="4 6" />
+        </svg>
+        <svg className="deco deco-diamond" width="60" height="60" viewBox="0 0 60 60" fill="none" aria-hidden>
+          <rect x="30" y="4" width="36" height="36" rx="2" transform="rotate(45 30 4)" stroke="var(--accent)" strokeWidth="0.7" opacity="0.1" />
+        </svg>
+        <svg className="deco deco-dots" width="100" height="100" viewBox="0 0 100 100" fill="none" aria-hidden>
+          {[0,1,2,3,4].map(r => [0,1,2,3,4].map(c => (
+            <circle key={`${r}-${c}`} cx={10 + c * 20} cy={10 + r * 20} r="1.2" fill="var(--accent)" opacity="0.1" />
+          )))}
+        </svg>
+
         <h1 className="hero-headline">
           <span className="ln">Tell us what</span>
           <span className="ln">you need made.</span>
@@ -320,6 +339,14 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ── Wave divider ── */}
+      <div className="deco-wave-wrap" aria-hidden>
+        <svg className="deco-wave" viewBox="0 0 1440 60" preserveAspectRatio="none" fill="none">
+          <path d="M0 30C240 60 480 0 720 30C960 60 1200 0 1440 30" stroke="var(--accent)" strokeWidth="1" opacity="0.12" />
+          <path d="M0 40C240 10 480 50 720 20C960 50 1200 10 1440 40" stroke="var(--accent)" strokeWidth="0.6" opacity="0.07" />
+        </svg>
+      </div>
+
       <section className="manifesto rv">
         <blockquote>
           The people who need sourcing tools the most have never heard the word <em>procurement</em>. We built Tamkin for them.
@@ -328,6 +355,13 @@ export default function HomePage() {
       </section>
 
       <section className="steps-section" id="steps">
+        {/* ── Steps corner decoration ── */}
+        <svg className="deco deco-steps-corner" width="140" height="140" viewBox="0 0 140 140" fill="none" aria-hidden>
+          <path d="M0 140L140 0" stroke="var(--accent)" strokeWidth="0.5" opacity="0.08" />
+          <path d="M0 100L100 0" stroke="var(--accent)" strokeWidth="0.5" opacity="0.06" />
+          <path d="M0 60L60 0" stroke="var(--accent)" strokeWidth="0.5" opacity="0.04" />
+          <circle cx="70" cy="70" r="3" fill="var(--accent)" opacity="0.12" />
+        </svg>
         <div className="steps-header rv">
           <h2>Four steps.<br />Zero friction.</h2>
           <p>
@@ -471,6 +505,15 @@ export default function HomePage() {
       </section>
 
       <section className="final" id="waitlist">
+        {/* ── Final section radial decoration ── */}
+        <svg className="deco deco-radial" width="300" height="300" viewBox="0 0 300 300" fill="none" aria-hidden>
+          <circle cx="150" cy="150" r="140" stroke="var(--accent)" strokeWidth="0.5" opacity="0.06" />
+          <circle cx="150" cy="150" r="100" stroke="var(--accent)" strokeWidth="0.5" opacity="0.05" />
+          <circle cx="150" cy="150" r="60" stroke="var(--accent)" strokeWidth="0.5" opacity="0.04" />
+          <line x1="150" y1="10" x2="150" y2="290" stroke="var(--accent)" strokeWidth="0.3" opacity="0.04" />
+          <line x1="10" y1="150" x2="290" y2="150" stroke="var(--accent)" strokeWidth="0.3" opacity="0.04" />
+        </svg>
+
         <div className="rv">
           <div className="scene-tag" style={{ textAlign: 'center' }}>Early Access</div>
           <h2>Stop searching.<br />Start <em>finding</em>.</h2>

@@ -464,6 +464,7 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 8px;
+  overflow: hidden;
 }
 
 .r-card {
@@ -1113,6 +1114,68 @@ body {
   transform: translateY(0);
 }
 
+/* ── SVG Decorations ──────────────────────────── */
+.deco {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.deco-hex {
+  top: 12%;
+  right: 8%;
+  animation: decoFloat 12s ease-in-out infinite;
+}
+
+.deco-circle {
+  bottom: 18%;
+  right: 22%;
+  animation: decoFloat 10s ease-in-out infinite 2s;
+}
+
+.deco-diamond {
+  top: 28%;
+  left: 6%;
+  animation: decoFloat 14s ease-in-out infinite 4s;
+}
+
+.deco-dots {
+  bottom: 12%;
+  left: 10%;
+}
+
+.deco-wave-wrap {
+  width: 100%;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.deco-wave {
+  width: 100%;
+  height: 40px;
+  display: block;
+}
+
+.steps-section { position: relative; }
+
+.deco-steps-corner {
+  top: 0;
+  right: clamp(20px, 5vw, 72px);
+}
+
+.final { position: relative; overflow: hidden; }
+
+.deco-radial {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes decoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
 @keyframes hIn {
   from { opacity: 0; transform: translateY(40px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1143,11 +1206,18 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Tablet ─────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .step { grid-template-columns: 80px 1fr 1fr; gap: 0 24px; }
+  .step-n { font-size: 56px; }
+}
+
+/* ── Small tablet / landscape phone ────────────── */
 @media (max-width: 900px) {
   .scene-layout { grid-template-columns: 1fr; }
   .scene-text { position: static; }
   .steps-header,
-  .dark-header { grid-template-columns: 1fr; }
+  .dark-header { grid-template-columns: 1fr; gap: 24px; }
   .step { grid-template-columns: 60px 1fr; gap: 0 20px; }
   .step-n { font-size: 40px; }
   .step > div:last-child { grid-column: 2; }
@@ -1184,4 +1254,136 @@ body {
   }
   .hero-arabic { display: none; }
   .nav-links a:not(.nav-cta) { display: none; }
+}
+
+/* ── Mobile (portrait) ─────────────────────────── */
+@media (max-width: 640px) {
+  /* Hero: switch from absolute footer to static flow to prevent overlap */
+  .hero {
+    min-height: auto;
+    padding-top: 100px;
+    padding-bottom: 48px;
+    gap: 40px;
+  }
+
+  .hero-headline {
+    font-size: clamp(38px, 10vw, 52px);
+    line-height: 0.95;
+  }
+
+  .hero-foot {
+    position: static;
+    padding: 0;
+    opacity: 1;
+    animation: none;
+  }
+
+  .hero-foot p {
+    font-size: 14px;
+    max-width: 100%;
+  }
+
+  .scroll-cue { display: none; }
+
+  /* Scene: reduce massive padding */
+  .scene {
+    padding-top: 56px;
+    padding-bottom: 56px;
+  }
+
+  .scene-text h2 { font-size: 28px; }
+
+  .scene-nums {
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  .convo { max-height: 440px; }
+
+  .m-bub {
+    max-width: 90%;
+    font-size: 13px;
+    padding: 11px 14px;
+  }
+
+  .status { margin-left: 0; padding: 14px 16px; }
+  .results { margin-left: 0; }
+  .reco { margin-left: 0; padding: 14px 16px; }
+
+  /* Manifesto: reduce vertical padding */
+  .manifesto {
+    padding-top: 64px;
+    padding-bottom: 64px;
+  }
+
+  .manifesto blockquote { font-size: 22px; }
+
+  /* Steps */
+  .steps-section { padding-bottom: 56px; }
+
+  .steps-header { margin-bottom: 40px; }
+  .steps-header h2 { font-size: 32px; }
+
+  .step {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 28px 0;
+  }
+
+  .step-n {
+    font-size: 28px;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .step > div:last-child { grid-column: 1; }
+  .step-details { margin-top: 12px; }
+
+  .step h3 { font-size: 22px; margin-bottom: 8px; }
+  .step p { font-size: 13.5px; }
+
+  /* Dark section */
+  .dark { padding-top: 56px; padding-bottom: 56px; }
+  .dark-header { margin-bottom: 40px; }
+  .dark-header h2 { font-size: 28px; }
+  .tl-i { font-size: 13px; padding: 10px 0; }
+
+  /* Cases */
+  .cases { padding-top: 56px; padding-bottom: 56px; }
+  .cases-head { margin-bottom: 32px; }
+  .cases-head h2 { font-size: 32px; }
+
+  .cx { padding: 24px; }
+  .cx-t { font-size: 19px; }
+  .cx-d { font-size: 12.5px; }
+  .cx-p { font-size: 12px; padding: 12px 14px; }
+
+  /* Final */
+  .final {
+    padding-top: 56px;
+    padding-bottom: 48px;
+  }
+
+  .final h2 { font-size: 36px; letter-spacing: -1px; }
+  .final > p { font-size: 14px; }
+
+  /* Footer */
+  .fl { gap: 14px; flex-wrap: wrap; justify-content: center; }
+
+  /* Decorations: hide busy elements on mobile */
+  .deco-hex, .deco-diamond, .deco-dots { display: none; }
+  .deco-circle { width: 50px; height: 50px; right: 10%; bottom: auto; top: 8%; }
+  .deco-steps-corner { display: none; }
+  .deco-radial { width: 200px; height: 200px; }
+}
+
+/* ── Tiny screens ──────────────────────────────── */
+@media (max-width: 380px) {
+  .hero-headline { font-size: 34px; }
+  .btn-d, .btn-g { padding: 12px 22px; font-size: 13px; }
+  .nav { padding: 0 16px; }
+  .nav-word { font-size: 15px; }
+  .nav-cta { padding: 6px 14px; font-size: 11px; }
+  .fi { font-size: 13px; padding: 11px 14px; }
+  .fb { padding: 11px 20px; font-size: 12px; }
 }
