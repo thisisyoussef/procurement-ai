@@ -293,12 +293,22 @@ async def verify_suppliers(
             emit_progress("verifying", "checking_supplier",
                           f"Verifying supplier {idx + 1}/{len(suppliers)}: {s.name}...",
                           progress_pct=(idx / len(suppliers)) * 100)
-            result = await verify_supplier(s, idx)
-            completed += 1
-            return result
+            try:
+                result = await verify_supplier(s, idx)
+                completed += 1
+                return result
+            except Exception as e:
+                completed += 1
+                logger.error("❌ Verification failed for supplier [%d] %s: %s", idx, s.name, e)
+                return None
 
     tasks = [_verify_with_limit(s, i) for i, s in enumerate(suppliers)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Log any exceptions that slipped through (shouldn't happen now, but safety net)
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.error("❌ Unexpected exception for supplier [%d]: %s", i, r)
 
     verifications = [r for r in results if isinstance(r, SupplierVerification)]
 

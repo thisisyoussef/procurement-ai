@@ -114,23 +114,35 @@ async def verify_node(state: GraphState) -> GraphState:
         )[:20]
         result = await verify_suppliers(top_suppliers)
 
+        if not result.verifications:
+            logger.error("All supplier verifications failed — no results to proceed with")
+            return {
+                **state,
+                "current_stage": PipelineStage.FAILED.value,
+                "error": "Supplier verification failed: all supplier checks returned errors. Try restarting from verification.",
+            }
+
         # Merge enriched contacts back into discovery results so downstream
         # agents (compare, recommend, outreach) see the updated emails/phones.
-        enriched_map = {
-            (s.name, s.website or ""): s for s in top_suppliers
-        }
-        for i, supplier in enumerate(discovery.suppliers):
-            key = (supplier.name, supplier.website or "")
-            enriched = enriched_map.get(key)
-            if enriched:
-                if enriched.email and not supplier.email:
-                    discovery.suppliers[i].email = enriched.email
-                if enriched.phone and not supplier.phone:
-                    discovery.suppliers[i].phone = enriched.phone
-                if enriched.enrichment:
-                    discovery.suppliers[i].enrichment = enriched.enrichment
+        try:
+            enriched_map = {
+                (s.name, s.website or ""): s for s in top_suppliers
+            }
+            for i, supplier in enumerate(discovery.suppliers):
+                key = (supplier.name, supplier.website or "")
+                enriched = enriched_map.get(key)
+                if enriched:
+                    if enriched.email and not supplier.email:
+                        discovery.suppliers[i].email = enriched.email
+                    if enriched.phone and not supplier.phone:
+                        discovery.suppliers[i].phone = enriched.phone
+                    if enriched.enrichment:
+                        discovery.suppliers[i].enrichment = enriched.enrichment
+        except Exception as e:
+            logger.warning("Contact merge failed (non-fatal): %s", e)
 
-        logger.info("═══ VERIFICATION COMPLETE ═══")
+        logger.info("═══ VERIFICATION COMPLETE (%d/%d suppliers verified) ═══",
+                     len(result.verifications), len(top_suppliers))
         return {
             **state,
             "current_stage": PipelineStage.COMPARING.value,

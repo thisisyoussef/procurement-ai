@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { featureFlags } from '@/lib/featureFlags'
@@ -51,7 +51,7 @@ function fallbackMessage(stage: string): string {
     case 'complete':
       return 'Your shortlist is ready.'
     case 'failed':
-      return 'This run failed. You can retry with more context.'
+      return 'Something went wrong during this run. Hit retry to pick up where it left off.'
     case 'canceled':
       return 'This run was canceled.'
     default:
@@ -73,7 +73,8 @@ function formatAgo(timestamp?: number): string {
 }
 
 export default function LiveProgressFeed() {
-  const { projectId, status } = useWorkspace()
+  const { projectId, status, restartCurrentProject } = useWorkspace()
+  const [restarting, setRestarting] = useState(false)
 
   const events = status?.progress_events || []
   const latest = events.length > 0 ? events[events.length - 1] : null
@@ -93,7 +94,8 @@ export default function LiveProgressFeed() {
   if (!projectId || !status) return null
 
   const title = STAGE_LABELS[stage] || 'Working'
-  const message = latestDetail || fallbackMessage(stage)
+  const errorMessage = stage === 'failed' && status?.error ? status.error : null
+  const message = errorMessage || latestDetail || fallbackMessage(stage)
   const decisionMilestone = DECISION_MILESTONES[stage] || 'Shortlist quality improving'
   const stageElapsedSec = stageStartedAt ? Math.max(0, Date.now() / 1000 - stageStartedAt) : 0
   const focusCircleEnabled = featureFlags.tamkinFocusCircleSearchV1
@@ -122,8 +124,28 @@ export default function LiveProgressFeed() {
               Still running normally. Expect a recommendation-quality update next.
             </p>
           ) : null}
+          {stage === 'failed' && (
+            <button
+              disabled={restarting}
+              onClick={async () => {
+                setRestarting(true)
+                try {
+                  await restartCurrentProject()
+                } finally {
+                  setRestarting(false)
+                }
+              }}
+              className="mt-2 text-[12px] font-medium text-teal hover:text-teal/80 transition-colors disabled:opacity-50"
+            >
+              {restarting ? 'Restarting…' : 'Retry this run'}
+            </button>
+          )}
         </div>
-        <span className="status-dot bg-teal animate-pulse-dot mt-1 shrink-0" />
+        <span
+          className={`status-dot mt-1 shrink-0 ${
+            stage === 'failed' ? 'bg-red-400' : 'bg-teal animate-pulse-dot'
+          }`}
+        />
       </div>
 
       {recent.length > 1 && (
