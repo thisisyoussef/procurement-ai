@@ -84,16 +84,17 @@ export default function LiveProgressFeed() {
     return [...events].slice(-4).reverse()
   }, [events])
 
-  if (!projectId || !status) return null
-
-  const title = STAGE_LABELS[stage] || 'Working'
-  const message = latestDetail || fallbackMessage(stage)
-  const decisionMilestone = DECISION_MILESTONES[stage] || 'Shortlist quality improving'
   const stageStartedAt = useMemo(() => {
     const stageEvents = events.filter((event) => event.stage === stage)
     const started = stageEvents.find((event) => event.substep === 'stage_started')
     return started?.timestamp || stageEvents[0]?.timestamp || latest?.timestamp || null
   }, [events, latest?.timestamp, stage])
+
+  if (!projectId || !status) return null
+
+  const title = STAGE_LABELS[stage] || 'Working'
+  const message = latestDetail || fallbackMessage(stage)
+  const decisionMilestone = DECISION_MILESTONES[stage] || 'Shortlist quality improving'
   const stageElapsedSec = stageStartedAt ? Math.max(0, Date.now() / 1000 - stageStartedAt) : 0
   const focusCircleEnabled = featureFlags.tamkinFocusCircleSearchV1
   const showExpectation =
