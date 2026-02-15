@@ -13,6 +13,7 @@ from app.models.supplier import Supplier  # noqa: F401
 from app.models.project import SourcingProject, Quote  # noqa: F401
 from app.models.runtime import RuntimeProject, LandingLead, AnalyticsEvent  # noqa: F401
 from app.models.user import User  # noqa: F401
+from automotive.models.project import AutomotiveProject, AutomotiveProjectEvent, AutomotiveSupplier  # noqa: F401
 
 config = context.config
 settings = get_settings()

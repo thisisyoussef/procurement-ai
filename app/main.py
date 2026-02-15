@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from automotive.api.v1.router import automotive_api_router
 from app.core.log_stream import install_project_log_handler
 from app.core.scheduler import get_scheduler
 from app.services.project_store import StoreUnavailableError, get_project_store
@@ -96,8 +97,9 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Include API routes
-app.include_router(api_router)
+# Include API routes — both projects on same server, insulated by prefix
+app.include_router(api_router)  # /api/v1/... (procurement)
+app.include_router(automotive_api_router)  # /api/v1/automotive/... (automotive)
 
 
 @app.get("/")
