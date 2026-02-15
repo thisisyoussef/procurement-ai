@@ -45,10 +45,19 @@ async def create_project(
         await db.flush()
     else:
         _in_memory_projects[project_id] = {
-            "id": project_id,
+            "project_id": project_id,
             "raw_request": raw_request,
             "current_stage": "parse",
             "status": "running",
+            "parsed_requirement": None,
+            "discovery_result": None,
+            "qualification_result": None,
+            "comparison_matrix": None,
+            "intelligence_reports": None,
+            "rfq_result": None,
+            "quote_ingestion": None,
+            "approvals": {},
+            "weight_profile": {},
             "buyer_company": buyer_company,
             "buyer_contact_name": buyer_contact_name,
             "buyer_contact_email": buyer_contact_email,
@@ -118,10 +127,37 @@ async def _run_pipeline(
         _update_project_state(project_id, {"status": "error", "current_stage": "error"}, db)
 
 
+# Keys from LangGraph state that map directly to project fields
+_STATE_KEYS = {
+    "current_stage", "parsed_requirement", "discovery_result",
+    "qualification_result", "comparison_matrix", "intelligence_reports",
+    "rfq_result", "quote_ingestion", "approvals", "weight_profile",
+}
+
+
 def _update_project_state(project_id: str, state: dict, db: AsyncSession | None) -> None:
-    """Update project state in memory (DB update happens via the session)."""
-    if project_id in _in_memory_projects:
-        _in_memory_projects[project_id].update(state)
+    """Update project state in memory from a LangGraph result dict.
+
+    Only copies recognised keys so that internal LangGraph bookkeeping
+    (messages, errors, human_overrides, etc.) doesn't leak into the
+    project record returned by the API.
+    """
+    if project_id not in _in_memory_projects:
+        return
+
+    proj = _in_memory_projects[project_id]
+    for key in _STATE_KEYS:
+        if key in state and state[key] is not None:
+            proj[key] = state[key]
+
+    # Infer status from stage
+    stage = state.get("current_stage", proj.get("current_stage"))
+    if stage == "error":
+        proj["status"] = "error"
+    elif stage == "complete":
+        proj["status"] = "complete"
+    else:
+        proj["status"] = "waiting_approval"
 
 
 async def get_project(db: AsyncSession | None, project_id: str) -> dict[str, Any] | None:

@@ -303,7 +303,27 @@ def build_graph() -> StateGraph:
     return graph
 
 
+_shared_checkpointer = None
+
+
+def _get_checkpointer():
+    """Return a shared MemorySaver for MVP (no DB).
+
+    In production, replace with PostgresSaver for durable checkpoints.
+    """
+    global _shared_checkpointer
+    if _shared_checkpointer is None:
+        from langgraph.checkpoint.memory import MemorySaver
+        _shared_checkpointer = MemorySaver()
+    return _shared_checkpointer
+
+
 def compile_graph(checkpointer=None):
-    """Compile the graph with optional checkpointer for persistence."""
+    """Compile the graph with checkpointer for interrupt/resume support.
+
+    Uses a shared in-memory checkpointer by default so HITL interrupt()
+    gates work correctly and the graph can be resumed via Command(resume=...).
+    """
     graph = build_graph()
-    return graph.compile(checkpointer=checkpointer)
+    cp = checkpointer if checkpointer is not None else _get_checkpointer()
+    return graph.compile(checkpointer=cp)
