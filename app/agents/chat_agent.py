@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
-from app.core.llm_gateway import call_llm_stream
+from app.core.llm_gateway import call_llm_stream, call_llm_structured
+from app.schemas.buyer_context import BuyerContext
 from app.schemas.agent_state import ChatAction
+from app.schemas.agent_state import ParsedQuote
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -196,3 +198,51 @@ async def chat_with_context(
         temperature=0.3,
     ):
         yield chunk
+
+
+async def generate_quote_context(
+    quote: ParsedQuote,
+    other_quotes: list[ParsedQuote],
+    market_intelligence: dict | None,
+    buyer_context: BuyerContext,
+) -> str:
+    """Generate proactive advisor-style context when a quote arrives."""
+    peer_quotes = [
+        {
+            "supplier_name": q.supplier_name,
+            "unit_price": q.unit_price,
+            "lead_time": q.lead_time,
+            "currency": q.currency,
+            "confidence_score": q.confidence_score,
+        }
+        for q in other_quotes
+        if q.supplier_name != quote.supplier_name
+    ][:5]
+
+    prompt = f"""A new supplier quote arrived. Write a concise, advisor-style update for the buyer.
+
+New quote:
+{quote.model_dump_json(indent=2)}
+
+Other quotes:
+{json.dumps(peer_quotes, indent=2)}
+
+Market intelligence:
+{json.dumps(market_intelligence or {}, indent=2)}
+
+Buyer context:
+{buyer_context.model_dump_json(indent=2)}
+
+Return 2-4 sentences. Include what this quote means relative to alternatives and one clear next action."""
+
+    try:
+        text = await call_llm_structured(
+            prompt=prompt,
+            system="You are Tamkin, a procurement advisor. Be specific, concise, and decision-oriented.",
+            model=settings.model_balanced,
+            max_tokens=500,
+        )
+        return text.strip()
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to generate quote context", exc_info=True)
+        return ""

@@ -1,18 +1,41 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { useChat } from '@/hooks/useChat'
+import { Phase } from '@/types/pipeline'
 
-const QUICK_ACTIONS = [
-  'Why this ranking?',
-  'Prioritize speed over price',
-  'Show me budget options',
-  'Draft outreach emails for top 3',
-]
+const PHASE_ACTIONS: Record<Phase, string[]> = {
+  brief: [
+    'Help me describe my product better',
+    'What info helps you find better suppliers?',
+  ],
+  search: [
+    'Focus on direct manufacturers only',
+    'Add more suppliers from Europe',
+    'Why did you filter these out?',
+  ],
+  compare: [
+    'Why this ranking?',
+    'Prioritize speed over price',
+    'Show me budget options',
+  ],
+  outreach: [
+    'Draft a follow-up for non-responders',
+    'Change my message tone to more formal',
+  ],
+  samples: [
+    'What should I look for in samples?',
+    'How do I evaluate sample quality?',
+  ],
+  order: [
+    'Help me negotiate better terms',
+    'What should a purchase order include?',
+  ],
+}
 
 export default function InputBar() {
-  const { projectId, refreshStatus } = useWorkspace()
+  const { projectId, refreshStatus, activePhase } = useWorkspace()
   const chat = useChat(projectId, { onResultsUpdated: refreshStatus })
   const [showHistory, setShowHistory] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -113,7 +136,7 @@ export default function InputBar() {
       {/* ── Quick Actions ─────────────────────── */}
       {chat.messages.length === 0 && !chat.isStreaming && (
         <div className="px-12 pt-3 flex flex-wrap gap-1.5">
-          {QUICK_ACTIONS.map((action) => (
+          {(PHASE_ACTIONS[activePhase] || PHASE_ACTIONS.compare).map((action) => (
             <button
               key={action}
               onClick={() => handleQuickAction(action)}

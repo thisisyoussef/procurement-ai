@@ -7,7 +7,9 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
+from app.schemas.buyer_context import BuyerContext
 from app.schemas.agent_state import ParsedQuote, ParsedRequirements
+from app.schemas.user_profile import UserSourcingProfile
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -20,6 +22,8 @@ async def parse_supplier_response(
     supplier_index: int,
     response_text: str,
     requirements: ParsedRequirements,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> ParsedQuote:
     """Parse a supplier's email response into structured quote data."""
     logger.info("Parsing response from %s (%d chars)", supplier_name, len(response_text))
@@ -30,7 +34,14 @@ async def parse_supplier_response(
         "material": requirements.material,
     }
 
+    context_block = ""
+    if buyer_context:
+        context_block += f"\n## Buyer Context\n{buyer_context.model_dump_json(indent=2)}\n"
+    if user_profile:
+        context_block += f"\n## User Sourcing Profile\n{user_profile.model_dump_json(indent=2)}\n"
+
     prompt = f"""Extract structured quote data from this supplier's response.
+{context_block}
 
 ## Supplier: {supplier_name}
 

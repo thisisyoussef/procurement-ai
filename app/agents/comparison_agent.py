@@ -8,6 +8,7 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
 from app.core.progress import emit_progress
+from app.schemas.buyer_context import BuyerContext
 from app.schemas.agent_state import (
     ComparisonResult,
     DiscoveredSupplier,
@@ -15,6 +16,8 @@ from app.schemas.agent_state import (
     SupplierComparison,
     VerificationResults,
 )
+from app.schemas.user_profile import UserSourcingProfile
+from app.services.feedback_bus import FeedbackSignal, emit_feedback
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -178,6 +181,8 @@ async def compare_suppliers(
     requirements: ParsedRequirements,
     suppliers: list[DiscoveredSupplier],
     verifications: VerificationResults,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> ComparisonResult:
     """
     Generate a side-by-side comparison of verified suppliers.
@@ -190,7 +195,23 @@ async def compare_suppliers(
 
     # Second-pass relevance gate: remove off-category suppliers that slipped
     # through discovery scoring (e.g. tire companies when searching for gumballs)
+    suppliers_before_gate = suppliers
     suppliers = _relevance_gate(suppliers, requirements)
+    if len(suppliers) < len(suppliers_before_gate):
+        removed = {
+            s.name for s in suppliers_before_gate
+            if all(s.name != kept.name for kept in suppliers)
+        }
+        for name in sorted(removed):
+            await emit_feedback(
+                FeedbackSignal(
+                    source_agent="comparison_agent",
+                    target="supplier",
+                    signal_type="off_category",
+                    supplier_name=name,
+                    data={"product_type": requirements.product_type},
+                )
+            )
     if not suppliers:
         logger.warning("Relevance gate removed ALL suppliers — returning empty comparison")
         return ComparisonResult(
@@ -240,8 +261,15 @@ async def compare_suppliers(
 
     logger.info("📊 Comparing %d suppliers (%d viable, %d rejected)", len(suppliers), len(viable), rejected_count)
 
+    context_block = ""
+    if buyer_context:
+        context_block += f"\nBuyer context:\n{buyer_context.model_dump_json(indent=2)}\n"
+    if user_profile:
+        context_block += f"\nUser sourcing profile:\n{user_profile.model_dump_json(indent=2)}\n"
+
     prompt = f"""Product requirements:
 {requirements.model_dump_json(indent=2)}
+{context_block}
 
 Verified supplier profiles (total={len(supplier_profiles)}, viable={len(viable)}, rejected={rejected_count}, showing top {min(len(viable), 15)}):
 {json.dumps(viable[:15], indent=2, default=str)}

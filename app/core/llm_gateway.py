@@ -44,6 +44,7 @@ async def call_llm(
     max_tokens: int = 4096,
     temperature: float = 0.0,
     tools: list[dict] | None = None,
+    tool_choice: dict | None = None,
 ) -> anthropic.types.Message:
     """Unified LLM call with model routing and cost tracking."""
     global _total_input_tokens, _total_output_tokens, _total_cost_usd
@@ -72,6 +73,8 @@ async def call_llm(
         kwargs["system"] = system
     if tools:
         kwargs["tools"] = tools
+    if tool_choice:
+        kwargs["tool_choice"] = tool_choice
 
     start = time.time()
     response = await client.messages.create(**kwargs)
@@ -93,6 +96,36 @@ async def call_llm(
     )
 
     return response
+
+
+async def call_llm_with_tools(
+    prompt: str,
+    tools: list[dict],
+    system_prompt: str = "",
+    model: str | None = None,
+    max_tokens: int = 8192,
+    temperature: float = 0.2,
+) -> dict:
+    """Call Claude with tool-use and return structured tool payload."""
+    response = await call_llm(
+        messages=[{"role": "user", "content": prompt}],
+        model=model,
+        system=system_prompt or None,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tools=tools,
+        tool_choice={"type": "any"},
+    )
+
+    for block in response.content:
+        if block.type == "tool_use":
+            payload = getattr(block, "input", None)
+            if isinstance(payload, dict):
+                return payload
+            if payload is not None:
+                return {"result": payload}
+
+    raise ValueError("No tool_use block in response")
 
 
 async def call_llm_structured(

@@ -6,6 +6,32 @@ export interface ProgressEvent {
   timestamp: number
 }
 
+export type CheckpointType =
+  | 'confirm_requirements'
+  | 'review_suppliers'
+  | 'set_confidence_gate'
+  | 'adjust_weights'
+  | 'outreach_preferences'
+
+export interface ContextQuestion {
+  field: string
+  question: string
+  context: string
+  options?: string[]
+  default?: string | null
+}
+
+export interface CheckpointEvent {
+  checkpoint_type: CheckpointType
+  summary: string
+  next_stage_preview: string
+  context_questions: ContextQuestion[]
+  adjustable_parameters: Record<string, unknown>
+  auto_continue_seconds: number
+  requires_explicit_approval: boolean
+  timestamp: number
+}
+
 export type DecisionLane =
   | 'best_overall'
   | 'best_low_risk'
@@ -80,6 +106,15 @@ export interface PipelineStatus {
   progress_events?: ProgressEvent[]
   clarifying_questions?: ClarifyingQuestion[] | null
   decision_preference?: DecisionLane | null
+  buyer_context?: Record<string, unknown> | null
+  active_checkpoint?: CheckpointEvent | null
+  proactive_alerts?: Array<{
+    id: string
+    title: string
+    message: string
+    severity?: string
+    created_at?: number
+  }>
 }
 
 export type Phase = 'brief' | 'search' | 'outreach' | 'compare' | 'samples' | 'order'
@@ -90,6 +125,7 @@ export function stageToPhase(stage: string): Phase {
   switch (stage) {
     case 'parsing':
     case 'clarifying':
+    case 'steering':
       return 'brief'
     case 'discovering':
     case 'verifying':

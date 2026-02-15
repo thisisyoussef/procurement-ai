@@ -1,13 +1,14 @@
 """Sourcing project API request/response schemas."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from app.schemas.agent_state import (
     ChatMessage,
+    CheckpointEvent,
     ComparisonResult,
     DiscoveryResults,
     OutreachState,
@@ -62,6 +63,10 @@ class PipelineStatusResponse(BaseModel):
     outreach_state: OutreachState | None = None
     progress_events: list[dict] = Field(default_factory=list)
     clarifying_questions: list[dict] | None = None
+    decision_preference: str | None = None
+    buyer_context: dict[str, Any] | None = None
+    active_checkpoint: CheckpointEvent | None = None
+    proactive_alerts: list[dict] = Field(default_factory=list)
 
 
 # ── Chat request/response ──────────────────────────────────────
@@ -104,6 +109,10 @@ class OutreachCancelPendingRequest(BaseModel):
 class ClarifyingAnswerRequest(BaseModel):
     """User's answers to clarifying questions."""
     answers: dict[str, str] = Field(description="Mapping of field name to answer text")
+
+
+class ProjectDecisionPreferenceRequest(BaseModel):
+    lane_preference: Literal["best_overall", "best_low_risk", "best_speed_to_order"]
 
 
 class ProjectRestartRequest(BaseModel):

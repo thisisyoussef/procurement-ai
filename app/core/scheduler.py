@@ -19,6 +19,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
+from app.schemas.user_profile import UserSourcingProfile
+from app.services.proactive_intelligence import check_seasonal_alerts
 from app.services.communication_monitor import (
     ensure_monitor,
     mark_inbound_message_parsed,
@@ -72,12 +74,14 @@ class OutreachScheduler:
                 "follow_ups": 0,
                 "inbox_monitor": 0,
                 "phone_escalation": 0,
+                "proactive_intelligence": 0,
             },
             "last_run": {
                 "email_queue": None,
                 "follow_ups": None,
                 "inbox_monitor": None,
                 "phone_escalation": None,
+                "proactive_intelligence": None,
             },
             "errors": [],
         }
@@ -107,6 +111,10 @@ class OutreachScheduler:
         self._tasks["phone_escalation"] = asyncio.create_task(
             self._loop("phone_escalation", 3600, self._escalate_to_phone)
         )
+        if settings.enable_proactive_intelligence:
+            self._tasks["proactive_intelligence"] = asyncio.create_task(
+                self._loop("proactive_intelligence", 86400, self._run_proactive_intelligence)
+            )
 
         logger.info("OutreachScheduler started with %d background loops", len(self._tasks))
 
@@ -816,6 +824,33 @@ class OutreachScheduler:
                             },
                         ))
 
+                        # Proactive quote contextualization for chat timeline.
+                        try:
+                            from app.agents.chat_agent import generate_quote_context
+                            from app.schemas.buyer_context import BuyerContext
+
+                            quote_context = await generate_quote_context(
+                                quote=quote,
+                                other_quotes=outreach.parsed_quotes,
+                                market_intelligence=(project.get("discovery_results") or {}).get("market_intelligence"),
+                                buyer_context=BuyerContext(**(project.get("buyer_context") or {})),
+                            )
+                            if quote_context:
+                                project.setdefault("chat_messages", []).append(
+                                    {
+                                        "role": "assistant",
+                                        "content": quote_context,
+                                        "timestamp": time.time(),
+                                        "metadata": {
+                                            "kind": "proactive_quote_context",
+                                            "supplier_index": supplier_idx,
+                                            "supplier_name": supplier_name,
+                                        },
+                                    }
+                                )
+                        except Exception:
+                            logger.debug("Quote contextualization failed", exc_info=True)
+
                         logger.info(
                             "Scheduler: Auto-parsed response from %s (confidence: %.0f)",
                             supplier_name, quote.confidence_score,
@@ -928,6 +963,41 @@ class OutreachScheduler:
                     logger.error("Scheduler: Phone escalation failed for %s: %s", supplier.name, e)
 
             await self._save_outreach_state(project, outreach)
+
+    # ── Loop 5: Proactive intelligence ────────────────────────
+
+    async def _run_proactive_intelligence(self):
+        """Generate periodic proactive alerts for active users/projects."""
+        projects = await self._list_projects()
+        if not projects:
+            return
+
+        for project in projects:
+            if str(project.get("status")) not in {"discovering", "verifying", "comparing", "recommending", "outreaching", "complete"}:
+                continue
+
+            try:
+                raw_profile = project.get("user_sourcing_profile") or {}
+                profile = UserSourcingProfile(**raw_profile) if raw_profile else UserSourcingProfile()
+            except Exception:
+                profile = UserSourcingProfile()
+
+            alerts = check_seasonal_alerts(profile)
+            if not alerts:
+                continue
+
+            existing = project.get("proactive_alerts") or []
+            existing_ids = {item.get("id") for item in existing if isinstance(item, dict)}
+            appended = False
+            for alert in alerts:
+                if alert.id in existing_ids:
+                    continue
+                existing.append(alert.model_dump(mode="json"))
+                appended = True
+
+            if appended:
+                project["proactive_alerts"] = existing
+                await self._save_project(project)
 
     # ── Manual trigger ──────────────────────────────────────────
 

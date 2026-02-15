@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     project_store_fallback_inmemory: bool = True
     auth_jwt_ttl_hours: int = 720
     feature_focus_circle_search_v1: bool = False
+    enable_multi_team_discovery: bool = False
+    enable_checkpoints: bool = False
+    enable_tool_use_output: bool = False
+    enable_buyer_context: bool = False
+    enable_proactive_intelligence: bool = False
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/procurement"

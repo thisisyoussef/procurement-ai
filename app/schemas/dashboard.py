@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.proactive import ProactiveAlert
 
 class DashboardGreeting(BaseModel):
     time_label: str
@@ -61,6 +62,7 @@ class DashboardSummaryResponse(BaseModel):
     attention: list[DashboardAttentionItem] = Field(default_factory=list)
     projects: list[DashboardProjectCard] = Field(default_factory=list)
     recent_activity: list[DashboardActivityItem] = Field(default_factory=list)
+    proactive_alerts: list[ProactiveAlert] = Field(default_factory=list)
 
 
 class DashboardActivityResponse(BaseModel):

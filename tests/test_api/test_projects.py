@@ -150,6 +150,7 @@ def test_restart_project_from_discovering_resets_downstream_state():
         "progress_events": [],
         "clarifying_questions": None,
         "user_answers": None,
+        "decision_preference": "best_low_risk",
     }
 
     with patch("app.api.v1.projects._resume_pipeline_task", new=AsyncMock()):
@@ -170,6 +171,7 @@ def test_restart_project_from_discovering_resets_downstream_state():
     assert updated["comparison_result"] is None
     assert updated["recommendation_result"] is None
     assert updated["outreach_state"] is None
+    assert updated["decision_preference"] is None
 
 
 def test_restart_with_additional_context_forces_parsing():
@@ -209,6 +211,7 @@ def test_restart_with_additional_context_forces_parsing():
         "progress_events": [],
         "clarifying_questions": None,
         "user_answers": None,
+        "decision_preference": "best_overall",
     }
 
     with patch("app.api.v1.projects._run_pipeline_task", new=AsyncMock()):
@@ -229,3 +232,81 @@ def test_restart_with_additional_context_forces_parsing():
     assert updated["status"] == "parsing"
     assert "Additional context" in updated["product_description"]
     assert updated["parsed_requirements"] is None
+    assert updated["decision_preference"] is None
+
+
+def test_status_includes_decision_preference():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000111"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Decision Preference",
+        "product_description": "Need custom packaging",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+        "decision_preference": "best_speed_to_order",
+    }
+
+    response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["decision_preference"] == "best_speed_to_order"
+
+
+def test_set_decision_preference_endpoint_auth_ownership_and_validation():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000112"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Decision Preference",
+        "product_description": "Need custom packaging",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+        "decision_preference": None,
+    }
+
+    ok_response = client.post(
+        f"/api/v1/projects/{project_id}/decision-preference",
+        json={"lane_preference": "best_low_risk"},
+        headers=_auth_headers(),
+    )
+    assert ok_response.status_code == 200
+    assert ok_response.json()["lane_preference"] == "best_low_risk"
+    assert _projects[project_id]["decision_preference"] == "best_low_risk"
+
+    forbidden_response = client.post(
+        f"/api/v1/projects/{project_id}/decision-preference",
+        json={"lane_preference": "best_overall"},
+        headers=_auth_headers("00000000-0000-0000-0000-000000000099"),
+    )
+    assert forbidden_response.status_code == 403
+
+    invalid_response = client.post(
+        f"/api/v1/projects/{project_id}/decision-preference",
+        json={"lane_preference": "not_a_lane"},
+        headers=_auth_headers(),
+    )
+    assert invalid_response.status_code == 422

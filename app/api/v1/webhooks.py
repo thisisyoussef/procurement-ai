@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.email_service import verify_webhook_signature
 from app.schemas.agent_state import EmailDeliveryEvent, OutreachState
 from app.services.communication_monitor import apply_delivery_event, ensure_monitor
+from app.services.feedback_bus import FeedbackSignal, emit_feedback
 from app.services.project_store import StoreUnavailableError, get_project_store
 from app.services.supplier_memory import record_supplier_interaction
 
@@ -130,6 +131,21 @@ async def resend_webhook(request: Request):
             source="webhook_resend",
             details={"event_type": event_type, "delivery_status": delivery_status, "email_id": email_id},
         )
+        if delivery_status == "bounced":
+            supplier_name = None
+            for status in outreach.supplier_statuses:
+                if status.supplier_index == supplier_index:
+                    supplier_name = status.supplier_name
+                    break
+            await emit_feedback(
+                FeedbackSignal(
+                    source_agent="outreach_webhook",
+                    target="supplier",
+                    signal_type="bounce",
+                    supplier_name=supplier_name,
+                    data={"email_id": email_id},
+                )
+            )
     await _save_project(project)
 
     logger.info(

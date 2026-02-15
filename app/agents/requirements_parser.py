@@ -12,9 +12,11 @@ import re
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.core.llm_gateway import call_llm_structured
+from app.core.llm_gateway import call_llm_structured, call_llm_with_tools
 from app.core.progress import emit_progress
 from app.schemas.agent_state import ParsedRequirements
+from app.schemas.buyer_context import BuyerContext
+from app.schemas.user_profile import UserSourcingProfile
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -274,7 +276,46 @@ def _apply_domain_guardrails(raw_description: str, data: dict) -> dict:
     return data
 
 
-async def parse_requirements(raw_description: str) -> ParsedRequirements:
+def _requirements_tool_schema() -> list[dict]:
+    return [
+        {
+            "name": "submit_requirements",
+            "description": "Submit structured parsed procurement requirements.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "product_type": {"type": "string"},
+                    "material": {"type": ["string", "null"]},
+                    "dimensions": {"type": ["string", "null"]},
+                    "quantity": {"type": ["integer", "null"]},
+                    "customization": {"type": ["string", "null"]},
+                    "delivery_location": {"type": ["string", "null"]},
+                    "deadline": {"type": ["string", "null"]},
+                    "certifications_needed": {"type": "array", "items": {"type": "string"}},
+                    "budget_range": {"type": ["string", "null"]},
+                    "missing_fields": {"type": "array", "items": {"type": "string"}},
+                    "search_queries": {"type": "array", "items": {"type": "string"}},
+                    "regional_searches": {"type": "array"},
+                    "clarifying_questions": {"type": "array"},
+                    "sourcing_strategy": {"type": ["string", "null"]},
+                    "sourcing_preference": {"type": ["string", "null"]},
+                    "risk_tolerance": {"type": ["string", "null"]},
+                    "priority_tradeoff": {"type": ["string", "null"]},
+                    "minimum_supplier_count": {"type": ["integer", "null"]},
+                    "evidence_strictness": {"type": ["string", "null"]},
+                },
+                "required": ["product_type"],
+                "additionalProperties": True,
+            },
+        }
+    ]
+
+
+async def parse_requirements(
+    raw_description: str,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
+) -> ParsedRequirements:
     """Parse a natural language product description into structured requirements.
 
     Uses Sonnet for enhanced reasoning — regional strategy, clarifying questions,
@@ -282,6 +323,18 @@ async def parse_requirements(raw_description: str) -> ParsedRequirements:
     """
     logger.info("📋 Parsing requirements from: '%s'", raw_description[:100])
     emit_progress("parsing", "analyzing", "Analyzing your requirements...")
+
+    context_block = ""
+    if buyer_context:
+        context_block += f"""
+Buyer context:
+{buyer_context.model_dump_json(indent=2)}
+"""
+    if user_profile:
+        context_block += f"""
+User profile:
+{user_profile.model_dump_json(indent=2)}
+"""
 
     prompt = f"""Parse the sourcing request into structured JSON using ONLY this user input.
 
@@ -294,48 +347,72 @@ Hard rules:
 
 User input:
 {raw_description}
+{context_block}
 
 Return only valid JSON matching the schema in the system prompt."""
 
-    # Use Sonnet (balanced) — regional strategy + clarifying questions need reasoning
-    logger.info("Calling LLM (model: %s)...", settings.model_balanced)
-    response_text = await call_llm_structured(
-        prompt=prompt,
-        system=SYSTEM_PROMPT,
-        model=settings.model_balanced,
-        max_tokens=3000,
-    )
+    data: dict | None = None
+    if settings.enable_tool_use_output:
+        try:
+            logger.info("Calling LLM with tool-use (model: %s)...", settings.model_balanced)
+            tool_data = await call_llm_with_tools(
+                prompt=prompt,
+                tools=_requirements_tool_schema(),
+                system_prompt=SYSTEM_PROMPT,
+                model=settings.model_balanced,
+                max_tokens=3500,
+                temperature=0.0,
+            )
+            data = tool_data.get("parsed") if isinstance(tool_data.get("parsed"), dict) else tool_data
+        except Exception:
+            logger.warning("Tool-use parsing failed, falling back to JSON mode", exc_info=True)
+
+    response_text = ""
+    if data is None:
+        # Use Sonnet (balanced) — regional strategy + clarifying questions need reasoning
+        logger.info("Calling LLM (model: %s)...", settings.model_balanced)
+        response_text = await call_llm_structured(
+            prompt=prompt,
+            system=SYSTEM_PROMPT,
+            model=settings.model_balanced,
+            max_tokens=3000,
+        )
     emit_progress("parsing", "structuring",
                   "Structuring product type, quantity, and quality requirements...",
                   progress_pct=50)
-    logger.info("Got LLM response (%d chars), parsing JSON...", len(response_text))
+    if response_text:
+        logger.info("Got LLM response (%d chars), parsing JSON...", len(response_text))
 
     # Parse JSON from response
-    try:
-        # Handle potential markdown code blocks
-        text = response_text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-        data = json.loads(text)
-        logger.info("✅ Parsed: product_type=%s, quantity=%s, %d search queries, %d regional searches, %d questions",
-                     data.get("product_type"), data.get("quantity"),
-                     len(data.get("search_queries", [])),
-                     len(data.get("regional_searches", [])),
-                     len(data.get("clarifying_questions", [])))
-    except json.JSONDecodeError:
-        logger.warning("JSON parse failed, trying regex fallback...")
-        import re
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            logger.info("Regex fallback succeeded")
-        else:
-            logger.error("❌ Could not parse requirements from LLM response")
-            return ParsedRequirements(
-                product_type="unknown",
-                missing_fields=["all_fields"],
-                search_queries=[raw_description + " manufacturer"],
-            )
+    if data is None:
+        try:
+            # Handle potential markdown code blocks
+            text = response_text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            data = json.loads(text)
+            logger.info("✅ Parsed: product_type=%s, quantity=%s, %d search queries, %d regional searches, %d questions",
+                         data.get("product_type"), data.get("quantity"),
+                         len(data.get("search_queries", [])),
+                         len(data.get("regional_searches", [])),
+                         len(data.get("clarifying_questions", [])))
+        except json.JSONDecodeError:
+            logger.warning("JSON parse failed, trying regex fallback...")
+            import re
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                logger.info("Regex fallback succeeded")
+            else:
+                logger.error("❌ Could not parse requirements from LLM response")
+                return ParsedRequirements(
+                    product_type="unknown",
+                    missing_fields=["all_fields"],
+                    search_queries=[raw_description + " manufacturer"],
+                )
+
+    if not isinstance(data, dict):
+        data = {}
 
     product_type = data.get("product_type", "unknown")
     quantity = data.get("quantity")

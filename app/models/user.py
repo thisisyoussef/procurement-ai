@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -27,6 +27,8 @@ class User(Base):
     business_address: Mapped[str | None] = mapped_column(String(1000))
     company_description: Mapped[str | None] = mapped_column(String(2000))
     onboarding_completed: Mapped[bool] = mapped_column(default=False)
+    sourcing_profile: Mapped[dict | None] = mapped_column(JSONB)
+    default_buyer_context: Mapped[dict | None] = mapped_column(JSONB)
     plan: Mapped[str] = mapped_column(String(50), default="free_trial")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

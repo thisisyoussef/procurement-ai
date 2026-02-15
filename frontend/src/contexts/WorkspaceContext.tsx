@@ -112,7 +112,9 @@ function normalizeProjectId(value: string | null | undefined): string | null {
 
 function shouldContinuePolling(status: PipelineStatus): boolean {
   if (TERMINAL_STATUSES.has(status.status)) return false
-  return status.status !== 'clarifying'
+  // Pause polling on clarifying; slow-poll on steering (checkpoint auto-continues)
+  if (status.status === 'clarifying') return false
+  return true
 }
 
 function applyStatus(state: WorkspaceState, status: PipelineStatus): WorkspaceState {

@@ -256,11 +256,30 @@ class DiscoveredSupplier(BaseModel):
     logo_url: str | None = None
     product_images: list[str] = Field(default_factory=list)
     enrichment: ContactEnrichmentResult | None = None
+    # Multi-team discovery scores (Phase 2)
+    discovery_teams: list[str] = Field(default_factory=list)
+    manufacturing_confidence: float = 0.0
+    market_position: float = 0.0
+    regional_depth_score: float = 0.0
+    trust_level: float = 0.0
+    logistics_fit: float = 0.0
+    cross_reference_count: int = 0
     filtered_reason: str | None = Field(
         None,
         description="If set, supplier was filtered from main results. "
                     "Reason: 'retail_store', 'wrong_product_type', 'low_relevance'",
     )
+
+
+class MarketIntelligence(BaseModel):
+    """Market context synthesized during discovery."""
+
+    price_range_low: str | None = None
+    price_range_high: str | None = None
+    typical_moq_range: str | None = None
+    dominant_regions: list[str] = Field(default_factory=list)
+    common_certifications: list[str] = Field(default_factory=list)
+    market_maturity: str = "unknown"
 
 
 class DiscoveryResults(BaseModel):
@@ -278,6 +297,11 @@ class DiscoveryResults(BaseModel):
         default_factory=list,
         description="Suppliers that didn't make the main list, with filter reasons",
     )
+    market_intelligence: MarketIntelligence | None = None
+    team_reports: list[dict[str, Any]] = Field(default_factory=list)
+    cross_reference_boost: dict[str, float] = Field(default_factory=dict)
+    coverage_gaps: list[str] = Field(default_factory=list)
+    discovery_briefing: str = ""
 
 
 # ── Agent C: Verification output ────────────────────────────────
@@ -365,6 +389,7 @@ class RecommendationResult(BaseModel):
     """Output from the Recommendation agent."""
     recommendations: list[SupplierRecommendation] = Field(default_factory=list)
     executive_summary: str = ""
+    narrative_briefing: str = ""
     caveats: list[str] = Field(default_factory=list)
     decision_checkpoint_summary: str = ""
     elimination_rationale: str | None = None
@@ -379,11 +404,53 @@ class PipelineStage(str, Enum):
     CLARIFYING = "clarifying"
     DISCOVERING = "discovering"
     VERIFYING = "verifying"
+    STEERING = "steering"
     COMPARING = "comparing"
     RECOMMENDING = "recommending"
     OUTREACHING = "outreaching"
     COMPLETE = "complete"
     FAILED = "failed"
+
+
+class CheckpointType(str, Enum):
+    CONFIRM_REQUIREMENTS = "confirm_requirements"
+    REVIEW_SUPPLIERS = "review_suppliers"
+    SET_CONFIDENCE_GATE = "set_confidence_gate"
+    ADJUST_WEIGHTS = "adjust_weights"
+    OUTREACH_PREFERENCES = "outreach_preferences"
+
+
+class ContextQuestion(BaseModel):
+    """A contextual question asked at a checkpoint."""
+
+    field: str
+    question: str
+    context: str
+    options: list[str] = Field(default_factory=list)
+    default: str | None = None
+
+
+class CheckpointEvent(BaseModel):
+    """Emitted when a pipeline stage completes and offers steering."""
+
+    checkpoint_type: CheckpointType
+    summary: str
+    next_stage_preview: str
+    context_questions: list[ContextQuestion] = Field(default_factory=list)
+    adjustable_parameters: dict[str, Any] = Field(default_factory=dict)
+    auto_continue_seconds: int = 30
+    requires_explicit_approval: bool = False
+    timestamp: float = Field(default_factory=time.time)
+
+
+class CheckpointResponse(BaseModel):
+    """User response payload for a checkpoint."""
+
+    checkpoint_type: CheckpointType
+    answers: dict[str, Any] = Field(default_factory=dict)
+    parameter_overrides: dict[str, Any] = Field(default_factory=dict)
+    action: str = "continue"  # continue | redirect | pause | restart_stage
+    redirect_instructions: str | None = None
 
 
 class PipelineState(BaseModel):
@@ -408,6 +475,10 @@ class PipelineState(BaseModel):
     verification_results: VerificationResults | None = None
     comparison_result: ComparisonResult | None = None
     recommendation_result: RecommendationResult | None = None
+    buyer_context: dict[str, Any] | None = None
+    user_sourcing_profile: dict[str, Any] | None = None
+    active_checkpoint: CheckpointEvent | None = None
+    checkpoint_responses: dict[str, CheckpointResponse] = Field(default_factory=dict)
 
 
 # ── Chat models ────────────────────────────────────────────────

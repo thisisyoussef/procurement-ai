@@ -162,9 +162,17 @@ async def search_supplier_memory_candidates(
     try:
         async with async_session_factory() as session:
             rows = await repo.search_supplier_memory(session, requirements, limit=limit)
+            semantic_rows = await repo.search_supplier_memory_semantic(session, requirements, limit=limit)
     except Exception:  # noqa: BLE001
         logger.warning("Supplier memory query failed", exc_info=True)
         return []
+
+    if semantic_rows:
+        existing_ids = {str(row.id) for row, _ in rows}
+        for supplier_row, semantic_score in semantic_rows:
+            if str(supplier_row.id) in existing_ids:
+                continue
+            rows.append((supplier_row, max(1, int(semantic_score * 10))))
 
     suppliers: list[DiscoveredSupplier] = []
     for supplier_row, interaction_count in rows:

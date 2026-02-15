@@ -9,6 +9,8 @@ import ComparePhase from './phases/ComparePhase'
 import SamplesPhase from './phases/SamplesPhase'
 import OrderPhase from './phases/OrderPhase'
 import LiveProgressFeed from './LiveProgressFeed'
+import CheckpointBanner from './CheckpointBanner'
+import StageTransitionToast from './StageTransitionToast'
 import SupplierProfileView from './supplier-profile/SupplierProfileView'
 import { AnimatePresence, m } from '@/lib/motion'
 import { phaseTransition } from '@/lib/motion/variants'
@@ -33,6 +35,8 @@ export default function CenterStage() {
 
   return (
     <>
+      <StageTransitionToast />
+
       {/* Backend offline warning */}
       {backendOk === false && (
         <div className="mx-6 mt-6 card border-l-[3px] border-l-red-400 px-5 py-4">
@@ -51,6 +55,7 @@ export default function CenterStage() {
         />
       ) : (
         <>
+          <CheckpointBanner />
           <LiveProgressFeed />
           <AnimatePresence mode="wait">
             <m.div

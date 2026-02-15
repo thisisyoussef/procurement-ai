@@ -157,7 +157,16 @@ class InMemoryProjectStore(BaseProjectStore):
         return event_id
 
     async def recover_stale_runs(self) -> int:
-        running = {"parsing", "clarifying", "discovering", "verifying", "comparing", "recommending"}
+        running = {
+            "parsing",
+            "clarifying",
+            "discovering",
+            "verifying",
+            "steering",
+            "comparing",
+            "recommending",
+            "outreaching",
+        }
         recovered = 0
         for project in self.projects.values():
             if project.get("status") not in running:

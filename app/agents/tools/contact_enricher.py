@@ -387,6 +387,7 @@ CHEAP_TIERS = {"contact_page_scrape", "firecrawl_extract"}
 async def enrich_supplier_contacts(
     supplier: DiscoveredSupplier,
     aggressive: bool = True,
+    priority: str | None = None,
 ) -> DiscoveredSupplier:
     """Run the waterfall contact enrichment pipeline on a single supplier.
 
@@ -396,8 +397,9 @@ async def enrich_supplier_contacts(
 
     Args:
         supplier: The supplier to enrich.
-        aggressive: If True, try all tiers including paid APIs.
+        aggressive: Legacy mode. If True, try all tiers including paid APIs.
                     If False, only try cheap tiers (1, 2).
+        priority: Optional adaptive mode: low | normal | high.
 
     Returns:
         The supplier with updated contact info and enrichment metadata.
@@ -407,6 +409,16 @@ async def enrich_supplier_contacts(
     result = ContactEnrichmentResult()
 
     # If supplier already has a good email, just validate and return
+    if supplier.email and supplier.phone and _is_valid_email(supplier.email):
+        logger.info("  Supplier already has email and phone — skipping enrichment")
+        result.best_email = supplier.email
+        result.best_phone = supplier.phone
+        result.enrichment_confidence = 95.0
+        result.sources_tried = ["existing_complete"]
+        result.sources_succeeded = ["existing_complete"]
+        supplier.enrichment = result
+        return supplier
+
     if supplier.email and _is_valid_email(supplier.email):
         logger.info("  Supplier already has email: %s — skipping enrichment", supplier.email)
         result.best_email = supplier.email
@@ -418,20 +430,40 @@ async def enrich_supplier_contacts(
         return supplier
 
     # Define the tier pipeline
-    tiers = [
-        ("contact_page_scrape", _tier1_scrape_contact_pages),
-        ("firecrawl_extract", _tier2_firecrawl_extract),
-    ]
-
-    if aggressive:
-        if settings.browserbase_api_key or settings.browserless_api_key:
-            tiers.append(("visual_analysis", _tier3_visual_analysis))
-
-        if settings.hunter_api_key:
-            tiers.append(("hunter_io", _tier4_hunter_io))
-
-        # Google search uses Firecrawl credits
-        tiers.append(("google_search", _tier5_google_search))
+    tiers = []
+    if priority:
+        mode = priority.strip().lower()
+        if mode == "low":
+            tiers = [
+                ("contact_page_scrape", _tier1_scrape_contact_pages),
+                ("google_search", _tier5_google_search),
+            ]
+        elif mode == "normal":
+            tiers = [("contact_page_scrape", _tier1_scrape_contact_pages)]
+            if settings.browserbase_api_key or settings.browserless_api_key:
+                tiers.append(("visual_analysis", _tier3_visual_analysis))
+            tiers.append(("google_search", _tier5_google_search))
+        else:  # high
+            tiers = [
+                ("contact_page_scrape", _tier1_scrape_contact_pages),
+                ("firecrawl_extract", _tier2_firecrawl_extract),
+            ]
+            if settings.browserbase_api_key or settings.browserless_api_key:
+                tiers.append(("visual_analysis", _tier3_visual_analysis))
+            if settings.hunter_api_key:
+                tiers.append(("hunter_io", _tier4_hunter_io))
+            tiers.append(("google_search", _tier5_google_search))
+    else:
+        tiers = [
+            ("contact_page_scrape", _tier1_scrape_contact_pages),
+            ("firecrawl_extract", _tier2_firecrawl_extract),
+        ]
+        if aggressive:
+            if settings.browserbase_api_key or settings.browserless_api_key:
+                tiers.append(("visual_analysis", _tier3_visual_analysis))
+            if settings.hunter_api_key:
+                tiers.append(("hunter_io", _tier4_hunter_io))
+            tiers.append(("google_search", _tier5_google_search))
 
     # Run the waterfall
     for tier_name, tier_fn in tiers:
@@ -509,3 +541,16 @@ async def enrich_supplier_contacts(
         )
 
     return supplier
+
+
+async def enrich_contact_adaptive(
+    supplier: DiscoveredSupplier,
+    priority: str = "normal",
+) -> ContactEnrichmentResult:
+    """Adaptive enrichment entrypoint used by verification/ranking stages."""
+    updated = await enrich_supplier_contacts(
+        supplier=supplier,
+        aggressive=(priority.strip().lower() == "high"),
+        priority=priority,
+    )
+    return updated.enrichment or ContactEnrichmentResult()

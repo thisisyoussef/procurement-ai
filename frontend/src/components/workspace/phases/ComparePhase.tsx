@@ -11,6 +11,9 @@ import { m, AnimatePresence } from '@/lib/motion'
 import { staggerContainer, cardEntrance } from '@/lib/motion/variants'
 import { EASE_OUT_EXPO, DURATION } from '@/lib/motion/config'
 import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
+import VerdictView from '@/components/workspace/compare/VerdictView'
+
+type CompareView = 'verdict' | 'full_comparison'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const PRIMARY_LANES: Array<Exclude<DecisionLane, 'alternative'>> = [
@@ -120,6 +123,7 @@ export default function ComparePhase() {
   } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const [compareView, setCompareView] = useState<CompareView>('verdict')
   const [selectedSupplierIndices, setSelectedSupplierIndices] = useState<number[]>([])
   const [selectedLane, setSelectedLane] = useState<Exclude<DecisionLane, 'alternative'>>(
     'best_overall'
@@ -361,8 +365,34 @@ export default function ComparePhase() {
     )
   }
 
+  // ─── Verdict View (default — recommendation-first) ────
+  if (compareView === 'verdict' && recommendation && suppliers) {
+    return (
+      <VerdictView
+        recommendation={recommendation}
+        suppliers={suppliers}
+        discoveryResults={status?.discovery_results}
+        verificationResults={verifications}
+        comparisonResult={comparison}
+        onApproveOutreach={() => void approveAndSendOutreach()}
+        onShowFullComparison={() => setCompareView('full_comparison')}
+        onOpenSupplierProfile={openSupplierProfile}
+        approvalLoading={approvalLoading}
+      />
+    )
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-10">
+      {/* ── Back to verdict view ────────────────── */}
+      {recommendation && (
+        <button
+          onClick={() => setCompareView('verdict')}
+          className="text-[12px] text-teal hover:text-teal-600 transition-colors flex items-center gap-1"
+        >
+          <span>&larr;</span> Back to recommendation
+        </button>
+      )}
       {/* ── Compare → Outreach touchpoint ─────── */}
       {recommendation && sorted.length > 0 && (
         <div className="card p-6 space-y-5">

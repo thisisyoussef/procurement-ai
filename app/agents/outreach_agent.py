@@ -14,6 +14,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
+from app.schemas.buyer_context import BuyerContext
 from app.schemas.agent_state import (
     AutoOutreachConfig,
     DraftEmail,
@@ -24,6 +25,7 @@ from app.schemas.agent_state import (
     SupplierVerification,
     VerificationResults,
 )
+from app.schemas.user_profile import UserSourcingProfile
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -36,6 +38,8 @@ async def draft_outreach_emails(
     requirements: ParsedRequirements,
     recommendations: RecommendationResult,
     business_profile: dict[str, str | None] | None = None,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> OutreachResult:
     """Draft personalized RFQ emails for selected suppliers."""
     logger.info("Drafting outreach emails for %d suppliers", len(selected_suppliers))
@@ -85,8 +89,15 @@ The opening should introduce the buyer's company by name. The sign-off should in
 the contact person's name, title, phone, and website if available.
 """
 
+    additional_context = ""
+    if buyer_context:
+        additional_context += f"\n## Buyer Context\n{buyer_context.model_dump_json(indent=2)}\n"
+    if user_profile:
+        additional_context += f"\n## User Sourcing Profile\n{user_profile.model_dump_json(indent=2)}\n"
+
     prompt = f"""Draft personalized RFQ emails for these suppliers based on the product requirements.
 {buyer_section}
+{additional_context}
 ## Product Requirements
 {json.dumps(req_context, indent=2)}
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured
+from app.schemas.buyer_context import BuyerContext
 from app.schemas.agent_state import (
     DraftEmail,
     NegotiationResponse,
@@ -21,6 +22,8 @@ from app.schemas.agent_state import (
     ParsedQuote,
     ParsedRequirements,
 )
+from app.schemas.user_profile import UserSourcingProfile
+from app.services.feedback_bus import FeedbackSignal, emit_feedback
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -32,6 +35,8 @@ async def evaluate_and_respond(
     quote: ParsedQuote,
     requirements: ParsedRequirements,
     all_quotes: list[ParsedQuote] | None = None,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> NegotiationResponse:
     """Evaluate a supplier's quote and generate a negotiation response.
 
@@ -80,7 +85,14 @@ async def evaluate_and_respond(
                 "other_lead_times": [q.lead_time for q in other_quotes if q.lead_time],
             }
 
+    context_block = ""
+    if buyer_context:
+        context_block += f"\n## Buyer Context\n{buyer_context.model_dump_json(indent=2)}\n"
+    if user_profile:
+        context_block += f"\n## User Sourcing Profile\n{user_profile.model_dump_json(indent=2)}\n"
+
     prompt = f"""Evaluate this supplier quote and decide how to respond.
+{context_block}
 
 ## Buyer's Requirements
 {json.dumps(req_context, indent=2)}
@@ -155,12 +167,24 @@ Choose the appropriate action (accept, clarify, counter, reject) based on your d
         "Negotiation for %s: action=%s, confidence=%.0f",
         quote.supplier_name, action, response.confidence,
     )
+    if action == "accept":
+        await emit_feedback(
+            FeedbackSignal(
+                source_agent="negotiation_agent",
+                target="supplier",
+                signal_type="great_quote",
+                supplier_name=quote.supplier_name,
+                data={"unit_price": quote.unit_price, "confidence": response.confidence},
+            )
+        )
     return response
 
 
 async def evaluate_all_quotes(
     quotes: list[ParsedQuote],
     requirements: ParsedRequirements,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> NegotiationResult:
     """Evaluate all received quotes and generate responses for each.
 
@@ -183,6 +207,8 @@ async def evaluate_all_quotes(
                 quote=quote,
                 requirements=requirements,
                 all_quotes=quotes,
+                buyer_context=buyer_context,
+                user_profile=user_profile,
             )
             responses.append(response)
         except Exception as e:

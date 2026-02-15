@@ -21,6 +21,7 @@ from app.schemas.dashboard import (
     DashboardSummaryResponse,
     DashboardSupplierContact,
 )
+from app.schemas.proactive import ProactiveAlert
 from app.services.project_store import get_project_store
 
 logger = logging.getLogger(__name__)
@@ -422,6 +423,22 @@ async def get_dashboard_summary_for_user(
     first = _first_name(full_name, email)
     daytime = _time_label_now()
 
+    proactive_alerts: list[ProactiveAlert] = []
+    seen_alert_ids: set[str] = set()
+    for project in user_projects:
+        for raw_alert in project.get("proactive_alerts") or []:
+            if not isinstance(raw_alert, dict):
+                continue
+            try:
+                alert = ProactiveAlert(**raw_alert)
+            except Exception:
+                continue
+            if alert.id in seen_alert_ids:
+                continue
+            seen_alert_ids.add(alert.id)
+            proactive_alerts.append(alert)
+    proactive_alerts.sort(key=lambda item: item.created_at, reverse=True)
+
     greeting = DashboardGreeting(
         time_label=f"{datetime.now().strftime('%A')} {daytime}",
         user_first_name=first,
@@ -438,6 +455,7 @@ async def get_dashboard_summary_for_user(
         attention=attention,
         projects=project_cards,
         recent_activity=activity,
+        proactive_alerts=proactive_alerts[:8],
     )
 
 

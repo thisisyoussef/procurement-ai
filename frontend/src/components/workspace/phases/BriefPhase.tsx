@@ -7,13 +7,7 @@ import { trackTraceEvent } from '@/lib/telemetry'
 import { m } from '@/lib/motion'
 import { staggerContainerFast, cardEntrance } from '@/lib/motion/variants'
 import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
-
-const SUGGESTIONS = [
-  'Custom enamel pins for my streetwear brand',
-  'Organic cotton tote bags, 500 units',
-  'Biodegradable food packaging, small batch',
-  'Hand-poured soy candles with custom labels',
-]
+import AgentGreeting from '@/components/workspace/AgentGreeting'
 
 export default function BriefPhase() {
   const {
@@ -57,76 +51,14 @@ export default function BriefPhase() {
   // ─── State 1: Empty — no project yet ─────────────────
   if (!projectId && !loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
-        <h1 className="font-heading text-4xl text-ink text-center mb-3">
-          What do you need <em className="text-teal">made</em>?
-        </h1>
-        <p className="text-[14px] text-ink-3 text-center max-w-lg mb-8">
-          Describe your product. Tamkin will find suppliers, verify them,
-          compare options, and recommend the best path forward.
-        </p>
-
-        {/* Input area */}
-        <div className="w-full max-w-xl">
-          <div className="card p-1.5">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  onSubmit(input)
-                }
-              }}
-              placeholder="Describe what you want manufactured..."
-              rows={3}
-              className="w-full resize-none bg-transparent px-4 py-3 text-[14px] text-ink
-                         placeholder:text-ink-4 focus:outline-none"
-            />
-            <div className="flex justify-end px-2 pb-2">
-              <m.button
-                onClick={() => onSubmit(input)}
-                disabled={!input.trim() || loading}
-                whileTap={{ scale: 0.97 }}
-                className="px-5 py-2 bg-teal text-white rounded-lg text-[13px] font-medium
-                           hover:bg-teal-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                Start sourcing
-              </m.button>
-            </div>
-          </div>
-
-          {/* Suggestion chips */}
-          <m.div
-            className="flex flex-wrap gap-2 mt-4 justify-center"
-            variants={staggerContainerFast}
-            initial="hidden"
-            animate="visible"
-          >
-            {SUGGESTIONS.map((s) => (
-              <m.button
-                key={s}
-                variants={cardEntrance}
-                onClick={() => onSubmit(s)}
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.97 }}
-                className="text-[11px] px-3 py-1.5 rounded-full border border-surface-3
-                           text-ink-4 hover:border-teal hover:text-teal transition-colors"
-              >
-                {s}
-              </m.button>
-            ))}
-          </m.div>
-        </div>
-
-        {/* Error */}
-        {errorMessage && (
-          <div className="mt-6 card border-l-[3px] border-l-red-400 px-5 py-4 max-w-xl w-full">
-            <p className="text-[13px] font-semibold text-ink-2">Error</p>
-            <p className="text-[11px] text-ink-3 mt-1">{errorMessage}</p>
-          </div>
-        )}
-      </div>
+      <AgentGreeting
+        onSubmit={onSubmit}
+        loading={loading}
+        errorMessage={errorMessage}
+        userName={undefined}
+        hasHistory={false}
+        lastCategory={undefined}
+      />
     )
   }
 

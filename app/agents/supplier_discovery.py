@@ -28,9 +28,12 @@ from app.schemas.agent_state import (
     DiscoveredSupplier,
     DiscoveryResults,
     IntermediaryDetection,
+    MarketIntelligence,
     ParsedRequirements,
     RegionalSearchConfig,
 )
+from app.schemas.buyer_context import BuyerContext
+from app.schemas.user_profile import UserSourcingProfile
 from app.services.supplier_memory import search_supplier_memory_candidates
 
 settings = get_settings()
@@ -810,6 +813,8 @@ Return ONLY a JSON array. No explanation."""
 
 async def discover_suppliers(
     requirements: ParsedRequirements,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> DiscoveryResults:
     """
     Search multiple sources for suppliers matching requirements.
@@ -830,6 +835,11 @@ async def discover_suppliers(
     queries = requirements.search_queries
     if not queries:
         queries = [f"{requirements.product_type} manufacturer"]
+    delivery_hint = (
+        requirements.delivery_location
+        or (buyer_context.logistics.shipping_city if buyer_context else None)
+        or (buyer_context.logistics.shipping_country if buyer_context else None)
+    )
 
     # ── Step 1: Memory-first retrieval ────────────────────────
     sources_searched = []
@@ -854,7 +864,7 @@ async def discover_suppliers(
 
     # Run live external searches after memory retrieval.
     search_tasks = [
-        _search_google(queries, location_hint=requirements.delivery_location),
+        _search_google(queries, location_hint=delivery_hint),
         _search_web(queries),
         _search_marketplaces(
             product_type=requirements.product_type,
@@ -961,7 +971,7 @@ async def discover_suppliers(
 
         # Run expansion searches (English + regional if available)
         exp_tasks = [
-            _search_google(expansion_queries, max_per_query=5, location_hint=requirements.delivery_location),
+            _search_google(expansion_queries, max_per_query=5, location_hint=delivery_hint),
             _search_web(expansion_queries, max_per_query=3),
         ]
         if requirements.regional_searches:
@@ -1089,6 +1099,44 @@ async def discover_suppliers(
     logger.info("✅ Discovery complete: %d suppliers (+%d filtered), %d search rounds, %d intermediaries resolved",
                 len(main_suppliers), len(filtered_suppliers), search_rounds, intermediaries_resolved)
 
+    market_intelligence = None
+    if main_suppliers:
+        countries = [s.country for s in main_suppliers if s.country]
+        dominant_regions = []
+        seen_regions: set[str] = set()
+        for country in countries:
+            key = country.lower()
+            if key in seen_regions:
+                continue
+            seen_regions.add(key)
+            dominant_regions.append(country)
+            if len(dominant_regions) >= 5:
+                break
+
+        all_certs: list[str] = []
+        for supplier in main_suppliers:
+            all_certs.extend(supplier.certifications or [])
+        unique_certs = []
+        seen_cert: set[str] = set()
+        for cert in all_certs:
+            key = cert.strip().lower()
+            if not key or key in seen_cert:
+                continue
+            seen_cert.add(key)
+            unique_certs.append(cert)
+            if len(unique_certs) >= 8:
+                break
+
+        market_intelligence = MarketIntelligence(
+            dominant_regions=dominant_regions,
+            common_certifications=unique_certs,
+            market_maturity=(
+                "mature"
+                if len(main_suppliers) >= 15
+                else "growing" if len(main_suppliers) >= 8 else "emerging"
+            ),
+        )
+
     return DiscoveryResults(
         suppliers=main_suppliers,
         filtered_suppliers=filtered_suppliers,
@@ -1099,4 +1147,9 @@ async def discover_suppliers(
         regional_results=regional_counts,
         intermediaries_resolved=intermediaries_resolved,
         search_rounds=search_rounds,
+        market_intelligence=market_intelligence,
+        discovery_briefing=(
+            f"Found {len(main_suppliers)} viable suppliers across {len(sources_searched)} sources "
+            f"with {intermediaries_resolved} intermediary resolutions and {search_rounds} search round(s)."
+        ),
     )

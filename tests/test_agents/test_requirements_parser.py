@@ -84,3 +84,48 @@ async def test_parse_requirements_rebuilds_when_category_is_not_in_user_input(mo
     assert "tote" not in result.product_type.lower()
     assert result.search_queries
     assert all("tote" not in q.lower() for q in result.search_queries)
+
+
+@pytest.mark.asyncio
+@patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
+async def test_parse_requirements_backfills_clarifying_question_guidance(mock_llm, monkeypatch):
+    from app.agents import requirements_parser as parser_module
+
+    monkeypatch.setattr(parser_module.settings, "feature_focus_circle_search_v1", True)
+    mock_llm.return_value = json.dumps(
+        {
+            "product_type": "Custom tote bag",
+            "material": "Cotton canvas",
+            "dimensions": None,
+            "quantity": None,
+            "customization": "Screen print",
+            "delivery_location": None,
+            "deadline": None,
+            "certifications_needed": [],
+            "budget_range": None,
+            "missing_fields": ["quantity", "budget_range"],
+            "search_queries": ["custom tote bag manufacturer"],
+            "clarifying_questions": [
+                {
+                    "field": "quantity",
+                    "question": "How many units do you need?",
+                    "importance": "recommended",
+                    "suggestions": ["500", "1000"],
+                },
+                {
+                    "field": "trade_off_priority",
+                    "question": "What matters most?",
+                    "importance": "recommended",
+                    "suggestions": [],
+                },
+            ],
+        }
+    )
+
+    result = await parse_requirements("Need custom tote bags with logo")
+
+    assert result.clarifying_questions
+    assert result.clarifying_questions[0].why_this_question
+    assert result.clarifying_questions[0].if_skipped_impact
+    assert result.clarifying_questions[0].suggested_default == "500"
+    assert result.clarifying_questions[1].suggested_default is not None

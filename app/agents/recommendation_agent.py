@@ -8,6 +8,7 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.core.llm_gateway import call_llm_structured, repair_truncated_json
 from app.core.progress import emit_progress
+from app.schemas.buyer_context import BuyerContext
 from app.schemas.agent_state import (
     ComparisonResult,
     ParsedRequirements,
@@ -17,6 +18,7 @@ from app.schemas.agent_state import (
     SupplierVerification,
     VerificationResults,
 )
+from app.schemas.user_profile import UserSourcingProfile
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -468,6 +470,8 @@ async def generate_recommendation(
     requirements: ParsedRequirements,
     comparison: ComparisonResult,
     verifications: VerificationResults,
+    buyer_context: BuyerContext | None = None,
+    user_profile: UserSourcingProfile | None = None,
 ) -> RecommendationResult:
     """
     Generate final ranked supplier recommendations.
@@ -494,8 +498,15 @@ async def generate_recommendation(
         indent=2,
     )
 
+    context_block = ""
+    if buyer_context:
+        context_block += f"\\nBuyer context:\\n{buyer_context.model_dump_json(indent=2)}\\n"
+    if user_profile:
+        context_block += f"\\nUser sourcing profile:\\n{user_profile.model_dump_json(indent=2)}\\n"
+
     prompt = f"""Product requirements:
 {requirements.model_dump_json(indent=2)}
+{context_block}
 
 Supplier comparison results:
 {comparison.model_dump_json(indent=2)}
@@ -525,6 +536,7 @@ Return JSON:
     }}
   ],
   "executive_summary": "2-3 sentence overview",
+  "narrative_briefing": "3-5 paragraph advisor-style recommendation briefing",
   "decision_checkpoint_summary": "short decision-readiness summary before outreach",
   "elimination_rationale": "plain-language note when shortlist is narrower than discovery breadth",
   "caveats": ["important warning 1", "important warning 2"]
@@ -590,6 +602,7 @@ If viable suppliers are numerous, still output a representative ranked set (up t
     return RecommendationResult(
         recommendations=recommendations,
         executive_summary=str(data.get("executive_summary") or "").strip(),
+        narrative_briefing=str(data.get("narrative_briefing") or "").strip(),
         caveats=_to_list_of_strings(data.get("caveats")),
         decision_checkpoint_summary=checkpoint,
         elimination_rationale=elimination_rationale,

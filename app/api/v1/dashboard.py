@@ -102,6 +102,14 @@ async def start_project_from_dashboard(
         "progress_events": [],
         "clarifying_questions": None,
         "user_answers": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "user_sourcing_profile": None,
+        "active_checkpoint": None,
+        "checkpoint_responses": {},
+        "confidence_gate_threshold": 30.0,
+        "retrospective": None,
+        "proactive_alerts": [],
     }
 
     try:

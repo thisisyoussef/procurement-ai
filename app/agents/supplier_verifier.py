@@ -12,10 +12,12 @@ from app.agents.tools.firecrawl_scraper import scrape_website
 from app.agents.tools.web_search import scrape_url_basic
 from app.schemas.agent_state import (
     DiscoveredSupplier,
+    ParsedRequirements,
     SupplierVerification,
     VerificationCheck,
     VerificationResults,
 )
+from app.schemas.buyer_context import BuyerContext
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -168,6 +170,9 @@ async def _extract_images_if_available(supplier: DiscoveredSupplier) -> None:
 async def verify_supplier(
     supplier: DiscoveredSupplier,
     index: int,
+    requirements: ParsedRequirements | None = None,
+    buyer_context: BuyerContext | None = None,
+    priority: str = "normal",
 ) -> SupplierVerification:
     """Run all verification checks on a single supplier in parallel."""
     logger.info("🔎 Verifying supplier [%d]: %s", index, supplier.name)
@@ -178,7 +183,12 @@ async def verify_supplier(
     if not supplier.email or not supplier.phone:
         try:
             from app.agents.tools.contact_enricher import enrich_supplier_contacts
-            supplier = await enrich_supplier_contacts(supplier, aggressive=True)
+
+            supplier = await enrich_supplier_contacts(
+                supplier,
+                aggressive=(priority == "high"),
+                priority=priority,
+            )
         except Exception as e:
             logger.warning("Contact enrichment failed for %s: %s", supplier.name, e)
 
@@ -186,18 +196,11 @@ async def verify_supplier(
         _check_website(supplier),
         _check_google_reviews(supplier),
         _check_business_registration(supplier),
+        _extract_images_if_available(supplier),
         return_exceptions=True,
     )
 
     valid_checks = [c for c in checks if isinstance(c, VerificationCheck)]
-
-    # Image extraction runs AFTER core checks (not in parallel) so it doesn't
-    # compete for the single Browserbase session slot on the free tier.
-    # It's best-effort — failures don't affect verification scores.
-    try:
-        await _extract_images_if_available(supplier)
-    except Exception as e:
-        logger.debug("Image extraction failed for %s: %s", supplier.name, e)
 
     # Calculate weighted composite score
     weights = {"website": 0.35, "reviews": 0.35, "registration": 0.30}
@@ -270,6 +273,8 @@ async def verify_supplier(
 async def verify_suppliers(
     suppliers: list[DiscoveredSupplier],
     max_concurrent: int = 5,
+    requirements: ParsedRequirements | None = None,
+    buyer_context: BuyerContext | None = None,
 ) -> VerificationResults:
     """
     Verify a batch of suppliers with concurrency control.
@@ -285,24 +290,34 @@ async def verify_suppliers(
     emit_progress("verifying", "starting",
                   f"Verifying {len(suppliers)} suppliers (website, reviews, registration checks)...")
     semaphore = asyncio.Semaphore(max_concurrent)
-    completed = 0
-
-    async def _verify_with_limit(s: DiscoveredSupplier, idx: int):
-        nonlocal completed
+    
+    async def _verify_with_limit(s: DiscoveredSupplier, idx: int, priority: str):
         async with semaphore:
             emit_progress("verifying", "checking_supplier",
                           f"Verifying supplier {idx + 1}/{len(suppliers)}: {s.name}...",
                           progress_pct=(idx / len(suppliers)) * 100)
             try:
-                result = await verify_supplier(s, idx)
-                completed += 1
-                return result
+                return await verify_supplier(
+                    s,
+                    idx,
+                    requirements=requirements,
+                    buyer_context=buyer_context,
+                    priority=priority,
+                )
             except Exception as e:
-                completed += 1
                 logger.error("❌ Verification failed for supplier [%d] %s: %s", idx, s.name, e)
                 return None
 
-    tasks = [_verify_with_limit(s, i) for i, s in enumerate(suppliers)]
+    tasks = []
+    for i, s in enumerate(suppliers):
+        if i < 5:
+            priority = "high"
+        elif i >= max(1, len(suppliers) // 2):
+            priority = "low"
+        else:
+            priority = "normal"
+        tasks.append(_verify_with_limit(s, i, priority))
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Log any exceptions that slipped through (shouldn't happen now, but safety net)

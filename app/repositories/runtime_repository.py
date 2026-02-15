@@ -42,6 +42,8 @@ def _project_from_row(row: RuntimeProject) -> dict[str, Any]:
     state["status"] = row.status
     state["current_stage"] = row.current_stage
     state["error"] = row.error
+    if row.buyer_context is not None:
+        state["buyer_context"] = copy.deepcopy(row.buyer_context)
     return state
 
 
@@ -80,6 +82,7 @@ async def upsert_runtime_project(session: AsyncSession, project: dict[str, Any])
             current_stage=project.get("current_stage") or "parsing",
             error=project.get("error"),
             state=_normalized_project_state(project),
+            buyer_context=copy.deepcopy(project.get("buyer_context")),
         )
         session.add(row)
     else:
@@ -90,6 +93,7 @@ async def upsert_runtime_project(session: AsyncSession, project: dict[str, Any])
         row.current_stage = project.get("current_stage") or row.current_stage
         row.error = project.get("error")
         row.state = _normalized_project_state(project)
+        row.buyer_context = copy.deepcopy(project.get("buyer_context"))
 
     await session.flush()
 
@@ -140,7 +144,16 @@ async def find_project_by_call_id(
 
 async def recover_stale_running_projects(session: AsyncSession) -> int:
     projects = await list_runtime_projects(session)
-    running = {"parsing", "clarifying", "discovering", "verifying", "comparing", "recommending"}
+    running = {
+        "parsing",
+        "clarifying",
+        "discovering",
+        "verifying",
+        "steering",
+        "comparing",
+        "recommending",
+        "outreaching",
+    }
     recovered = 0
 
     for project in projects:

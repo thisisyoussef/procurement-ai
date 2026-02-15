@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.orchestrator import (
+    checkpoint_node,
     compare_node,
     discover_node,
     parse_node,
@@ -31,6 +32,8 @@ from app.core.log_stream import current_project_id, get_project_logs, subscribe_
 from app.core.progress import emit_progress
 from app.schemas.agent_state import (
     ChatMessage,
+    CheckpointResponse,
+    CheckpointType,
     ComparisonResult,
     DiscoveryResults,
     OutreachState,
@@ -42,8 +45,15 @@ from app.schemas.agent_state import (
 from app.schemas.project import (
     ClarifyingAnswerRequest,
     PipelineStatusResponse,
+    ProjectDecisionPreferenceRequest,
     ProjectCreateRequest,
     ProjectRestartRequest,
+)
+from app.schemas.buyer_context import BuyerContext
+from app.schemas.retrospective import RetrospectiveRequest
+from app.services.buyer_context_builder import (
+    merge_checkpoint_answers,
+    update_user_profile_from_project,
 )
 from app.services.project_store import (
     StoreUnavailableError,
@@ -69,16 +79,19 @@ ACTIVE_PIPELINE_STATUSES = {
     "clarifying",
     "discovering",
     "verifying",
+    "steering",
     "comparing",
     "recommending",
     "outreaching",
 }
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
+DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
 
 _STAGE_PHASE = {
     "parsing": "brief",
     "clarifying": "brief",
+    "steering": "brief",
     "discovering": "search",
     "verifying": "search",
     "comparing": "compare",
@@ -93,6 +106,7 @@ _STAGE_PHASE = {
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
+        "steering": "Review checkpoint",
         "discovering": "Searching suppliers",
         "verifying": "Verifying suppliers",
         "comparing": "Comparing options",
@@ -105,6 +119,7 @@ def _stage_title(stage_name: str) -> str:
 def _stage_progress_message(stage_name: str) -> str:
     messages = {
         "parsing": "Reading your brief and setting up the sourcing plan.",
+        "steering": "Waiting for your steering input, or continuing with defaults shortly.",
         "discovering": "Searching for suppliers that match your requirements.",
         "verifying": "Checking supplier legitimacy, contact data, and fit.",
         "comparing": "Comparing top suppliers across cost, quality, and speed.",
@@ -207,6 +222,14 @@ async def create_project(
             "progress_events": [],
             "clarifying_questions": None,
             "user_answers": None,
+            "decision_preference": None,
+            "buyer_context": None,
+            "user_sourcing_profile": None,
+            "active_checkpoint": None,
+            "checkpoint_responses": {},
+            "confidence_gate_threshold": 30.0,
+            "retrospective": None,
+            "proactive_alerts": [],
         }
 
         await _create_project(project)
@@ -248,6 +271,16 @@ def _sync_state_to_project(project: dict, state: GraphState) -> None:
         project["comparison_result"] = state["comparison_result"]
     if state.get("recommendation_result"):
         project["recommendation_result"] = state["recommendation_result"]
+    if "buyer_context" in state:
+        project["buyer_context"] = state.get("buyer_context")
+    if "user_sourcing_profile" in state:
+        project["user_sourcing_profile"] = state.get("user_sourcing_profile")
+    if "gated_suppliers" in state:
+        project["gated_suppliers"] = state.get("gated_suppliers", [])
+    if "confidence_gate_threshold" in state:
+        project["confidence_gate_threshold"] = state.get("confidence_gate_threshold")
+    if "active_checkpoint" in state:
+        project["active_checkpoint"] = state.get("active_checkpoint")
     # Sync auto-outreach results from the pipeline outreach_node
     outreach_result = state.get("outreach_result")
     if outreach_result and not outreach_result.get("skipped") and not outreach_result.get("error"):
@@ -290,6 +323,12 @@ async def _run_pipeline_task(project_id: str, description: str):
         "user_answers": None,
         "auto_outreach_enabled": bool(project.get("auto_outreach")),
         "user_id": project.get("user_id"),
+        "buyer_context": project.get("buyer_context"),
+        "user_sourcing_profile": project.get("user_sourcing_profile"),
+        "active_checkpoint": project.get("active_checkpoint"),
+        "checkpoint_responses": project.get("checkpoint_responses", {}) or {},
+        "confidence_gate_threshold": float(project.get("confidence_gate_threshold") or 30.0),
+        "checkpoint_auto_continue": not settings.enable_checkpoints,
     }
 
     steps = [
@@ -299,6 +338,13 @@ async def _run_pipeline_task(project_id: str, description: str):
         ("comparing", compare_node),
         ("recommending", recommend_node),
     ]
+    checkpoint_by_stage = {
+        "parsing": CheckpointType.CONFIRM_REQUIREMENTS,
+        "discovering": CheckpointType.REVIEW_SUPPLIERS,
+        "verifying": CheckpointType.SET_CONFIDENCE_GATE,
+        "comparing": CheckpointType.ADJUST_WEIGHTS,
+        "recommending": CheckpointType.OUTREACH_PREFERENCES,
+    }
 
     # Add outreach step if auto_outreach is enabled
     if project.get("auto_outreach"):
@@ -376,10 +422,93 @@ async def _run_pipeline_task(project_id: str, description: str):
                 await store.save_project(project)
                 break
 
-            if stage_name == "parsing":
+            if settings.enable_checkpoints:
+                checkpoint_type = checkpoint_by_stage.get(stage_name)
+                if checkpoint_type:
+                    state = await checkpoint_node(state, checkpoint_type)
+                    _sync_state_to_project(project, state)
+                    project["status"] = state.get("current_stage", project.get("status"))
+                    project["current_stage"] = state.get("current_stage", project.get("current_stage"))
+                    await store.save_project(project)
+
+                    if state.get("current_stage") == PipelineStage.STEERING.value:
+                        emit_progress(
+                            "steering",
+                            checkpoint_type.value,
+                            "Checkpoint ready. Continue now or provide steering input.",
+                        )
+                        await record_project_event(
+                            project,
+                            event_type="checkpoint_ready",
+                            title="Checkpoint ready",
+                            description=(state.get("active_checkpoint") or {}).get(
+                                "summary",
+                                "Review this stage before continuing.",
+                            ),
+                            priority="medium",
+                            phase=_STAGE_PHASE.get(stage_name),
+                            payload={
+                                "checkpoint_type": checkpoint_type.value,
+                                "auto_continue_seconds": (state.get("active_checkpoint") or {}).get(
+                                    "auto_continue_seconds"
+                                ),
+                            },
+                        )
+                        await store.save_project(project)
+                        logger.info("Pipeline paused at checkpoint %s (project %s)", checkpoint_type.value, project_id)
+                        return
+
+            if stage_name == "recommending" and settings.feature_focus_circle_search_v1:
+                recommendation = project.get("recommendation_result") or {}
+                lane_coverage = recommendation.get("lane_coverage") or {}
+                if isinstance(lane_coverage, dict):
+                    primary_coverage = {lane: int(lane_coverage.get(lane, 0) or 0) for lane in DECISION_LANES}
+                    missing_lanes = [lane for lane, count in primary_coverage.items() if count < 1]
+                    if missing_lanes:
+                        await record_project_event(
+                            project,
+                            event_type="recommendation_lane_coverage_low",
+                            title="Recommendation lane coverage is thin",
+                            description=(
+                                "Recommendation output did not fully cover decision lanes: "
+                                + ", ".join(missing_lanes)
+                            ),
+                            priority="medium",
+                            phase="compare",
+                            payload={
+                                "lane_coverage": primary_coverage,
+                                "missing_lanes": missing_lanes,
+                            },
+                        )
+
+            if stage_name == "parsing" and not settings.enable_checkpoints:
                 reqs = state.get("parsed_requirements") or {}
                 questions = reqs.get("clarifying_questions", [])
                 if questions:
+                    enhanced_questions = 0
+                    if settings.feature_focus_circle_search_v1:
+                        for question in questions:
+                            if not isinstance(question, dict):
+                                continue
+                            if (
+                                question.get("why_this_question")
+                                or question.get("if_skipped_impact")
+                                or question.get("suggested_default")
+                            ):
+                                enhanced_questions += 1
+                        if enhanced_questions:
+                            await record_project_event(
+                                project,
+                                event_type="clarification_question_enhanced",
+                                title="Clarification guidance added",
+                                description=(
+                                    f"Added rationale/default guidance to {enhanced_questions} "
+                                    "clarification question(s)."
+                                ),
+                                priority="info",
+                                phase="brief",
+                                payload={"enhanced_count": enhanced_questions},
+                            )
                     project["status"] = "clarifying"
                     project["current_stage"] = "clarifying"
                     project["clarifying_questions"] = questions
@@ -414,6 +543,16 @@ async def _run_pipeline_task(project_id: str, description: str):
             phase=_STAGE_PHASE.get(project.get("current_stage")),
         )
         emit_progress("complete", "ready", "Your shortlist is ready. Review suppliers and approve outreach.")
+        if settings.enable_buyer_context and project.get("buyer_context") and project.get("user_id"):
+            try:
+                context = BuyerContext(**(project.get("buyer_context") or {}))
+                await update_user_profile_from_project(
+                    user_id=str(project.get("user_id")),
+                    project_state=project,
+                    buyer_context=context,
+                )
+            except Exception:
+                logger.warning("Profile update after project completion failed", exc_info=True)
         await store.save_project(project)
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
@@ -437,7 +576,7 @@ async def _run_pipeline_task(project_id: str, description: str):
             logger.exception("Failed to persist pipeline failure state")
 
 
-async def _resume_pipeline_task(project_id: str):
+async def _resume_pipeline_task(project_id: str, from_stage: str | None = None):
     """Resume a paused pipeline from the discover stage onward."""
     current_project_id.set(project_id)
 
@@ -455,28 +594,55 @@ async def _resume_pipeline_task(project_id: str):
         logger.info("Project %s is canceled before resume", project_id)
         return
 
+    stage_name = (from_stage or project.get("current_stage") or "discovering").strip().lower()
+    if stage_name == "steering":
+        stage_name = "discovering"
+
     state: GraphState = {
         "raw_description": project.get("product_description", ""),
-        "current_stage": PipelineStage.DISCOVERING.value,
+        "current_stage": stage_name,
         "error": None,
         "parsed_requirements": project.get("parsed_requirements"),
-        "discovery_results": None,
-        "verification_results": None,
-        "comparison_result": None,
-        "recommendation_result": None,
+        "discovery_results": project.get("discovery_results"),
+        "verification_results": project.get("verification_results"),
+        "comparison_result": project.get("comparison_result"),
+        "recommendation_result": project.get("recommendation_result"),
+        "outreach_result": project.get("outreach_state"),
         "progress_events": project.get("progress_events", []),
         "user_answers": project.get("user_answers"),
+        "auto_outreach_enabled": bool(project.get("auto_outreach")),
+        "user_id": project.get("user_id"),
+        "buyer_context": project.get("buyer_context"),
+        "user_sourcing_profile": project.get("user_sourcing_profile"),
+        "active_checkpoint": project.get("active_checkpoint"),
+        "checkpoint_responses": project.get("checkpoint_responses", {}) or {},
+        "confidence_gate_threshold": float(project.get("confidence_gate_threshold") or 30.0),
+        "checkpoint_auto_continue": not settings.enable_checkpoints,
     }
 
-    steps = [
+    full_steps = [
         ("discovering", discover_node),
         ("verifying", verify_node),
         ("comparing", compare_node),
         ("recommending", recommend_node),
     ]
+    if project.get("auto_outreach"):
+        full_steps.append(("outreaching", outreach_node))
+
+    stage_order = [name for name, _ in full_steps]
+    if stage_name not in stage_order:
+        stage_name = "discovering"
+    start_index = stage_order.index(stage_name)
+    steps = full_steps[start_index:]
+    checkpoint_by_stage = {
+        "discovering": CheckpointType.REVIEW_SUPPLIERS,
+        "verifying": CheckpointType.SET_CONFIDENCE_GATE,
+        "comparing": CheckpointType.ADJUST_WEIGHTS,
+        "recommending": CheckpointType.OUTREACH_PREFERENCES,
+    }
 
     try:
-        logger.info("Resuming pipeline for project %s from discover", project_id)
+        logger.info("Resuming pipeline for project %s from %s", project_id, stage_name)
 
         for stage_name, step_fn in steps:
             should_stop, latest_project = await _should_stop_for_cancellation(store, project_id)
@@ -547,6 +713,63 @@ async def _resume_pipeline_task(project_id: str):
                 await store.save_project(project)
                 break
 
+            if settings.enable_checkpoints:
+                checkpoint_type = checkpoint_by_stage.get(stage_name)
+                if checkpoint_type:
+                    state = await checkpoint_node(state, checkpoint_type)
+                    _sync_state_to_project(project, state)
+                    project["status"] = state.get("current_stage", project.get("status"))
+                    project["current_stage"] = state.get("current_stage", project.get("current_stage"))
+                    await store.save_project(project)
+
+                    if state.get("current_stage") == PipelineStage.STEERING.value:
+                        emit_progress(
+                            "steering",
+                            checkpoint_type.value,
+                            "Checkpoint ready. Continue now or provide steering input.",
+                        )
+                        await record_project_event(
+                            project,
+                            event_type="checkpoint_ready",
+                            title="Checkpoint ready",
+                            description=(state.get("active_checkpoint") or {}).get(
+                                "summary",
+                                "Review this stage before continuing.",
+                            ),
+                            priority="medium",
+                            phase=_STAGE_PHASE.get(stage_name),
+                            payload={
+                                "checkpoint_type": checkpoint_type.value,
+                                "resume": True,
+                            },
+                        )
+                        await store.save_project(project)
+                        logger.info("Pipeline paused at checkpoint %s (project %s)", checkpoint_type.value, project_id)
+                        return
+
+            if stage_name == "recommending" and settings.feature_focus_circle_search_v1:
+                recommendation = project.get("recommendation_result") or {}
+                lane_coverage = recommendation.get("lane_coverage") or {}
+                if isinstance(lane_coverage, dict):
+                    primary_coverage = {lane: int(lane_coverage.get(lane, 0) or 0) for lane in DECISION_LANES}
+                    missing_lanes = [lane for lane, count in primary_coverage.items() if count < 1]
+                    if missing_lanes:
+                        await record_project_event(
+                            project,
+                            event_type="recommendation_lane_coverage_low",
+                            title="Recommendation lane coverage is thin",
+                            description=(
+                                "Recommendation output did not fully cover decision lanes: "
+                                + ", ".join(missing_lanes)
+                            ),
+                            priority="medium",
+                            phase="compare",
+                            payload={
+                                "lane_coverage": primary_coverage,
+                                "missing_lanes": missing_lanes,
+                            },
+                        )
+
         await record_project_event(
             project,
             event_type="project_completed",
@@ -556,6 +779,16 @@ async def _resume_pipeline_task(project_id: str):
             phase=_STAGE_PHASE.get(project.get("current_stage")),
         )
         emit_progress("complete", "ready", "Your shortlist is ready. Review suppliers and approve outreach.")
+        if settings.enable_buyer_context and project.get("buyer_context") and project.get("user_id"):
+            try:
+                context = BuyerContext(**(project.get("buyer_context") or {}))
+                await update_user_profile_from_project(
+                    user_id=str(project.get("user_id")),
+                    project_state=project,
+                    buyer_context=context,
+                )
+            except Exception:
+                logger.warning("Profile update after resumed completion failed", exc_info=True)
         await store.save_project(project)
         logger.info("Pipeline completed for project %s, stage=%s", project_id, project["current_stage"])
 
@@ -626,7 +859,37 @@ async def get_project_status(
         ),
         progress_events=project.get("progress_events", []),
         clarifying_questions=project.get("clarifying_questions"),
+        decision_preference=project.get("decision_preference"),
+        buyer_context=project.get("buyer_context"),
+        active_checkpoint=project.get("active_checkpoint"),
+        proactive_alerts=project.get("proactive_alerts", []),
     )
+
+
+@router.post("/{project_id}/decision-preference")
+async def set_project_decision_preference(
+    project_id: str,
+    request: ProjectDecisionPreferenceRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    lane_preference = request.lane_preference
+    project["decision_preference"] = lane_preference
+
+    await record_project_event(
+        project,
+        event_type="decision_preference_set",
+        title="Decision lane selected",
+        description=f"Lane preference set to {lane_preference.replace('_', ' ')}.",
+        priority="info",
+        phase="compare",
+        payload={"lane_preference": lane_preference},
+    )
+    await _save_project(project)
+
+    return {"project_id": project_id, "lane_preference": lane_preference}
 
 
 @router.post("/{project_id}/cancel")
@@ -726,6 +989,10 @@ async def restart_project(
     project["comparison_result"] = None
     project["recommendation_result"] = None
     project["outreach_state"] = None
+    project["decision_preference"] = None
+    project["active_checkpoint"] = None
+    project["checkpoint_responses"] = {}
+    project["gated_suppliers"] = []
 
     if restart_stage == "parsing":
         project["parsed_requirements"] = None
@@ -928,6 +1195,72 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.post("/{project_id}/checkpoint")
+async def respond_to_checkpoint(
+    project_id: str,
+    response: CheckpointResponse,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Submit user's response to an active steering checkpoint and resume pipeline."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    active_checkpoint = project.get("active_checkpoint") or {}
+    if project.get("status") != PipelineStage.STEERING.value or not active_checkpoint:
+        raise HTTPException(status_code=400, detail="Project is not awaiting checkpoint input")
+
+    active_type = active_checkpoint.get("checkpoint_type")
+    if active_type != response.checkpoint_type.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Checkpoint mismatch. Active checkpoint: {active_type}",
+        )
+
+    project.setdefault("checkpoint_responses", {})[response.checkpoint_type.value] = response.model_dump(mode="json")
+
+    # Merge answers into buyer context for immediate persistence.
+    context = BuyerContext(**(project.get("buyer_context") or {}))
+    context = await merge_checkpoint_answers(context, response.answers)
+    project["buyer_context"] = context.model_dump(mode="json")
+    project["active_checkpoint"] = None
+
+    # Route to the next stage before background resume starts.
+    stage_after = {
+        CheckpointType.CONFIRM_REQUIREMENTS: "discovering",
+        CheckpointType.REVIEW_SUPPLIERS: "verifying",
+        CheckpointType.SET_CONFIDENCE_GATE: "comparing",
+        CheckpointType.ADJUST_WEIGHTS: "recommending",
+        CheckpointType.OUTREACH_PREFERENCES: "outreaching" if project.get("auto_outreach") else "complete",
+    }
+    next_stage = stage_after[response.checkpoint_type]
+    project["status"] = next_stage
+    project["current_stage"] = next_stage
+
+    await record_project_event(
+        project,
+        event_type="checkpoint_answered",
+        title="Checkpoint updated",
+        description=f"Applied steering for {response.checkpoint_type.value}.",
+        priority="info",
+        phase=_STAGE_PHASE.get(next_stage),
+        payload={
+            "checkpoint_type": response.checkpoint_type.value,
+            "action": response.action,
+        },
+    )
+    await _save_project(project)
+
+    if next_stage in {"discovering", "verifying", "comparing", "recommending", "outreaching"}:
+        background_tasks.add_task(_resume_pipeline_task, project_id, next_stage)
+
+    return {
+        "project_id": project_id,
+        "status": "resumed",
+        "next_stage": next_stage,
+    }
+
+
 @router.post("/{project_id}/clarify")
 async def clarify_project_answers_compat(
     project_id: str,
@@ -973,6 +1306,42 @@ async def skip_clarifying_questions(
     background_tasks.add_task(_resume_pipeline_task, project_id)
 
     return {"status": "resumed", "message": "Skipped clarifying questions, resuming pipeline"}
+
+
+@router.post("/{project_id}/retrospective")
+async def submit_retro(
+    project_id: str,
+    request: RetrospectiveRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Persist post-project retrospective feedback and update user profile learning."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    project["retrospective"] = request.model_dump(mode="json")
+
+    try:
+        context = BuyerContext(**(project.get("buyer_context") or {}))
+        await update_user_profile_from_project(
+            user_id=str(current_user.user_id),
+            project_state=project,
+            buyer_context=context,
+            user_feedback=request.model_dump(mode="json"),
+        )
+    except Exception:
+        logger.warning("Failed to update user profile from retrospective", exc_info=True)
+
+    await record_project_event(
+        project,
+        event_type="retrospective_submitted",
+        title="Retrospective recorded",
+        description="Captured post-project feedback for future sourcing improvements.",
+        priority="info",
+        phase="order",
+    )
+    await _save_project(project)
+
+    return {"project_id": project_id, "status": "recorded"}
 
 
 @router.get("")

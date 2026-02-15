@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supplier import Supplier, SupplierInteraction
 from app.schemas.agent_state import DiscoveredSupplier, ParsedRequirements
+from app.services.embedding_service import cosine_similarity, embed_text
 
 GENERIC_QUERY_TERMS = {
     "manufacturer",
@@ -287,6 +288,12 @@ async def upsert_discovered_suppliers(
         else:
             _merge_supplier_row(row, supplier)
 
+        try:
+            row.embedding = await generate_supplier_embedding(row)
+        except Exception:  # noqa: BLE001
+            # Embeddings are best-effort and should not block persistence.
+            pass
+
         await session.flush()
         supplier_id = str(row.id)
         ids.append(supplier_id)
@@ -457,3 +464,58 @@ async def apply_verification_feedback(
         )
 
     await session.flush()
+
+
+async def generate_supplier_embedding(supplier: Supplier) -> list[float]:
+    """Generate embedding from supplier description and structured tags."""
+    text = " ".join(
+        [
+            supplier.name or "",
+            supplier.description or "",
+            " ".join(supplier.categories or []),
+            " ".join(supplier.certifications or []),
+            supplier.country or "",
+        ]
+    ).strip()
+    return await embed_text(text)
+
+
+async def generate_supplier_embedding_from_requirements(requirements: ParsedRequirements) -> list[float]:
+    """Generate embedding for a sourcing request."""
+    text = " ".join(
+        [
+            requirements.product_type or "",
+            requirements.material or "",
+            requirements.customization or "",
+            requirements.delivery_location or "",
+            " ".join(requirements.certifications_needed or []),
+            " ".join(requirements.search_queries or []),
+        ]
+    ).strip()
+    return await embed_text(text)
+
+
+async def search_supplier_memory_semantic(
+    session: AsyncSession,
+    requirements: ParsedRequirements,
+    limit: int = 20,
+) -> list[tuple[Supplier, float]]:
+    """Semantic search using embeddings with lexical fallback."""
+    stmt = select(Supplier).where(Supplier.embedding.is_not(None)).limit(max(limit * 3, 30))
+    rows = (await session.execute(stmt)).scalars().all()
+    if not rows:
+        return []
+
+    query_embedding = await generate_supplier_embedding_from_requirements(requirements)
+    scored: list[tuple[Supplier, float]] = []
+    for row in rows:
+        if not row.embedding:
+            continue
+        try:
+            score = cosine_similarity(query_embedding, list(row.embedding))
+        except Exception:  # noqa: BLE001
+            continue
+        scored.append((row, score))
+
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[:limit]

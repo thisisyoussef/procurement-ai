@@ -320,6 +320,69 @@ def test_parse_response_excludes_supplier_when_unfulfillable():
     assert updated["outreach_state"]["excluded_suppliers"] == [0]
 
 
+def test_quick_approval_respects_project_decision_lane_preference():
+    _projects.clear()
+    project_id = "proj-outreach-lane-pref"
+    _seed_project(project_id)
+    _projects[project_id]["decision_preference"] = "best_speed_to_order"
+    _projects[project_id]["recommendation_result"] = {
+        "recommendations": [
+            {
+                "rank": 1,
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "overall_score": 92,
+                "confidence": "high",
+                "reasoning": "Best overall",
+                "best_for": "best overall",
+                "lane": "best_overall",
+            },
+            {
+                "rank": 2,
+                "supplier_name": "Beta Textiles",
+                "supplier_index": 1,
+                "overall_score": 90,
+                "confidence": "medium",
+                "reasoning": "Fastest to order",
+                "best_for": "fastest delivery",
+                "lane": "best_speed_to_order",
+            },
+        ],
+        "executive_summary": "",
+        "caveats": [],
+    }
+
+    with patch("app.api.v1.outreach.draft_outreach_emails", new=AsyncMock()) as mock_draft, patch(
+        "app.api.v1.outreach.send_email", new=AsyncMock(return_value={"sent": True, "id": "email_lane_pref"})
+    ) as mock_send:
+        from app.schemas.agent_state import DraftEmail, OutreachResult
+
+        # Draft uses local supplier index 0 (selected list), API should remap to global index 1.
+        mock_draft.return_value = OutreachResult(
+            drafts=[
+                DraftEmail(
+                    supplier_name="Beta Textiles",
+                    supplier_index=0,
+                    recipient_email=None,
+                    subject="RFQ",
+                    body="Hello",
+                    status="draft",
+                )
+            ],
+            summary="done",
+        )
+
+        approve = client.post(
+            f"/api/v1/projects/{project_id}/outreach/quick-approval",
+            json={"approve": True, "max_suppliers": 1},
+            headers=_auth_headers(),
+        )
+        assert approve.status_code == 200
+        assert approve.json()["status"] == "approved"
+        assert approve.json()["selected_suppliers"] == [1]
+        assert mock_send.await_args.kwargs["to"] == "sales@beta.example"
+
+
 def test_monitor_returns_empty_state_when_outreach_not_started():
     _projects.clear()
     project_id = "proj-outreach-monitor-empty"

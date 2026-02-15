@@ -19,6 +19,10 @@ Given a product description from a small business founder, extract:
     - "custom [product_type] producer [material]"
     - "[material] [product_type] factory"
     - Avoid consumer-oriented terms like "shop", "store", "buy", "best [product]"
+11. **risk_tolerance**: Extract buyer posture if stated (`low`, `medium`, `high` risk tolerance)
+12. **priority_tradeoff**: Extract ranking preference when stated (`lowest_cost`, `fastest_delivery`, `highest_quality`, `lowest_risk`, `balanced`)
+13. **minimum_supplier_count**: If user requests a minimum option count before deciding
+14. **evidence_strictness**: Desired proof strictness if implied (`relaxed`, `balanced`, `strict`)
 
 If a field cannot be determined, set it to null and add the field name to `missing_fields`.
 
@@ -131,6 +135,10 @@ Tailor questions to the actual product. For example:
 - **Furniture**: Ask about wood species, finish type, assembly requirements
 
 For each question, provide 2-4 suggestion options the user can click.
+Also provide:
+- **why_this_question**: one short sentence explaining why this question improves outcome quality
+- **if_skipped_impact**: one short sentence describing what degrades if user skips
+- **suggested_default**: a safe default answer users can accept with one click
 
 IMPORTANT: Think about whether each question adds genuine value. A highly specific request like "500 units of 12oz cotton canvas tote bags, screen printed, delivered to LA by March" needs at most 1 question. A vague request like "custom mugs" needs 3-4.
 
@@ -154,6 +162,10 @@ Respond ONLY with valid JSON matching this schema. No markdown, no explanation:
   "deadline": "YYYY-MM-DD or null",
   "certifications_needed": ["list of strings"],
   "budget_range": "string or null",
+  "risk_tolerance": "string or null",
+  "priority_tradeoff": "string or null",
+  "minimum_supplier_count": "int or null",
+  "evidence_strictness": "string or null",
   "missing_fields": ["list of field names"],
   "search_queries": ["3-5 English search queries"],
   "regional_searches": [
@@ -170,13 +182,19 @@ Respond ONLY with valid JSON matching this schema. No markdown, no explanation:
       "field": "budget_range",
       "question": "What's your target price per unit?",
       "importance": "recommended",
-      "suggestions": ["Under $3/unit", "$3-8/unit", "$8-15/unit", "No specific budget"]
+      "suggestions": ["Under $3/unit", "$3-8/unit", "$8-15/unit", "No specific budget"],
+      "why_this_question": "Budget helps rank realistic suppliers and avoid dead-end options.",
+      "if_skipped_impact": "Skipping may produce recommendations outside your acceptable range.",
+      "suggested_default": "$3-8/unit"
     },
     {
       "field": "trade_off_priority",
       "question": "If you had to choose, what matters most for this order?",
       "importance": "recommended",
-      "suggestions": ["Lowest cost", "Fastest delivery", "Highest quality", "Flexibility on MOQ"]
+      "suggestions": ["Lowest cost", "Fastest delivery", "Highest quality", "Flexibility on MOQ"],
+      "why_this_question": "Trade-off preference determines how we rank suppliers.",
+      "if_skipped_impact": "Without a preference, rankings may not match your decision style.",
+      "suggested_default": "Balanced approach"
     }
   ],
   "sourcing_strategy": "Brief explanation of sourcing approach..."
