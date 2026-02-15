@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { automotiveClient } from '@/lib/automotive/client'
 import { STAGE_LABELS, STAGE_ORDER, type PipelineStage } from '@/types/automotive'
@@ -16,19 +16,18 @@ export default function AutomotiveDashboard() {
   const [projects, setProjects] = useState<any[]>([])
   const [loaded, setLoaded] = useState(false)
 
-  const loadProjects = async () => {
-    try {
-      const list = await automotiveClient.listProjects()
-      setProjects(list)
-    } catch (e) {
-      console.error('Failed to load projects', e)
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const list = await automotiveClient.listProjects()
+        setProjects(list)
+      } catch (e) {
+        console.error('Failed to load projects', e)
+      }
+      setLoaded(true)
     }
-    setLoaded(true)
-  }
-
-  if (!loaded) {
     loadProjects()
-  }
+  }, [])
 
   const handleGenerate = async () => {
     setGenerating(true)

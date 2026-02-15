@@ -36,6 +36,7 @@ class ProcurementState(TypedDict, total=False):
     intelligence_reports: dict  # IntelligenceReportResult as dict
     rfq_result: dict  # RFQResult as dict
     quote_ingestion: dict  # QuoteIngestionResult as dict
+    raw_quote_texts: list[dict]  # [{supplier_id, supplier_name, text}] from webhooks/manual
 
     # Pipeline control
     current_stage: str

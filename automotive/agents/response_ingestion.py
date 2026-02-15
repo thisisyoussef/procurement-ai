@@ -153,20 +153,60 @@ async def parse_quote_from_text(
 async def run(state: dict[str, Any]) -> dict[str, Any]:
     """LangGraph node entry point.
 
-    In production, this node would be triggered by inbound email webhooks.
-    For the initial implementation, it processes any quotes attached to state.
+    Processes quotes from three sources:
+    1. Already-parsed quotes in state (from webhook handler)
+    2. Raw quote texts attached to state (from manual paste or email body)
+    3. RFQ outreach records — generates placeholder entries for suppliers
+       that were sent RFQs but haven't responded yet
     """
     rfq_data = state.get("rfq_result", {})
     existing_quotes = state.get("quote_ingestion", {})
+    raw_quotes = state.get("raw_quote_texts", [])  # list of {supplier_id, supplier_name, text}
+    req_data = state.get("parsed_requirement", {})
 
-    quotes = existing_quotes.get("quotes", []) if existing_quotes else []
+    # Start with any already-parsed quotes
+    parsed: list[ParsedQuote] = []
+    if existing_quotes:
+        for q in existing_quotes.get("quotes", []):
+            parsed.append(ParsedQuote(**q) if isinstance(q, dict) else q)
+
+    # Parse any raw quote texts that arrived (from webhook or manual input)
+    rfq_context = {
+        "part_description": req_data.get("part_description", ""),
+        "annual_volume": req_data.get("annual_volume", 0),
+    } if req_data else None
+
+    for raw in raw_quotes:
+        if not raw.get("text"):
+            continue
+        quote = await parse_quote_from_text(
+            raw_text=raw["text"],
+            supplier_id=raw.get("supplier_id", "unknown"),
+            supplier_name=raw.get("supplier_name", "Unknown"),
+            rfq_context=rfq_context,
+        )
+        parsed.append(quote)
+
+    # Build awaiting list from outreach records
+    outreach = rfq_data.get("outreach_records", []) if rfq_data else []
+    parsed_supplier_ids = {q.supplier_id for q in parsed}
+    awaiting = [
+        r.get("supplier_name", r.get("supplier_id", ""))
+        for r in outreach
+        if r.get("supplier_id") not in parsed_supplier_ids
+        and r.get("delivery_status") in ("sent", "approved", "draft")
+    ]
+
+    total_received = len(parsed) + len(raw_quotes)
+    logger.info("Quote ingestion: %d parsed, %d awaiting response", len(parsed), len(awaiting))
 
     return {
         "quote_ingestion": QuoteIngestionResult(
-            quotes=[ParsedQuote(**q) if isinstance(q, dict) else q for q in quotes],
-            total_received=len(quotes),
-            total_parsed=len(quotes),
+            quotes=parsed,
+            total_received=total_received,
+            total_parsed=len(parsed),
+            awaiting_response=awaiting,
         ).model_dump(),
         "current_stage": "quote_ingest",
-        "messages": [{"role": "system", "content": f"Quote ingestion: {len(quotes)} quotes processed"}],
+        "messages": [{"role": "system", "content": f"Quote ingestion: {len(parsed)} quotes parsed, {len(awaiting)} awaiting response"}],
     }

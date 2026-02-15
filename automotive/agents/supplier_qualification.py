@@ -63,10 +63,13 @@ async def _verify_single_supplier(
     corporate_task = check_corporate_registration(supplier.company_name)
     reviews_task = check_google_reviews(supplier.company_name, supplier.headquarters)
 
+    async def _empty_caps() -> dict:
+        return {}
+
     website_task = (
         extract_supplier_capabilities(supplier.website)
         if supplier.website
-        else asyncio.coroutine(lambda: {})()
+        else _empty_caps()
     )
 
     results = await asyncio.gather(

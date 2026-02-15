@@ -190,8 +190,16 @@ async def send_rfqs(rfq_result: RFQResult) -> RFQResult:
     from app.core.config import get_settings
 
     settings = get_settings()
+
+    # Mark all draft records as approved (gate already gave approval)
+    for record in rfq_result.outreach_records:
+        if record.delivery_status == "draft":
+            record.delivery_status = "approved"
+
     if not settings.resend_api_key:
-        logger.warning("Resend not configured, marking as pending")
+        logger.warning("Resend not configured — RFQs marked as approved but not sent. "
+                       "Configure RESEND_API_KEY to enable email delivery.")
+        rfq_result.total_sent = 0
         return rfq_result
 
     import resend
@@ -224,6 +232,21 @@ async def send_rfqs(rfq_result: RFQResult) -> RFQResult:
     logger.info("Sent %d RFQs, %d failed", sent_count, bounced_count)
 
     return rfq_result
+
+
+async def run_send(state: dict[str, Any]) -> dict[str, Any]:
+    """LangGraph node entry point — sends RFQs after human approval."""
+    rfq_data = state.get("rfq_result")
+    if not rfq_data:
+        return {"errors": [{"stage": "rfq_send", "error": "No RFQ data to send"}]}
+
+    rfq_result = RFQResult(**rfq_data)
+    result = await send_rfqs(rfq_result)
+
+    return {
+        "rfq_result": result.model_dump(),
+        "messages": [{"role": "system", "content": f"RFQ emails: {result.total_sent} sent, {result.total_bounced} bounced"}],
+    }
 
 
 async def run(state: dict[str, Any]) -> dict[str, Any]:

@@ -49,6 +49,8 @@ async def create_project(
         )
         db.add(project)
         await db.flush()
+        # Commit immediately so the background pipeline task can read/update the row
+        await db.commit()
     else:
         _in_memory_projects[project_id] = {
             "project_id": project_id,
@@ -214,6 +216,8 @@ async def get_project(db: AsyncSession | None, project_id: str) -> dict[str, Any
                 "approvals": project.approvals,
                 "weight_profile": project.weight_profile,
                 "buyer_company": project.buyer_company,
+                "buyer_contact_name": project.buyer_contact_name,
+                "buyer_contact_email": project.buyer_contact_email,
                 "created_at": project.created_at.isoformat(),
             }
     return _in_memory_projects.get(project_id)

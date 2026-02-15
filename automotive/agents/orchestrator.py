@@ -65,6 +65,11 @@ async def rfq_node(state: ProcurementState) -> dict[str, Any]:
     return await rfq_outreach.run(state)
 
 
+async def rfq_send_node(state: ProcurementState) -> dict[str, Any]:
+    """Send approved RFQ emails to suppliers."""
+    return await rfq_outreach.run_send(state)
+
+
 async def quote_ingest_node(state: ProcurementState) -> dict[str, Any]:
     """Agent 7: Parse incoming supplier quotes."""
     return await response_ingestion.run(state)
@@ -243,13 +248,30 @@ async def gate_after_quotes(state: ProcurementState) -> dict[str, Any]:
 
 # ── Routing logic ─────────────────────────────────────────────────────
 
+_discovery_retries: dict[str, int] = {}  # project_id -> retry count
+
+MAX_DISCOVERY_RETRIES = 2
+
+
 def _should_expand_search(state: ProcurementState) -> str:
-    """Check if discovery returned too few results."""
+    """Check if discovery returned too few results (max 2 retries)."""
     discovery = state.get("discovery_result", {})
     total = discovery.get("total_found", 0)
-    if total < 3:
-        logger.info("Only %d suppliers found, expanding search", total)
+    project_id = state.get("project_id", "unknown")
+
+    retries = _discovery_retries.get(project_id, 0)
+
+    if total < 3 and retries < MAX_DISCOVERY_RETRIES:
+        _discovery_retries[project_id] = retries + 1
+        logger.info("Only %d suppliers found (attempt %d/%d), expanding search",
+                     total, retries + 1, MAX_DISCOVERY_RETRIES)
         return "expand_search"
+
+    # Clean up counter
+    _discovery_retries.pop(project_id, None)
+
+    if total < 3:
+        logger.warning("Only %d suppliers found after %d retries, proceeding anyway", total, MAX_DISCOVERY_RETRIES)
     return "proceed"
 
 
@@ -272,6 +294,7 @@ def build_graph() -> StateGraph:
     graph.add_node("gate_report", gate_after_report)
     graph.add_node("rfq", rfq_node)
     graph.add_node("gate_rfq_send", gate_before_send)
+    graph.add_node("rfq_send", rfq_send_node)
     graph.add_node("quote_ingest", quote_ingest_node)
     graph.add_node("gate_quotes", gate_after_quotes)
     graph.add_node("complete", complete_node)
@@ -295,7 +318,8 @@ def build_graph() -> StateGraph:
     graph.add_edge("report", "gate_report")
     graph.add_edge("gate_report", "rfq")
     graph.add_edge("rfq", "gate_rfq_send")
-    graph.add_edge("gate_rfq_send", "quote_ingest")
+    graph.add_edge("gate_rfq_send", "rfq_send")
+    graph.add_edge("rfq_send", "quote_ingest")
     graph.add_edge("quote_ingest", "gate_quotes")
     graph.add_edge("gate_quotes", "complete")
     graph.add_edge("complete", END)
