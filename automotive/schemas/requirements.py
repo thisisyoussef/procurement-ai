@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _coerce_optional_int(v: object) -> int | None:
+    """Coerce LLM output to int or None.
+
+    The LLM sometimes returns descriptive strings like
+    'Samples for durability testing (quantity not specified)'
+    instead of an integer. We try to extract a number; if we can't, return None.
+    """
+    if v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    if isinstance(v, str):
+        v = v.strip().replace(",", "")
+        # Try direct parse first
+        try:
+            return int(v)
+        except ValueError:
+            pass
+        # Try to extract first number from the string
+        match = re.search(r"\d+", v)
+        if match:
+            return int(match.group())
+        return None
+    return None
 
 
 class ParsedRequirement(BaseModel):
@@ -58,6 +87,23 @@ class ParsedRequirement(BaseModel):
     complexity_score: Literal["simple", "moderate", "complex"] = "moderate"
     estimated_tooling_range: str = Field(default="", description="e.g. $50K–$150K")
     estimated_lead_time: str = Field(default="", description="e.g. 12–16 weeks tooling")
+
+    # ── Validators to coerce sloppy LLM output ──
+
+    @field_validator("annual_volume", mode="before")
+    @classmethod
+    def _coerce_annual_volume(cls, v: object) -> int:
+        result = _coerce_optional_int(v)
+        return result if result is not None else 0
+
+    @field_validator(
+        "prototype_quantity", "lot_size", "max_distance_miles",
+        "min_revenue", "min_employees",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_opt_ints(cls, v: object) -> int | None:
+        return _coerce_optional_int(v)
 
 
 # JSON Schema for structured output extraction
