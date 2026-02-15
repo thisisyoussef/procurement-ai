@@ -231,6 +231,30 @@ def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) ->
     return hits >= min_required
 
 
+def _is_promotable_filtered_supplier(
+    supplier: DiscoveredSupplier,
+    industrial_mode: bool,
+) -> bool:
+    """Whether a filtered supplier can be promoted for broad-net verification."""
+    reason = (supplier.filtered_reason or "").lower()
+
+    # Never promote clearly wrong industry in industrial mode.
+    if industrial_mode and reason == "wrong_industry":
+        return False
+
+    # Never promote pure retail-store profiles.
+    if reason == "retail_store":
+        return False
+
+    # Keep some quality floor for broad-net promotions.
+    if reason == "low_relevance" and supplier.relevance_score < 28:
+        return False
+    if reason == "wrong_product_type" and supplier.relevance_score < 55:
+        return False
+
+    return True
+
+
 # ── Product Page URL Validation ──────────────────────────────────
 
 def _validate_product_page_url(product_url: str | None, website: str | None) -> str | None:
@@ -1054,44 +1078,40 @@ async def discover_suppliers(
         emit_progress("discovering", "filtering",
                       f"Filtered {len(filtered_suppliers)} low-quality results (retail stores, irrelevant matches)")
 
-    # If strict filters remove every candidate, keep a small set of strongest
-    # borderline matches so verification can still run and provide signal.
-    if not main_suppliers and filtered_suppliers:
-        rescue_pool = sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
-        rescued: list[DiscoveredSupplier] = []
-        for supplier in rescue_pool:
-            reason = supplier.filtered_reason or ""
+    # Keep a broad verification pool: if strict filters leave too few suppliers,
+    # promote top borderline suppliers for downstream verification.
+    target_min_viable = min(30, max(12, len(suppliers) // 2))
+    if len(main_suppliers) < target_min_viable and filtered_suppliers:
+        needed = target_min_viable - len(main_suppliers)
+        promotable = [
+            supplier
+            for supplier in sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
+            if _is_promotable_filtered_supplier(supplier, industrial_mode)
+        ]
+        promoted = promotable[:needed]
 
-            # In industrial mode, do not rescue clearly consumer/merch suppliers.
-            if industrial_mode and reason == "wrong_industry":
-                continue
+        if promoted:
+            promoted_ids = {id(s) for s in promoted}
+            for supplier in promoted:
+                supplier.raw_data["promoted_for_verification"] = True
+                supplier.raw_data["promoted_from_filter_reason"] = supplier.filtered_reason
+                supplier.filtered_reason = None
 
-            # Ignore very weak matches.
-            if reason == "low_relevance" and supplier.relevance_score < 30:
-                continue
-            if reason == "wrong_product_type" and supplier.relevance_score < 55:
-                continue
+            main_suppliers.extend(promoted)
+            filtered_suppliers = [s for s in filtered_suppliers if id(s) not in promoted_ids]
 
-            supplier.raw_data["rescued_from_filter_reason"] = reason
-            supplier.filtered_reason = None
-            rescued.append(supplier)
-            if len(rescued) >= 5:
-                break
-
-        if rescued:
-            rescued_ids = {id(s) for s in rescued}
-            main_suppliers = rescued
-            filtered_suppliers = [s for s in filtered_suppliers if id(s) not in rescued_ids]
             logger.warning(
-                "Filter fallback triggered: rescued %d suppliers so pipeline can continue",
-                len(rescued),
+                "Broad-net backfill promoted %d suppliers (target=%d, now=%d)",
+                len(promoted),
+                target_min_viable,
+                len(main_suppliers),
             )
             emit_progress(
                 "discovering",
-                "filter_relaxed",
+                "broad_net_backfill",
                 (
-                    "No suppliers passed strict filtering. Kept "
-                    f"{len(rescued)} borderline matches for verification."
+                    f"Promoted {len(promoted)} borderline suppliers for broader verification "
+                    f"coverage (now {len(main_suppliers)} candidates)."
                 ),
             )
 

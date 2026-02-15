@@ -277,7 +277,31 @@ async def verify_node(state: GraphState) -> GraphState:
         discovery = DiscoveryResults(**state["discovery_results"])
         buyer_context = _load_buyer_context(state)
 
-        if not discovery.suppliers:
+        # Build a broad verification pool from high-confidence suppliers first,
+        # then backfill with borderline candidates to maintain global search coverage.
+        candidate_pool = sorted(
+            discovery.suppliers, key=lambda s: s.relevance_score, reverse=True
+        )
+
+        if len(candidate_pool) < 25 and discovery.filtered_suppliers:
+            seen = {(s.name.lower(), (s.website or "").lower()) for s in candidate_pool}
+            for supplier in sorted(
+                discovery.filtered_suppliers,
+                key=lambda s: s.relevance_score,
+                reverse=True,
+            ):
+                reason = (supplier.filtered_reason or "").lower()
+                if reason == "wrong_industry":
+                    continue
+                key = (supplier.name.lower(), (supplier.website or "").lower())
+                if key in seen:
+                    continue
+                candidate_pool.append(supplier)
+                seen.add(key)
+                if len(candidate_pool) >= 40:
+                    break
+
+        if not candidate_pool:
             logger.error("Verification aborted: discovery returned zero viable suppliers")
             return {
                 **state,
@@ -288,9 +312,7 @@ async def verify_node(state: GraphState) -> GraphState:
                 ),
             }
 
-        top_suppliers = sorted(
-            discovery.suppliers, key=lambda s: s.relevance_score, reverse=True
-        )[:20]
+        top_suppliers = candidate_pool[:40]
         result = await verify_suppliers(
             top_suppliers,
             requirements=requirements,

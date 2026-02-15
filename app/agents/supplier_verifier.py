@@ -306,7 +306,27 @@ async def verify_suppliers(
                 )
             except Exception as e:
                 logger.error("❌ Verification failed for supplier [%d] %s: %s", idx, s.name, e)
-                return None
+                # Resilience: return a structured high-risk verification instead of dropping
+                # the supplier entirely. This prevents whole-stage collapse when a shared
+                # dependency fails transiently.
+                return SupplierVerification(
+                    supplier_name=s.name,
+                    supplier_index=idx,
+                    checks=[
+                        VerificationCheck(
+                            check_type="verification_error",
+                            status="failed",
+                            score=0,
+                            details=f"Verification process error: {str(e)[:180]}",
+                        )
+                    ],
+                    composite_score=0.0,
+                    risk_level="high",
+                    recommendation="reject",
+                    summary=f"Verification failed due to processing error: {str(e)[:180]}",
+                    preferred_contact_method="email",
+                    contact_notes="Automated checks failed; manual review required.",
+                )
 
     tasks = []
     for i, s in enumerate(suppliers):
