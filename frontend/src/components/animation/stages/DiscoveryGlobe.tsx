@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { m } from '@/lib/motion'
 import { DURATION, EASE_OUT_EXPO } from '@/lib/motion/config'
 import GlobeSVG from '../globe/GlobeSVG'
@@ -8,6 +8,35 @@ import { useGlobeTimeline } from '../globe/useGlobeTimeline'
 import { useStageProgress } from '../shared/useStageProgress'
 import EventTickerOverlay from '../shared/EventTickerOverlay'
 import AnimatedCounter from '../AnimatedCounter'
+
+function deriveLiveSupplierCount(
+  events: Array<{ detail: string; substep: string }>,
+  fallback: number
+): number {
+  let count = Number.isFinite(fallback) ? Math.max(0, fallback) : 0
+
+  for (const event of events) {
+    const detail = event.detail || ''
+    const completeMatch = detail.match(/Discovery complete:\s*(\d+)\s+suppliers/i)
+    if (completeMatch) {
+      count = Math.max(count, Number.parseInt(completeMatch[1], 10) || 0)
+      continue
+    }
+
+    const rawMatch = detail.match(/Found\s+(\d+)\s+raw results/i)
+    if (rawMatch) {
+      count = Math.max(count, Number.parseInt(rawMatch[1], 10) || 0)
+      continue
+    }
+
+    const checkingMatch = detail.match(/Checking\s+(\d+)\s+suppliers/i)
+    if (checkingMatch) {
+      count = Math.max(count, Number.parseInt(checkingMatch[1], 10) || 0)
+    }
+  }
+
+  return count
+}
 
 /**
  * Discovery Globe — hero animation for the "discovering" pipeline stage.
@@ -35,6 +64,11 @@ export default function DiscoveryGlobe() {
   const [searchingRegion, setSearchingRegion] = useState<string | null>(null)
   const animatedArcsRef = useRef(new Set<string>())
   const completeFired = useRef(false)
+  const liveSupplierCount = useMemo(
+    () => deriveLiveSupplierCount(events, supplierCount),
+    [events, supplierCount]
+  )
+  const countIsEstimated = !isComplete && supplierCount === 0 && liveSupplierCount > 0
 
   // Dot ripple-in after a short delay
   useEffect(() => {
@@ -140,10 +174,11 @@ export default function DiscoveryGlobe() {
         className="mt-4 text-center"
       >
         <p className="text-[28px] font-semibold text-ink tabular-nums">
-          <AnimatedCounter value={supplierCount} />
+          <AnimatedCounter value={liveSupplierCount} />
         </p>
         <p className="text-[12px] text-ink-3 mt-0.5">
-          {supplierCount === 1 ? 'supplier found' : 'suppliers found'}
+          {liveSupplierCount === 1 ? 'supplier found' : 'suppliers found'}
+          {countIsEstimated && <span className="text-ink-4"> (live estimate)</span>}
           {activeRegions.length > 0 && !isComplete && (
             <span className="text-ink-4"> across {activeRegions.length} region{activeRegions.length > 1 ? 's' : ''}</span>
           )}

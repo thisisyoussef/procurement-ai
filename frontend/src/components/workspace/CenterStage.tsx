@@ -9,6 +9,7 @@ import ComparePhase from './phases/ComparePhase'
 import SamplesPhase from './phases/SamplesPhase'
 import OrderPhase from './phases/OrderPhase'
 import LiveProgressFeed from './LiveProgressFeed'
+import DebugConsoleFeed from './DebugConsoleFeed'
 import CheckpointBanner from './CheckpointBanner'
 import StageTransitionToast from './StageTransitionToast'
 import SupplierProfileView from './supplier-profile/SupplierProfileView'
@@ -57,6 +58,7 @@ export default function CenterStage() {
         <>
           <CheckpointBanner />
           <LiveProgressFeed />
+          <DebugConsoleFeed />
           <AnimatePresence mode="wait">
             <m.div
               key={activePhase}
