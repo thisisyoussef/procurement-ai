@@ -78,12 +78,10 @@ export default function AgentNarrationPanel() {
   const [showEarlier, setShowEarlier] = useState(false)
   const [retrying, setRetrying] = useState(false)
 
-  if (!projectId || !status) return null
-
-  const stage = status.current_stage || 'parsing'
-  const events = status.progress_events || []
+  const stage = status?.current_stage || 'parsing'
+  const events = status?.progress_events || []
   const latestEvent = events.length > 0 ? events[events.length - 1] : null
-  const activeCheckpoint = status.active_checkpoint || null
+  const activeCheckpoint = status?.active_checkpoint || null
   const isTerminal = ['complete', 'failed', 'canceled'].includes(stage)
 
   const narrativeEvents = events.filter(
@@ -96,19 +94,19 @@ export default function AgentNarrationPanel() {
   const stageNarrative = useMemo(() => {
     const recentNarrative = narrativeEvents[narrativeEvents.length - 1]?.detail
     if (recentNarrative) return recentNarrative
-    if (stage === 'discovering' && status.discovery_results?.discovery_briefing) {
-      return status.discovery_results.discovery_briefing
+    if (stage === 'discovering' && status?.discovery_results?.discovery_briefing) {
+      return status?.discovery_results?.discovery_briefing
     }
-    if (stage === 'recommending' && status.recommendation?.executive_summary) {
-      return status.recommendation.executive_summary
+    if (stage === 'recommending' && status?.recommendation?.executive_summary) {
+      return status?.recommendation?.executive_summary
     }
     return latestEvent?.detail || STAGE_FALLBACKS[stage] || 'Working on your project.'
   }, [
     latestEvent?.detail,
     narrativeEvents,
     stage,
-    status.discovery_results?.discovery_briefing,
-    status.recommendation?.executive_summary,
+    status?.discovery_results?.discovery_briefing,
+    status?.recommendation?.executive_summary,
   ])
 
   const currentActivity = useMemo(() => {
@@ -125,9 +123,11 @@ export default function AgentNarrationPanel() {
   const currentSupplier = useMemo(() => extractCurrentSupplier(events), [events])
   const currentStageIndex = stageIndex(stage)
 
-  const retryFromStage = stage === 'failed' && (status.error || '').toLowerCase().includes('parsing')
+  const retryFromStage = stage === 'failed' && (status?.error || '').toLowerCase().includes('parsing')
     ? 'parsing'
     : 'discovering'
+
+  if (!projectId || !status) return null
 
   const handleRetry = async () => {
     setRetrying(true)
