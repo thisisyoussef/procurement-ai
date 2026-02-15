@@ -832,21 +832,61 @@ Return ONLY a JSON array. No explanation."""
         max_tokens=8192,
     )
 
-    # Parse response
-    try:
-        text = response_text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-        supplier_data = json.loads(text)
-        if isinstance(supplier_data, dict):
-            supplier_data = supplier_data.get("suppliers", [])
-    except (json.JSONDecodeError, KeyError):
-        import re
-        json_match = re.search(r"\[.*\]", response_text, re.DOTALL)
-        if json_match:
-            supplier_data = json.loads(json_match.group())
-        else:
-            supplier_data = []
+    # Parse response — LLMs sometimes produce malformed JSON (trailing commas,
+    # single quotes, unescaped control chars).  We try progressively harder
+    # repair strategies before giving up.
+    def _repair_json(raw: str) -> list:
+        """Attempt to parse JSON with progressively aggressive repairs."""
+        # Strategy 1: direct parse
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else data.get("suppliers", [data]) if isinstance(data, dict) else []
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        # Strategy 2: extract [...] block and parse
+        arr_match = re.search(r"\[.*\]", raw, re.DOTALL)
+        if arr_match:
+            try:
+                data = json.loads(arr_match.group())
+                return data if isinstance(data, list) else []
+            except json.JSONDecodeError:
+                raw = arr_match.group()  # continue repairing extracted block
+
+        # Strategy 3: fix common LLM JSON errors
+        repaired = raw
+        # Remove trailing commas before } or ]
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+        # Replace single quotes with double quotes (careful with apostrophes)
+        repaired = re.sub(r"(?<=[\[{,:\s])'|'(?=[\]},:\s])", '"', repaired)
+        # Remove control characters that break JSON
+        repaired = re.sub(r"[\x00-\x1f]+", " ", repaired)
+        try:
+            data = json.loads(repaired)
+            return data if isinstance(data, list) else []
+        except json.JSONDecodeError:
+            pass
+
+        # Strategy 4: extract individual {...} objects and build array
+        objects = []
+        for m in re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", raw, re.DOTALL):
+            chunk = m.group()
+            chunk = re.sub(r",\s*([}\]])", r"\1", chunk)
+            chunk = re.sub(r"[\x00-\x1f]+", " ", chunk)
+            try:
+                obj = json.loads(chunk)
+                if isinstance(obj, dict) and obj.get("name"):
+                    objects.append(obj)
+            except json.JSONDecodeError:
+                continue
+        return objects
+
+    text = response_text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    supplier_data = _repair_json(text)
+    if not supplier_data:
+        logger.warning("Could not parse any supplier JSON from LLM response (%d chars)", len(response_text))
 
     suppliers = []
     for s in supplier_data:
