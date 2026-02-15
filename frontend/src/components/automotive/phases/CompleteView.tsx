@@ -1,6 +1,8 @@
 'use client'
 
 import type { ProjectDetail } from '@/lib/automotive/client'
+import ScoreBar from '@/components/automotive/shared/ScoreBar'
+import Tooltip from '@/components/automotive/shared/Tooltip'
 
 interface Props {
   project: ProjectDetail
@@ -28,6 +30,12 @@ export default function CompleteView({ project }: Props) {
 
   const formatUSD = (n: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+
+  const confidenceTooltip = (c: number) => {
+    if (c >= 0.8) return 'High confidence — quote data was clearly structured and easily extracted.'
+    if (c >= 0.5) return 'Medium confidence — some fields were estimated or partially extracted.'
+    return 'Low confidence — significant manual review recommended.'
+  }
 
   return (
     <div className="space-y-6">
@@ -100,42 +108,82 @@ export default function CompleteView({ project }: Props) {
           <div className="px-6 py-4 border-b border-zinc-800">
             <h3 className="font-semibold">Final Quote Rankings</h3>
           </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800">
-                <th className="px-4 py-3 text-left text-xs text-zinc-500 font-normal">#</th>
-                <th className="px-4 py-3 text-left text-xs text-zinc-500 font-normal">Supplier</th>
-                <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Piece Price</th>
-                <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Tooling</th>
-                <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Lead Time</th>
-                <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Annual TCO</th>
-                <th className="px-4 py-3 text-center text-xs text-zinc-500 font-normal">Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...quotesList]
-                .sort((a, b) => a.estimated_annual_tco_usd - b.estimated_annual_tco_usd)
-                .map((q, idx) => (
-                  <tr key={q.supplier_name} className={`border-b border-zinc-800/50 ${idx === 0 ? 'bg-emerald-500/5' : ''}`}>
-                    <td className="px-4 py-3 text-zinc-600 font-mono text-xs">{idx + 1}</td>
-                    <td className="px-4 py-3 text-zinc-200 font-medium">{q.supplier_name}</td>
-                    <td className="px-4 py-3 text-right text-zinc-300 font-mono">${q.piece_price.toFixed(3)}</td>
-                    <td className="px-4 py-3 text-right text-zinc-400">
-                      {q.tooling_cost ? formatUSD(q.tooling_cost) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-zinc-400">
-                      {q.production_lead_time_weeks ? `${q.production_lead_time_weeks}w` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-zinc-200 font-semibold">
-                      {formatUSD(q.estimated_annual_tco_usd)}
-                    </td>
-                    <td className="px-4 py-3 text-center text-zinc-400 font-mono text-xs">
-                      {Math.round(q.extraction_confidence * 100)}%
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+
+          {/* Desktop table */}
+          <div className="hidden md:block">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800">
+                  <th className="px-4 py-3 text-left text-xs text-zinc-500 font-normal">#</th>
+                  <th className="px-4 py-3 text-left text-xs text-zinc-500 font-normal">Supplier</th>
+                  <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Piece Price</th>
+                  <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Tooling</th>
+                  <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Lead Time</th>
+                  <th className="px-4 py-3 text-right text-xs text-zinc-500 font-normal">Annual TCO</th>
+                  <th className="px-4 py-3 text-center text-xs text-zinc-500 font-normal">Confidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...quotesList]
+                  .sort((a, b) => a.estimated_annual_tco_usd - b.estimated_annual_tco_usd)
+                  .map((q, idx) => (
+                    <tr key={q.supplier_name} className={`border-b border-zinc-800/50 ${idx === 0 ? 'bg-emerald-500/5' : ''}`}>
+                      <td className="px-4 py-3 text-zinc-600 font-mono text-xs">{idx + 1}</td>
+                      <td className="px-4 py-3">
+                        <span className="font-medium text-zinc-200">{q.supplier_name}</span>
+                        {idx === 0 && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            BEST TCO
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-300 font-mono">${q.piece_price.toFixed(3)}</td>
+                      <td className="px-4 py-3 text-right text-zinc-400">
+                        {q.tooling_cost ? formatUSD(q.tooling_cost) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-400">
+                        {q.production_lead_time_weeks ? `${q.production_lead_time_weeks}w` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-200 font-semibold">
+                        {formatUSD(q.estimated_annual_tco_usd)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Tooltip content={confidenceTooltip(q.extraction_confidence)}>
+                          <div className="w-20 mx-auto">
+                            <ScoreBar value={q.extraction_confidence * 100} size="sm" />
+                          </div>
+                        </Tooltip>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden p-4 space-y-3">
+            {[...quotesList]
+              .sort((a, b) => a.estimated_annual_tco_usd - b.estimated_annual_tco_usd)
+              .map((q, idx) => (
+                <div key={q.supplier_name} className={`rounded-lg p-4 ${idx === 0 ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-zinc-800/50'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-sm text-zinc-200">{q.supplier_name}</span>
+                    {idx === 0 && <span className="text-[10px] text-emerald-400">BEST TCO</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div><span className="text-zinc-500">Piece Price</span><p className="text-zinc-300 font-mono">${q.piece_price.toFixed(3)}</p></div>
+                    <div><span className="text-zinc-500">Annual TCO</span><p className="text-zinc-200 font-semibold">{formatUSD(q.estimated_annual_tco_usd)}</p></div>
+                    {q.tooling_cost && <div><span className="text-zinc-500">Tooling</span><p className="text-zinc-300">{formatUSD(q.tooling_cost)}</p></div>}
+                    {q.production_lead_time_weeks && <div><span className="text-zinc-500">Lead Time</span><p className="text-zinc-300">{q.production_lead_time_weeks}w</p></div>}
+                  </div>
+                  <div className="mt-2">
+                    <Tooltip content={confidenceTooltip(q.extraction_confidence)}>
+                      <ScoreBar value={q.extraction_confidence * 100} size="sm" />
+                    </Tooltip>
+                  </div>
+                </div>
+              ))}
+          </div>
         </div>
       )}
 

@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import StageActionButton from '@/components/automotive/shared/StageActionButton'
+import ProcessingState from '@/components/automotive/shared/ProcessingState'
 
 interface Props {
   data: Record<string, unknown> | null
@@ -13,8 +15,8 @@ interface Props {
 interface FieldDef {
   label: string
   type: 'text' | 'number' | 'select' | 'list' | 'boolean'
-  options?: string[] // for select fields
-  wide?: boolean     // span 2 columns
+  options?: string[]
+  wide?: boolean
 }
 
 const FIELDS: Record<string, FieldDef> = {
@@ -61,9 +63,16 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
     setEdits(prev => ({ ...prev, [key]: value }))
   }, [])
 
+  const removeEdit = useCallback((key: string) => {
+    setEdits(prev => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }, [])
+
   const handleConfirm = async () => {
     setSubmitting(true)
-    // Merge answers into edits as notes
     const answeredAmbiguities = Object.entries(answers)
       .filter(([, v]) => v.trim())
       .map(([idx, v]) => `Q: ${(data?.ambiguities as string[])?.[Number(idx)]} → A: ${v}`)
@@ -79,18 +88,11 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
   }
 
   if (!data) {
-    return (
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center">
-        <div className="flex items-center justify-center gap-3 mb-3">
-          <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-zinc-400">Parsing your requirements...</span>
-        </div>
-        <p className="text-xs text-zinc-600">Analyzing procurement request with AI</p>
-      </div>
-    )
+    return <ProcessingState stage="parse" variant={isActive ? 'processing' : 'waiting'} />
   }
 
   const ambiguities = (data.ambiguities as string[]) || []
+  const editCount = Object.keys(edits).length
 
   // Current value = edit override or original
   const val = (key: string) => (key in edits ? edits[key] : data[key])
@@ -106,8 +108,8 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
             <p className="text-xs text-zinc-500 mt-0.5">Click any field to edit · changes highlighted in amber</p>
           )}
         </div>
-        {isActive && (
-          <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {isActive && (
             <button
               onClick={() => {
                 if (editing) { setEdits({}); setAnswers({}) }
@@ -115,31 +117,32 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
               }}
               className="px-3 py-1.5 text-sm bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 transition-colors"
             >
-              {editing ? 'Cancel' : 'Edit Fields'}
+              {editing ? 'Cancel Edits' : 'Edit Fields'}
             </button>
-            <button
+          )}
+          {isActive && (
+            <StageActionButton
+              stage="parse"
               onClick={handleConfirm}
               disabled={submitting}
-              className="px-4 py-1.5 text-sm bg-amber-500 text-zinc-950 font-semibold rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-50"
-            >
-              {submitting ? 'Submitting...' : editing && Object.keys(edits).length > 0 ? 'Save & Continue →' : 'Approve & Continue →'}
-            </button>
-          </div>
-        )}
+              loading={submitting}
+              editCount={editCount}
+            />
+          )}
+        </div>
       </div>
 
-      {/* Clarification questions with input fields */}
+      {/* Clarification questions — elevated, above fields */}
       {ambiguities.length > 0 && (
-        <div className="px-6 py-4 bg-amber-500/5 border-b border-amber-500/20">
+        <div className="px-6 py-4 bg-amber-500/10 border-b border-amber-500/20 border-l-4 border-l-amber-500">
           <div className="flex items-center gap-2 mb-3">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="7" stroke="#f59e0b" strokeWidth="1.5"/>
-              <path d="M8 5v3M8 10.5v.5" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M8 2L10 6L14 6.5L11 9.5L12 14L8 11.5L4 14L5 9.5L2 6.5L6 6L8 2Z" stroke="#f59e0b" strokeWidth="1.2" fill="none" />
             </svg>
             <p className="text-sm text-amber-400 font-medium">
-              {ambiguities.length} question{ambiguities.length > 1 ? 's' : ''} to clarify
+              {ambiguities.length} clarification question{ambiguities.length > 1 ? 's' : ''}
             </p>
-            <span className="text-xs text-zinc-500">(optional — skip to continue with defaults)</span>
+            <span className="text-xs text-amber-500/70">— answering these helps AI find better suppliers</span>
           </div>
           <div className="space-y-3">
             {ambiguities.map((q, i) => (
@@ -153,13 +156,26 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
                     type="text"
                     value={answers[i] || ''}
                     onChange={(e) => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
-                    placeholder="Type your answer (or leave blank to skip)..."
+                    placeholder="AI will use its best guess if left blank"
                     className="w-full bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500/40"
                   />
                 </div>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Edit summary bar */}
+      {editing && editCount > 0 && (
+        <div className="px-6 py-2.5 bg-amber-500/5 border-b border-amber-500/10 flex items-center justify-between">
+          <span className="text-xs text-amber-400">{editCount} field{editCount > 1 ? 's' : ''} modified</span>
+          <button
+            onClick={() => setEdits({})}
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Reset All
+          </button>
         </div>
       )}
 
@@ -172,11 +188,22 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
           const isEdited = edited(key)
 
           return (
-            <div key={key} className={def.wide ? 'col-span-2' : ''}>
-              <label className={`text-xs uppercase tracking-wider ${isEdited ? 'text-amber-400' : 'text-zinc-500'}`}>
-                {def.label}
-                {isEdited && <span className="ml-1 normal-case tracking-normal">(edited)</span>}
-              </label>
+            <div key={key} className={`${def.wide ? 'col-span-2' : ''} ${isEdited ? 'ring-1 ring-amber-500/30 rounded-lg p-2 -m-2' : ''}`}>
+              <div className="flex items-center justify-between">
+                <label className={`text-xs uppercase tracking-wider ${isEdited ? 'text-amber-400' : 'text-zinc-500'}`}>
+                  {def.label}
+                  {isEdited && <span className="ml-1 normal-case tracking-normal">(edited)</span>}
+                </label>
+                {isEdited && editing && (
+                  <button
+                    onClick={() => removeEdit(key)}
+                    className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                    title="Undo edit"
+                  >
+                    ✕ Undo
+                  </button>
+                )}
+              </div>
 
               {editing ? (
                 <div className="mt-1">
@@ -227,6 +254,12 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
                       {val(key) ? 'Yes' : 'No'}
                     </button>
                   )}
+                  {/* Show original value when edited */}
+                  {isEdited && (
+                    <p className="text-[10px] text-zinc-600 mt-1 line-through">
+                      Was: {displayValue(data[key])}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className={`mt-1 text-sm ${isEdited ? 'text-amber-400' : 'text-zinc-200'}`}>
@@ -256,22 +289,6 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Quick approve bar when not editing */}
-      {isActive && !editing && (
-        <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex items-center justify-between">
-          <p className="text-xs text-zinc-500">
-            Looks good? Approve to start supplier discovery, or edit fields above.
-          </p>
-          <button
-            onClick={handleConfirm}
-            disabled={submitting}
-            className="px-5 py-2 bg-amber-500 text-zinc-950 font-semibold rounded-lg hover:bg-amber-400 transition-colors text-sm disabled:opacity-50"
-          >
-            {submitting ? 'Submitting...' : 'Approve & Continue →'}
-          </button>
         </div>
       )}
     </div>

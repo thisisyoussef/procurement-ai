@@ -1,6 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import StageActionButton from '@/components/automotive/shared/StageActionButton'
+import ConfirmDialog from '@/components/automotive/shared/ConfirmDialog'
+import ProcessingState from '@/components/automotive/shared/ProcessingState'
 
 interface Props {
   data: Record<string, unknown> | null
@@ -56,17 +59,10 @@ const STATUS_ICONS: Record<string, string> = {
 
 export default function RFQView({ data, isActive, onApprove }: Props) {
   const [showPreview, setShowPreview] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   if (!data) {
-    return (
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center">
-        <div className="flex items-center justify-center gap-3 mb-3">
-          <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-zinc-400">Preparing RFQ packages...</span>
-        </div>
-        <p className="text-xs text-zinc-600">Generating professional RFQ documents and email drafts</p>
-      </div>
-    )
+    return <ProcessingState stage="rfq" variant={isActive ? 'processing' : 'waiting'} />
   }
 
   const rfqPackage = (data.rfq_package || {}) as RFQPackage
@@ -80,7 +76,10 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
         <div>
           <h3 className="font-semibold">RFQ & Outreach</h3>
           <p className="text-xs text-zinc-500 mt-1">
-            {totalSent} sent • {totalBounced} bounced • {outreach.filter((o) => o.responded).length} responded
+            {totalSent > 0
+              ? `${totalSent} sent · ${totalBounced} bounced · ${outreach.filter((o) => o.responded).length} responded`
+              : `${outreach.length} supplier${outreach.length !== 1 ? 's' : ''} ready for outreach`
+            }
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -91,12 +90,11 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
             {showPreview ? 'Hide RFQ' : 'Preview RFQ'}
           </button>
           {isActive && (
-            <button
-              onClick={onApprove}
-              className="px-4 py-1.5 text-sm bg-amber-500 text-zinc-950 font-semibold rounded-lg hover:bg-amber-400"
-            >
-              Send RFQs
-            </button>
+            <StageActionButton
+              stage="rfq"
+              onClick={() => setShowConfirm(true)}
+              supplierCount={outreach.length}
+            />
           )}
         </div>
       </div>
@@ -115,7 +113,7 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
             </div>
             <div>
               <span className="text-[10px] text-zinc-500 uppercase">Deadline</span>
-              <p className="text-xs text-zinc-300">{rfqPackage.response_deadline}</p>
+              <p className="text-xs text-zinc-300 font-semibold text-amber-400">{rfqPackage.response_deadline}</p>
             </div>
             <div>
               <span className="text-[10px] text-zinc-500 uppercase">NDA</span>
@@ -201,6 +199,18 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
           <p className="text-sm text-zinc-500">RFQ package ready. Approve to send to suppliers.</p>
         </div>
       )}
+
+      {/* Confirmation dialog for sending */}
+      <ConfirmDialog
+        open={showConfirm}
+        title={`Send RFQs to ${outreach.length} Supplier${outreach.length !== 1 ? 's' : ''}`}
+        description="This will email RFQ packages to the following suppliers. Emails will be sent immediately and this action cannot be undone."
+        details={outreach.map(r => `${r.supplier_name} — ${r.recipient_email}`)}
+        confirmLabel={`Yes, Send ${outreach.length} Email${outreach.length !== 1 ? 's' : ''} Now`}
+        variant="danger"
+        onConfirm={() => { setShowConfirm(false); onApprove() }}
+        onCancel={() => setShowConfirm(false)}
+      />
     </div>
   )
 }

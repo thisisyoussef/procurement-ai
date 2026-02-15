@@ -90,6 +90,24 @@ class ParsedRequirement(BaseModel):
 
     # ── Validators to coerce sloppy LLM output ──
 
+    @field_validator(
+        "secondary_operations", "certifications_required",
+        "preferred_regions", "ambiguities",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_str_lists(cls, v: object) -> list[str]:
+        """LLM sometimes returns a plain string instead of a list."""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            # Split on common delimiters: commas, semicolons, newlines
+            parts = re.split(r"[,;\n]+", v)
+            return [p.strip() for p in parts if p.strip()]
+        return []
+
     @field_validator("annual_volume", mode="before")
     @classmethod
     def _coerce_annual_volume(cls, v: object) -> int:

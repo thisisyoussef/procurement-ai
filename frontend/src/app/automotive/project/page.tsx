@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { automotiveClient, type ProjectDetail } from '@/lib/automotive/client'
 import { STAGE_LABELS, STAGE_ORDER, type PipelineStage } from '@/types/automotive'
@@ -15,6 +15,33 @@ import QuotesView from '@/components/automotive/phases/QuotesView'
 import CompleteView from '@/components/automotive/phases/CompleteView'
 import ActivityConsole from '@/components/automotive/workspace/ActivityConsole'
 
+/** Toast notification for stage transitions */
+const TRANSITION_MESSAGES: Record<string, string> = {
+  'parse→discover': 'Requirements approved. Searching for suppliers...',
+  'discover→qualify': 'Supplier list approved. Verifying credentials...',
+  'qualify→compare': 'Shortlist approved. Scoring and ranking suppliers...',
+  'compare→report': 'Rankings approved. Generating intelligence reports...',
+  'report→rfq': 'Reports approved. Drafting RFQ packages...',
+  'rfq→quote_ingest': 'RFQs sent. Waiting for supplier quotes...',
+  'quote_ingest→complete': 'Selection finalized. Pipeline complete!',
+}
+
+function Toast({ message, onDone }: { message: string; onDone: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDone, 4000)
+    return () => clearTimeout(timer)
+  }, [onDone])
+
+  return (
+    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-300">
+      <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl flex items-center gap-3">
+        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+        <p className="text-sm text-zinc-200">{message}</p>
+      </div>
+    </div>
+  )
+}
+
 function ProjectContent() {
   const params = useSearchParams()
   const router = useRouter()
@@ -22,12 +49,24 @@ function ProjectContent() {
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [activeTab, setActiveTab] = useState<PipelineStage>('parse')
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const prevStageRef = useRef<string | null>(null)
 
   const loadProject = useCallback(async () => {
     if (!projectId) return
     try {
       const data = await automotiveClient.getProject(projectId)
       setProject(data)
+
+      // Detect stage transition for toast
+      const newStage = data.current_stage
+      if (prevStageRef.current && prevStageRef.current !== newStage) {
+        const key = `${prevStageRef.current}→${newStage}`
+        const msg = TRANSITION_MESSAGES[key]
+        if (msg) setToast(msg)
+      }
+      prevStageRef.current = newStage
+
       setActiveTab(data.current_stage as PipelineStage)
     } catch (e: any) {
       setError(e.message)
@@ -92,8 +131,15 @@ function ProjectContent() {
 
   const currentStageIdx = STAGE_ORDER.indexOf(project.current_stage as PipelineStage)
 
+  // Derive processingStage: if project is running, the current_stage is being processed
+  const processingStage: PipelineStage | null =
+    project.status === 'running' ? (project.current_stage as PipelineStage) : null
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Transition toast */}
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -128,6 +174,7 @@ function ProjectContent() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         completedUpTo={currentStageIdx}
+        processingStage={processingStage}
       />
 
       {/* Stage content */}
@@ -158,6 +205,7 @@ function ProjectContent() {
             data={project.comparison_matrix}
             isActive={project.current_stage === 'compare'}
             onApprove={(weights) => handleApprove('compare', { weight_adjustments: weights })}
+            weightProfile={project.weight_profile}
           />
         )}
         {activeTab === 'report' && (
