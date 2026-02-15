@@ -291,7 +291,10 @@ async def verify_node(state: GraphState) -> GraphState:
             return {
                 **state,
                 "current_stage": PipelineStage.FAILED.value,
-                "error": "Supplier verification failed: all supplier checks returned errors. Try restarting from verification.",
+                "error": (
+                    "Supplier verification failed: all supplier checks returned errors. "
+                    "Try restarting supplier search or restart from the brief."
+                ),
             }
 
         try:

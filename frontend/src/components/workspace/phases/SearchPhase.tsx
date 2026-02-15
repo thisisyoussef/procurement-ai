@@ -11,7 +11,7 @@ import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
 type SortKey = 'relevance' | 'rating' | 'verification' | 'name'
 
 export default function SearchPhase() {
-  const { status, loading } = useWorkspace()
+  const { status, loading, restartCurrentProject, setActivePhase } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -20,11 +20,16 @@ export default function SearchPhase() {
   const [filterCountry, setFilterCountry] = useState('all')
   const [showIntermediaries, setShowIntermediaries] = useState(true)
   const [visibleCount, setVisibleCount] = useState(12)
+  const [restarting, setRestarting] = useState(false)
 
-  const suppliers = status?.discovery_results?.suppliers || []
+  const discoveryResults = status?.discovery_results
+  const suppliers = discoveryResults?.suppliers || []
+  const filteredSuppliers = discoveryResults?.filtered_suppliers || []
   const verifications = status?.verification_results?.verifications || []
   const currentStage = status?.current_stage || 'idle'
   const productType = status?.parsed_requirements?.product_type || 'your product'
+  const totalRawResults = discoveryResults?.total_raw_results || 0
+  const deduplicatedCount = discoveryResults?.deduplicated_count || suppliers.length
 
   // Verification map
   const verificationMap = useMemo(() => {
@@ -92,13 +97,77 @@ export default function SearchPhase() {
   const visible = filtered.slice(0, visibleCount)
 
   // ─── Searching / discovering / verifying state ───────
-  if (!status?.discovery_results) {
+  if (!discoveryResults) {
     if (loading) return <StageAnimationRouter />
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <p className="text-ink-4 text-[13px]">
           No supplier results yet. Start a project in the Brief phase.
         </p>
+      </div>
+    )
+  }
+
+  if (suppliers.length === 0) {
+    const allFiltered = filteredSuppliers.length > 0
+    const hasPipelineError = Boolean(status?.error)
+    const canRestart = !restarting && currentStage !== 'discovering'
+
+    return (
+      <div className="bg-white min-h-[80vh] px-6 py-8">
+        <div className="max-w-3xl mx-auto space-y-5">
+          <div>
+            <h2 className="text-xl font-heading text-ink">Discovered Suppliers</h2>
+            <div className="flex gap-3 text-[11px] text-ink-4 mt-1">
+              <span>{totalRawResults} raw</span>
+              <span>{deduplicatedCount} unique</span>
+              <span>{suppliers.length} active</span>
+            </div>
+          </div>
+
+          {hasPipelineError && (
+            <div className="card border-l-[3px] border-l-red-400 px-5 py-4">
+              <p className="text-[12px] font-medium text-ink-2">Pipeline stopped before shortlist generation.</p>
+              <p className="text-[11px] text-ink-3 mt-1">{status?.error}</p>
+            </div>
+          )}
+
+          <div className="card p-6">
+            <p className="text-[13px] text-ink-2 font-medium">
+              No viable suppliers are available yet for {productType}.
+            </p>
+            <p className="text-[11px] text-ink-4 mt-2 leading-relaxed">
+              {allFiltered
+                ? `${filteredSuppliers.length} candidates were found but filtered out as low-quality or off-category.`
+                : totalRawResults > 0
+                  ? 'Raw candidates were found, but none passed deduplication and verification readiness.'
+                  : 'No candidate suppliers were found from the current search strategy.'}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 mt-4">
+              <button
+                onClick={async () => {
+                  setRestarting(true)
+                  try {
+                    await restartCurrentProject({ fromStage: 'discovering' })
+                  } finally {
+                    setRestarting(false)
+                  }
+                }}
+                disabled={!canRestart}
+                className="px-4 py-2 bg-teal text-white rounded-lg text-[12px] font-medium hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {restarting ? 'Restarting…' : 'Restart supplier search'}
+              </button>
+              <button
+                onClick={() => setActivePhase('brief')}
+                className="px-4 py-2 border border-surface-3 rounded-lg text-[12px] text-ink-3 hover:bg-surface-2 transition-colors"
+              >
+                Refine brief
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
@@ -114,8 +183,8 @@ export default function SearchPhase() {
               Discovered Suppliers
             </h2>
             <div className="flex gap-3 text-[11px] text-ink-4 mt-1">
-              <span>{status.discovery_results.total_raw_results} raw</span>
-              <span>{status.discovery_results.deduplicated_count} unique</span>
+              <span>{totalRawResults} raw</span>
+              <span>{deduplicatedCount} unique</span>
               <span>{suppliers.length} active</span>
             </div>
           </div>

@@ -395,18 +395,6 @@ async def _run_pipeline_task(project_id: str, description: str):
                 if persisted_discovery:
                     project["discovery_results"] = persisted_discovery
 
-            await record_project_event(
-                project,
-                event_type="stage_completed",
-                title=f"{_stage_title(stage_name)} complete",
-                description=f"Tamkin completed {stage_name.replace('_', ' ')}.",
-                priority="info",
-                phase=_STAGE_PHASE.get(stage_name),
-                payload={"stage": stage_name},
-            )
-            emit_progress(stage_name, "stage_complete", f"{_stage_title(stage_name)} complete.")
-            await store.save_project(project)
-
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
                 emit_progress("failed", "pipeline_failed", "The run failed. You can retry with updated context.")
@@ -420,7 +408,19 @@ async def _run_pipeline_task(project_id: str, description: str):
                     payload={"stage": stage_name},
                 )
                 await store.save_project(project)
-                break
+                return
+
+            await record_project_event(
+                project,
+                event_type="stage_completed",
+                title=f"{_stage_title(stage_name)} complete",
+                description=f"Tamkin completed {stage_name.replace('_', ' ')}.",
+                priority="info",
+                phase=_STAGE_PHASE.get(stage_name),
+                payload={"stage": stage_name},
+            )
+            emit_progress(stage_name, "stage_complete", f"{_stage_title(stage_name)} complete.")
+            await store.save_project(project)
 
             if settings.enable_checkpoints:
                 checkpoint_type = checkpoint_by_stage.get(stage_name)
@@ -533,6 +533,18 @@ async def _run_pipeline_task(project_id: str, description: str):
                         project_id,
                     )
                     return
+
+        if state.get("error") or project.get("current_stage") in {"failed", "canceled"}:
+            logger.info(
+                "Skipping completion marker for project %s due terminal state: %s",
+                project_id,
+                project.get("current_stage"),
+            )
+            return
+
+        project["status"] = "complete"
+        project["current_stage"] = "complete"
+        project["error"] = None
 
         await record_project_event(
             project,
@@ -686,18 +698,6 @@ async def _resume_pipeline_task(project_id: str, from_stage: str | None = None):
                 if persisted_discovery:
                     project["discovery_results"] = persisted_discovery
 
-            await record_project_event(
-                project,
-                event_type="stage_completed",
-                title=f"{_stage_title(stage_name)} complete",
-                description=f"Tamkin completed {stage_name.replace('_', ' ')}.",
-                priority="info",
-                phase=_STAGE_PHASE.get(stage_name),
-                payload={"stage": stage_name, "resume": True},
-            )
-            emit_progress(stage_name, "stage_complete", f"{_stage_title(stage_name)} complete.")
-            await store.save_project(project)
-
             if state.get("error"):
                 logger.error("Pipeline stopped at %s: %s", stage_name, state["error"][:200])
                 emit_progress("failed", "pipeline_failed", "The run failed. You can retry with updated context.")
@@ -711,7 +711,19 @@ async def _resume_pipeline_task(project_id: str, from_stage: str | None = None):
                     payload={"stage": stage_name},
                 )
                 await store.save_project(project)
-                break
+                return
+
+            await record_project_event(
+                project,
+                event_type="stage_completed",
+                title=f"{_stage_title(stage_name)} complete",
+                description=f"Tamkin completed {stage_name.replace('_', ' ')}.",
+                priority="info",
+                phase=_STAGE_PHASE.get(stage_name),
+                payload={"stage": stage_name, "resume": True},
+            )
+            emit_progress(stage_name, "stage_complete", f"{_stage_title(stage_name)} complete.")
+            await store.save_project(project)
 
             if settings.enable_checkpoints:
                 checkpoint_type = checkpoint_by_stage.get(stage_name)
@@ -769,6 +781,18 @@ async def _resume_pipeline_task(project_id: str, from_stage: str | None = None):
                                 "missing_lanes": missing_lanes,
                             },
                         )
+
+        if state.get("error") or project.get("current_stage") in {"failed", "canceled"}:
+            logger.info(
+                "Skipping completion marker for resumed project %s due terminal state: %s",
+                project_id,
+                project.get("current_stage"),
+            )
+            return
+
+        project["status"] = "complete"
+        project["current_stage"] = "complete"
+        project["error"] = None
 
         await record_project_event(
             project,
