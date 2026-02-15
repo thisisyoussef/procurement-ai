@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -17,164 +16,11 @@ from app.schemas.agent_state import (
     VerificationResults,
 )
 from app.schemas.user_profile import UserSourcingProfile
-from app.services.feedback_bus import FeedbackSignal, emit_feedback
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# ── Relevance gate ──────────────────────────────────────────────
-
-_GENERIC_TERMS = {
-    "manufacturer", "manufacturers", "factory", "factories", "supplier",
-    "suppliers", "oem", "wholesale", "bulk", "custom", "production",
-    "producer", "makers", "maker",
-}
-_STOPWORDS = {
-    "the", "and", "for", "with", "from", "need", "needs", "looking",
-    "source", "find", "made", "make", "unit", "units", "piece", "pieces",
-    "pcs", "per",
-}
-
-
-def _tokenize(text: str) -> list[str]:
-    tokens: list[str] = []
-    for token in re.split(r"[^a-zA-Z0-9]+", text.lower()):
-        t = token.strip()
-        if len(t) < 3 or t in _STOPWORDS or t in _GENERIC_TERMS:
-            continue
-        tokens.append(t)
-    return tokens
-
-
-def _relevance_gate(
-    suppliers: list[DiscoveredSupplier],
-    requirements: ParsedRequirements,
-) -> list[DiscoveredSupplier]:
-    """Second-pass relevance filter at comparison stage.
-
-    Removes suppliers whose name + description have zero overlap with
-    the core product-type terms. This catches cases where the LLM scorer
-    in discovery gave a passing relevance_score despite the supplier being
-    in a completely different industry.
-    """
-    anchors = _tokenize(requirements.product_type or "")
-    if not anchors:
-        return suppliers
-
-    passed: list[DiscoveredSupplier] = []
-    removed = 0
-    for s in suppliers:
-        blob = " ".join([
-            s.name or "",
-            s.description or "",
-            " ".join(s.categories or []),
-        ]).lower()
-        hits = sum(1 for a in anchors if a in blob)
-        min_required = 2 if len(anchors) >= 3 else 1
-        if hits >= min_required:
-            passed.append(s)
-        else:
-            removed += 1
-            logger.info(
-                "Relevance gate removed '%s' — no product-type anchor match "
-                "(anchors=%s, supplier_text='%s')",
-                s.name, anchors, blob[:120],
-            )
-    if removed:
-        logger.info(
-            "Relevance gate: removed %d/%d suppliers before comparison",
-            removed, len(suppliers),
-        )
-    return passed
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "comparison.md").read_text()
-HEAVY_FREIGHT_SIGNALS = {
-    "tire",
-    "rubber",
-    "automotive",
-    "machined",
-    "metal",
-    "steel",
-    "aluminum",
-    "copper",
-    "chemical",
-    "resin",
-    "polymer",
-    "industrial",
-    "raw material",
-    "compound",
-    "molding",
-    "injection",
-}
-HEAVY_FREIGHT_LOW_PER_UNIT_THRESHOLD_USD = 1.0
-LOW_PER_UNIT_EXEMPTION_QTY = 20000
-SHIPPING_GUARD_NOTE = (
-    "Shipping estimate was flagged as low-confidence for heavy freight; "
-    "lane-specific freight quote required."
-)
-
-
-def _is_heavy_freight_category(requirements: ParsedRequirements) -> bool:
-    blob = " ".join(
-        [
-            requirements.product_type or "",
-            requirements.material or "",
-            requirements.customization or "",
-            " ".join(requirements.certifications_needed or []),
-        ]
-    ).lower()
-    return any(signal in blob for signal in HEAVY_FREIGHT_SIGNALS)
-
-
-def _extract_min_usd_amount(text: str | None) -> float | None:
-    if not text:
-        return None
-    normalized = text.lower().replace(",", "")
-    matches = re.findall(r"\$?\s*(\d+(?:\.\d+)?)", normalized)
-    if not matches:
-        return None
-    values: list[float] = []
-    for raw in matches:
-        try:
-            values.append(float(raw))
-        except ValueError:
-            continue
-    if not values:
-        return None
-    return min(values)
-
-
-def _looks_like_per_unit_shipping(text: str | None) -> bool:
-    if not text:
-        return False
-    normalized = text.lower()
-    return any(token in normalized for token in {"per unit", "/unit", "unit equivalent", "per-piece", "per piece"})
-
-
-def _apply_shipping_sanity_guard(
-    comparison: SupplierComparison,
-    requirements: ParsedRequirements,
-) -> bool:
-    if not _is_heavy_freight_category(requirements):
-        return False
-    if requirements.quantity and requirements.quantity >= LOW_PER_UNIT_EXEMPTION_QTY:
-        return False
-    if not _looks_like_per_unit_shipping(comparison.estimated_shipping_cost):
-        return False
-
-    min_usd = _extract_min_usd_amount(comparison.estimated_shipping_cost)
-    if min_usd is None or min_usd >= HEAVY_FREIGHT_LOW_PER_UNIT_THRESHOLD_USD:
-        return False
-
-    comparison.estimated_shipping_cost = (
-        "Freight quote required (heavy commodity). "
-        "Per-unit equivalent is likely above $1.00 before final lane/mode assumptions."
-    )
-    if not any("freight quote" in weakness.lower() for weakness in comparison.weaknesses):
-        comparison.weaknesses.append(SHIPPING_GUARD_NOTE)
-    if comparison.estimated_landed_cost and "quote" not in comparison.estimated_landed_cost.lower():
-        comparison.estimated_landed_cost = "Freight quote required to finalize landed cost"
-    comparison.shipping_score = min(2.5, comparison.shipping_score)
-    return True
 
 
 async def compare_suppliers(
@@ -190,34 +36,15 @@ async def compare_suppliers(
     Combines discovery data with verification scores to produce
     an actionable comparison for the user.
     """
-    emit_progress("comparing", "relevance_gate",
-                  f"Filtering {len(suppliers)} suppliers for product relevance...")
+    emit_progress("comparing", "building_profiles",
+                  f"Preparing {len(suppliers)} supplier profiles for comparison...")
 
-    # Second-pass relevance gate: remove off-category suppliers that slipped
-    # through discovery scoring (e.g. tire companies when searching for gumballs)
-    suppliers_before_gate = suppliers
-    suppliers = _relevance_gate(suppliers, requirements)
-    if len(suppliers) < len(suppliers_before_gate):
-        removed = {
-            s.name for s in suppliers_before_gate
-            if all(s.name != kept.name for kept in suppliers)
-        }
-        for name in sorted(removed):
-            await emit_feedback(
-                FeedbackSignal(
-                    source_agent="comparison_agent",
-                    target="supplier",
-                    signal_type="off_category",
-                    supplier_name=name,
-                    data={"product_type": requirements.product_type},
-                )
-            )
     if not suppliers:
-        logger.warning("Relevance gate removed ALL suppliers — returning empty comparison")
+        logger.warning("No suppliers provided — returning empty comparison")
         return ComparisonResult(
             comparisons=[],
             analysis_narrative=(
-                "No suppliers passed the relevance check for the requested product. "
+                "No suppliers were available for comparison. "
                 "The search may need to be re-run with more specific terms."
             ),
         )
@@ -365,11 +192,10 @@ In analysis_narrative, if viable suppliers are much fewer than total suppliers, 
                 )
 
     emit_progress("comparing", "parsing_scores",
-                  f"Received scores for {len(data.get('comparisons', []))} suppliers. Applying shipping sanity checks...",
+                  f"Received scores for {len(data.get('comparisons', []))} suppliers...",
                   progress_pct=70)
 
     comparisons = []
-    shipping_guard_adjustments = 0
     for c in data.get("comparisons", []):
         try:
             comparison_entry = SupplierComparison(
@@ -391,12 +217,6 @@ In analysis_narrative, if viable suppliers are much fewer than total suppliers, 
                 review_score=min(5, max(0, float(c.get("review_score", 0)))),
                 lead_time_score=min(5, max(0, float(c.get("lead_time_score", 0)))),
             )
-            if _apply_shipping_sanity_guard(comparison_entry, requirements):
-                shipping_guard_adjustments += 1
-                logger.info(
-                    "Shipping guard adjusted supplier '%s' due to low per-unit freight estimate.",
-                    comparison_entry.supplier_name,
-                )
             comparisons.append(comparison_entry)
         except Exception:
             continue
@@ -409,16 +229,9 @@ In analysis_narrative, if viable suppliers are much fewer than total suppliers, 
                   f"Best value: {best_value}. Best quality: {best_quality}.",
                   progress_pct=100)
     logger.info("✅ Comparison complete: %d compared | best_value=%s, best_quality=%s, best_speed=%s", len(comparisons), best_value, best_quality, best_speed)
-    analysis_narrative = data.get("analysis_narrative", "")
-    if shipping_guard_adjustments:
-        guard_note = (
-            f"Shipping numbers for {shipping_guard_adjustments} supplier(s) were converted to "
-            "quote-required because automated per-unit freight looked unrealistically low for heavy freight."
-        )
-        analysis_narrative = f"{analysis_narrative}\n\n{guard_note}".strip()
     return ComparisonResult(
         comparisons=comparisons,
-        analysis_narrative=analysis_narrative,
+        analysis_narrative=data.get("analysis_narrative", ""),
         best_value=data.get("best_value"),
         best_quality=data.get("best_quality"),
         best_speed=data.get("best_speed"),

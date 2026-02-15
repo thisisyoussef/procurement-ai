@@ -43,30 +43,6 @@ LANE_ALIASES = {
     "alternative": "alternative",
     "alt": "alternative",
 }
-TECHNICAL_SIGNALS = {
-    "pcb",
-    "printed circuit",
-    "electronic",
-    "electronics",
-    "semiconductor",
-    "iso 13485",
-    "medical device",
-    "aerospace",
-    "automotive",
-    "iatf",
-    "machined",
-    "cnc",
-    "precision",
-    "injection molding",
-    "stamped steel",
-    "wire harness",
-    "tolerance",
-    "firmware",
-    "custom tooling",
-    "fr-4",
-}
-
-
 def _normalize_lane(value: str | None) -> str | None:
     if value is None:
         return None
@@ -79,14 +55,11 @@ def _normalize_lane(value: str | None) -> str | None:
 
 
 def _coerce_confidence(value: str | None, overall_score: float) -> str:
+    """Validate LLM confidence output; fallback to 'medium' if invalid."""
     normalized = (value or "").strip().lower()
     if normalized in {"high", "medium", "low"}:
         return normalized
-    if overall_score >= 80:
-        return "high"
-    if overall_score >= 60:
-        return "medium"
-    return "low"
+    return "medium"
 
 
 def _to_list_of_strings(value: object) -> list[str]:
@@ -143,36 +116,6 @@ def _lead_time_days(value: str | None) -> float:
     if single:
         return float(single.group(1))
     return 9999
-
-
-def _is_technical_category(requirements: ParsedRequirements) -> bool:
-    blob = " ".join(
-        [
-            requirements.product_type or "",
-            requirements.material or "",
-            requirements.customization or "",
-            " ".join(requirements.certifications_needed or []),
-        ]
-    ).lower()
-    return any(signal in blob for signal in TECHNICAL_SIGNALS)
-
-
-def _manual_verification_reason(requirements: ParsedRequirements) -> str:
-    product = requirements.product_type or "this category"
-    return (
-        f"{product} often needs tighter technical validation before PO "
-        "(spec tolerances, compliance docs, and pilot sample sign-off)."
-    )
-
-
-def _fallback_verify_checklist(technical: bool) -> list[str]:
-    if technical:
-        return [
-            "Confirm latest compliance and test reports",
-            "Approve production sample against specs",
-            "Validate tooling, tolerances, and QC plan before PO",
-        ]
-    return []
 
 
 def _comparison_maps(comparison: ComparisonResult) -> tuple[dict[int, SupplierComparison], dict[str, SupplierComparison]]:
@@ -402,24 +345,6 @@ def _apply_lane_fallback(
             rec.lane = "alternative"
 
 
-def _apply_manual_verification_defaults(
-    recommendations: list[SupplierRecommendation],
-    requirements: ParsedRequirements,
-) -> None:
-    technical = _is_technical_category(requirements)
-    if not technical:
-        return
-
-    reason = _manual_verification_reason(requirements)
-    fallback_checklist = _fallback_verify_checklist(technical=True)
-    for rec in recommendations:
-        rec.needs_manual_verification = True
-        if not rec.manual_verification_reason:
-            rec.manual_verification_reason = reason
-        if not rec.verify_before_po:
-            rec.verify_before_po = fallback_checklist
-
-
 def _lane_coverage(recommendations: list[SupplierRecommendation]) -> dict[str, int]:
     coverage = {lane: 0 for lane in ALL_LANES}
     for rec in recommendations:
@@ -577,7 +502,6 @@ If viable suppliers are numerous, still output a representative ranked set (up t
         if floor_rationale and not elimination_rationale:
             elimination_rationale = floor_rationale
         _apply_lane_fallback(recommendations, comparison, verifications)
-        _apply_manual_verification_defaults(recommendations, requirements)
 
     coverage = _lane_coverage(recommendations)
     checkpoint = str(data.get("decision_checkpoint_summary") or "").strip()

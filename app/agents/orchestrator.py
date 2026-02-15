@@ -312,7 +312,9 @@ async def verify_node(state: GraphState) -> GraphState:
                 ),
             }
 
-        top_suppliers = candidate_pool[:40]
+        # Verification concurrency limit — not a quality filter.
+        # All candidates are LLM-vetted; this caps API calls per run.
+        top_suppliers = candidate_pool[:50]
         result = await verify_suppliers(
             top_suppliers,
             requirements=requirements,

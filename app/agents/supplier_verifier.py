@@ -84,16 +84,13 @@ contact information completeness. Return JSON: {{"score": N, "details": "brief e
 
 
 async def _check_google_reviews(supplier: DiscoveredSupplier) -> VerificationCheck:
-    """Check Google rating and reviews."""
+    """Gather Google rating and review data as raw evidence."""
     logger.info("  ⭐ Checking Google reviews for %s", supplier.name)
     if supplier.google_rating is not None:
-        score = min(100, supplier.google_rating * 20)  # 5.0 = 100
-        review_bonus = min(20, (supplier.google_review_count or 0) / 5)
-        score = min(100, score + review_bonus)
         return VerificationCheck(
             check_type="reviews",
-            status="passed" if score >= 60 else "failed",
-            score=score,
+            status="passed",
+            score=0,  # LLM synthesis will score holistically
             details=f"Google rating: {supplier.google_rating}/5 ({supplier.google_review_count or 0} reviews)",
         )
     return VerificationCheck(
@@ -105,35 +102,27 @@ async def _check_google_reviews(supplier: DiscoveredSupplier) -> VerificationChe
 
 
 async def _check_business_registration(supplier: DiscoveredSupplier) -> VerificationCheck:
-    """Check business registration indicators from available data."""
+    """Gather business registration indicators as raw evidence."""
     logger.info("  📋 Checking business registration for %s", supplier.name)
     indicators = []
-    score = 30  # Base score: we found them, they exist
 
     if supplier.address:
-        score += 15
-        indicators.append("physical address present")
+        indicators.append(f"physical address: {supplier.address}")
     if supplier.phone:
-        score += 10
         indicators.append("phone number available")
     if supplier.email:
-        score += 10
         indicators.append("email contact available")
     if supplier.website and supplier.website.startswith("https"):
-        score += 10
         indicators.append("SSL-secured website")
     if supplier.certifications:
-        score += 15
         indicators.append(f"claims certifications: {', '.join(supplier.certifications[:3])}")
     if supplier.description and len(supplier.description) > 50:
-        score += 10
         indicators.append("detailed business description")
 
-    score = min(100, score)
     return VerificationCheck(
         check_type="registration",
-        status="passed" if score >= 60 else ("failed" if score < 40 else "unavailable"),
-        score=score,
+        status="passed" if indicators else "unavailable",
+        score=0,  # LLM synthesis will score holistically
         details=f"Business indicators: {'; '.join(indicators)}" if indicators else "Limited information",
     )
 
@@ -202,58 +191,77 @@ async def verify_supplier(
 
     valid_checks = [c for c in checks if isinstance(c, VerificationCheck)]
 
-    # Calculate weighted composite score
-    weights = {"website": 0.35, "reviews": 0.35, "registration": 0.30}
-    total_weight = 0
-    weighted_sum = 0
+    # ── LLM synthesis: holistic assessment from all gathered evidence ──
+    evidence_summary = {
+        "supplier_name": supplier.name,
+        "country": supplier.country,
+        "is_intermediary": supplier.is_intermediary,
+        "language_discovered": supplier.language_discovered,
+        "has_email": bool(supplier.email),
+        "has_phone": bool(supplier.phone),
+        "has_website": bool(supplier.website),
+        "checks": [
+            {"check_type": c.check_type, "status": c.status, "details": c.details}
+            for c in valid_checks
+        ],
+    }
 
-    for check in valid_checks:
-        w = weights.get(check.check_type, 0.1)
-        if check.status != "unavailable":
-            weighted_sum += check.score * w
-            total_weight += w
+    synthesis_prompt = f"""Assess this supplier's legitimacy based on the gathered evidence.
 
-    composite = weighted_sum / total_weight if total_weight > 0 else 0
+Supplier evidence:
+{json.dumps(evidence_summary, indent=2)}
 
-    # Penalize known intermediaries
-    if supplier.is_intermediary:
-        composite = max(0, composite - 15)
-        logger.info("  Intermediary penalty applied: -15 points")
+Follow your system instructions to produce a holistic assessment. Return ONLY valid JSON."""
 
-    # Determine risk level and recommendation
-    if composite >= 70:
-        risk_level, recommendation = "low", "proceed"
-    elif composite >= 40:
-        risk_level, recommendation = "medium", "caution"
-    else:
-        risk_level, recommendation = "high", "reject"
+    try:
+        synthesis_resp = await call_llm_structured(
+            prompt=synthesis_prompt,
+            system=SYSTEM_PROMPT,
+            model=settings.model_cheap,
+            max_tokens=500,
+        )
+        text = synthesis_resp.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        synthesis = json.loads(text)
+    except (json.JSONDecodeError, Exception):
+        # Fallback: simple heuristic if LLM synthesis fails
+        logger.warning("LLM verification synthesis failed for %s; using fallback", supplier.name)
+        has_signals = sum(1 for c in valid_checks if c.status == "passed")
+        synthesis = {
+            "composite_score": min(100, has_signals * 35),
+            "risk_level": "medium",
+            "recommendation": "caution",
+            "preferred_contact_method": "email" if supplier.email else ("phone" if supplier.phone else "website_form"),
+            "contact_notes": None,
+            "summary": "; ".join(f"{c.check_type}: {c.details}" for c in valid_checks),
+        }
 
-    summary_parts = [f"{c.check_type}: {c.details}" for c in valid_checks]
+    # Update check scores from LLM synthesis if provided
+    if "checks" in synthesis:
+        llm_checks_map = {c["check_type"]: c for c in synthesis["checks"] if isinstance(c, dict)}
+        for check in valid_checks:
+            llm_check = llm_checks_map.get(check.check_type)
+            if llm_check:
+                check.score = float(llm_check.get("score", check.score))
+                check.status = llm_check.get("status", check.status)
+                if llm_check.get("details"):
+                    check.details = llm_check["details"]
 
-    # Determine preferred contact method
-    preferred_contact_method = "email"
-    contact_notes = None
+    composite = float(synthesis.get("composite_score", 0))
+    risk_level = str(synthesis.get("risk_level", "medium"))
+    recommendation = str(synthesis.get("recommendation", "caution"))
+    preferred_contact_method = str(synthesis.get("preferred_contact_method", "email"))
+    contact_notes = synthesis.get("contact_notes")
+    summary = str(synthesis.get("summary", "; ".join(f"{c.check_type}: {c.details}" for c in valid_checks)))
 
-    website_check = next((c for c in valid_checks if c.check_type == "website"), None)
-    website_score = website_check.score if website_check else 0
-    has_email = bool(supplier.email)
-    has_phone = bool(supplier.phone)
-    has_website = bool(supplier.website)
-    is_non_english = supplier.language_discovered and supplier.language_discovered != "en"
-
-    if not has_email and has_phone:
-        preferred_contact_method = "phone"
-        contact_notes = "No email found; phone contact recommended"
-    elif website_score < 30 and has_phone:
-        preferred_contact_method = "phone"
-        contact_notes = "Website appears limited; phone may be more reliable"
-    elif is_non_english and has_phone:
-        preferred_contact_method = "phone"
-        lang = supplier.language_discovered
-        contact_notes = f"Website in {lang}; phone recommended for English inquiries"
-    elif not has_email and not has_phone and has_website:
-        preferred_contact_method = "website_form"
-        contact_notes = "No direct contact info; try website contact form"
+    # Validate enum values
+    if risk_level not in ("low", "medium", "high"):
+        risk_level = "medium"
+    if recommendation not in ("proceed", "caution", "reject"):
+        recommendation = "caution"
+    if preferred_contact_method not in ("email", "phone", "website_form"):
+        preferred_contact_method = "email"
 
     logger.info("  Verification: score=%.1f, risk=%s, rec=%s, contact=%s",
                 composite, risk_level, recommendation, preferred_contact_method)
@@ -264,7 +272,7 @@ async def verify_supplier(
         composite_score=round(composite, 1),
         risk_level=risk_level,
         recommendation=recommendation,
-        summary="; ".join(summary_parts),
+        summary=summary,
         preferred_contact_method=preferred_contact_method,
         contact_notes=contact_notes,
     )
