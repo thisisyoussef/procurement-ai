@@ -5,9 +5,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import async_session_factory
 from automotive.agents.orchestrator import compile_graph
 from automotive.api.v1.events import automotive_project_id, emit_activity
 from automotive.models.project import AutomotiveProject, AutomotiveProjectEvent
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 # In-memory fallback store for development without database
 _in_memory_projects: dict[str, dict] = {}
+
+# Whether we have a live database (set on first create)
+_has_db: bool = False
 
 
 async def create_project(
@@ -29,9 +33,11 @@ async def create_project(
     buyer_contact_email: str = "",
 ) -> dict[str, Any]:
     """Create a new automotive procurement project and start the pipeline."""
+    global _has_db
     project_id = str(uuid.uuid4())
 
     if db:
+        _has_db = True
         project = AutomotiveProject(
             id=uuid.UUID(project_id),
             user_id=uuid.UUID(user_id) if user_id else None,
@@ -64,9 +70,11 @@ async def create_project(
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    # Start the pipeline asynchronously
+    # Start the pipeline asynchronously (uses its own DB session)
     import asyncio
-    asyncio.create_task(_run_pipeline(project_id, raw_request, db, buyer_company, buyer_contact_name, buyer_contact_email))
+    asyncio.create_task(
+        _run_pipeline(project_id, raw_request, buyer_company, buyer_contact_name, buyer_contact_email)
+    )
 
     return {
         "project_id": project_id,
@@ -78,15 +86,14 @@ async def create_project(
 async def _run_pipeline(
     project_id: str,
     raw_request: str,
-    db: AsyncSession | None,
     buyer_company: str = "",
     buyer_contact_name: str = "",
     buyer_contact_email: str = "",
 ) -> None:
     """Execute the LangGraph pipeline for a project.
 
-    In production with PostgresSaver, the graph persists state and
-    pauses at HITL gates. For MVP, we run without interrupts.
+    Runs as a background task with its own DB session so it isn't
+    tied to the lifecycle of the HTTP request that created the project.
     """
     # Set context var so agents can emit activity events
     automotive_project_id.set(project_id)
@@ -116,11 +123,9 @@ async def _run_pipeline(
     try:
         emit_activity("parse", "start", "Parsing procurement requirements with AI...", project_id=project_id)
         # Run until first interrupt (HITL gate)
-        result = await graph.ainvoke(initial_state, config)
-        logger.info("ainvoke returned type=%s, keys=%s", type(result).__name__, list(result.keys()) if isinstance(result, dict) else "N/A")
+        await graph.ainvoke(initial_state, config)
 
-        # ainvoke returns the state snapshot; however when an interrupt fires,
-        # the returned dict may be partial.  Always read the full checkpoint.
+        # Read full checkpoint state (reliable even after interrupt)
         snapshot = await graph.aget_state(config)
         state_values = snapshot.values if snapshot else {}
         logger.info(
@@ -129,17 +134,17 @@ async def _run_pipeline(
             "parsed_requirement" in state_values if isinstance(state_values, dict) else False,
         )
 
-        _update_project_state(project_id, state_values, db)
+        await _persist_state(project_id, state_values)
         stage = state_values.get("current_stage", "unknown") if isinstance(state_values, dict) else "unknown"
         emit_activity(stage, "paused", f"Pipeline paused — awaiting approval at {stage}", project_id=project_id)
         logger.info("Pipeline paused at stage: %s for project %s", stage, project_id)
     except Exception as exc:
         logger.exception("Pipeline failed for project %s", project_id)
         emit_activity("pipeline", "error", f"Pipeline error: {exc}", project_id=project_id)
-        _update_project_state(project_id, {"status": "error", "current_stage": "error"}, db)
+        await _persist_state(project_id, {"status": "error", "current_stage": "error"})
 
 
-# Keys from LangGraph state that map directly to project fields
+# Keys from LangGraph state that map directly to DB / in-memory project fields
 _STATE_KEYS = {
     "current_stage", "parsed_requirement", "discovery_result",
     "qualification_result", "comparison_matrix", "intelligence_reports",
@@ -147,29 +152,43 @@ _STATE_KEYS = {
 }
 
 
-def _update_project_state(project_id: str, state: dict, db: AsyncSession | None) -> None:
-    """Update project state in memory from a LangGraph result dict.
+def _infer_status(stage: str | None) -> str:
+    if stage == "error":
+        return "error"
+    if stage == "complete":
+        return "complete"
+    return "waiting_approval"
 
-    Only copies recognised keys so that internal LangGraph bookkeeping
-    (messages, errors, human_overrides, etc.) doesn't leak into the
-    project record returned by the API.
+
+async def _persist_state(project_id: str, state: dict) -> None:
+    """Persist pipeline state to both in-memory store and database.
+
+    Creates its own DB session so it can be called from background tasks.
     """
-    if project_id not in _in_memory_projects:
-        return
-
-    proj = _in_memory_projects[project_id]
+    # Build the subset of fields to update
+    updates: dict[str, Any] = {}
     for key in _STATE_KEYS:
         if key in state and state[key] is not None:
-            proj[key] = state[key]
+            updates[key] = state[key]
+    updates["status"] = _infer_status(state.get("current_stage"))
 
-    # Infer status from stage
-    stage = state.get("current_stage", proj.get("current_stage"))
-    if stage == "error":
-        proj["status"] = "error"
-    elif stage == "complete":
-        proj["status"] = "complete"
-    else:
-        proj["status"] = "waiting_approval"
+    # Update in-memory store (for local dev / fallback)
+    if project_id in _in_memory_projects:
+        _in_memory_projects[project_id].update(updates)
+
+    # Update database
+    if _has_db:
+        try:
+            async with async_session_factory() as session:
+                await session.execute(
+                    update(AutomotiveProject)
+                    .where(AutomotiveProject.id == uuid.UUID(project_id))
+                    .values(**updates)
+                )
+                await session.commit()
+                logger.info("Persisted state to DB for project %s (keys: %s)", project_id[:8], list(updates.keys()))
+        except Exception:
+            logger.exception("Failed to persist state to DB for project %s", project_id)
 
 
 async def get_project(db: AsyncSession | None, project_id: str) -> dict[str, Any] | None:
@@ -230,7 +249,7 @@ async def approve_stage(
 ) -> dict[str, Any]:
     """Submit human approval for a pipeline stage gate.
 
-    In production, this resumes the LangGraph graph via Command(resume=...).
+    Resumes the LangGraph graph via Command(resume=...).
     """
     automotive_project_id.set(project_id)
     emit_activity(stage, "approved", f"Human approved stage: {stage}", project_id=project_id)
@@ -241,14 +260,14 @@ async def approve_stage(
     try:
         from langgraph.types import Command
         emit_activity(stage, "resuming", f"Resuming pipeline from {stage}...", project_id=project_id)
-        result = await graph.ainvoke(Command(resume=decision), config)
+        await graph.ainvoke(Command(resume=decision), config)
 
-        # Read the full checkpoint state (more reliable than ainvoke return)
+        # Read the full checkpoint state
         snapshot = await graph.aget_state(config)
-        state_values = snapshot.values if snapshot else result
+        state_values = snapshot.values if snapshot else {}
         logger.info("Resume snapshot keys: %s", list(state_values.keys()) if isinstance(state_values, dict) else "N/A")
 
-        _update_project_state(project_id, state_values, db)
+        await _persist_state(project_id, state_values)
         new_stage = state_values.get("current_stage", "unknown") if isinstance(state_values, dict) else "unknown"
         emit_activity(new_stage, "paused", f"Pipeline advanced to {new_stage}", project_id=project_id)
         return {"status": "resumed", "current_stage": new_stage}
