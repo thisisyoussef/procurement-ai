@@ -4,14 +4,14 @@ import { useState } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { featureFlags } from '@/lib/featureFlags'
 import { trackTraceEvent } from '@/lib/telemetry'
-import { m } from '@/lib/motion'
-import { staggerContainerFast, cardEntrance } from '@/lib/motion/variants'
-import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
 import AgentGreeting from '@/components/workspace/AgentGreeting'
+import SmartLoader from '@/components/workspace/SmartLoader'
 
 export default function BriefPhase() {
   const {
+    authUser,
     projectId,
+    projectList,
     status,
     loading,
     errorMessage,
@@ -20,7 +20,6 @@ export default function BriefPhase() {
     handleClarifyingAnswered,
   } = useWorkspace()
 
-  const [input, setInput] = useState('')
   const [restartContext, setRestartContext] = useState('')
   const [restarting, setRestarting] = useState(false)
   const currentStage = status?.current_stage || 'idle'
@@ -33,7 +32,6 @@ export default function BriefPhase() {
   const onSubmit = (text: string) => {
     if (!text.trim()) return
     handleSearch(text.trim())
-    setInput('')
   }
 
   const onRestartWithContext = async () => {
@@ -50,21 +48,23 @@ export default function BriefPhase() {
 
   // ─── State 1: Empty — no project yet ─────────────────
   if (!projectId && !loading) {
+    const hasHistory = projectList.length > 0
+    const lastCategory = projectList[0]?.title || undefined
     return (
       <AgentGreeting
         onSubmit={onSubmit}
         loading={loading}
         errorMessage={errorMessage}
-        userName={undefined}
-        hasHistory={false}
-        lastCategory={undefined}
+        userName={authUser.full_name || undefined}
+        hasHistory={hasHistory}
+        lastCategory={lastCategory}
       />
     )
   }
 
   // ─── State 2: Parsing / waiting ──────────────────────
   if (loading && !parsed && !isClarifying) {
-    return <StageAnimationRouter />
+    return <SmartLoader stage={currentStage} loading />
   }
 
   // ─── State 3: Parsed + optional clarifying questions ──

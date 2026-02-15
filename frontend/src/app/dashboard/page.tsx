@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 
 import GoogleSignIn from '@/components/GoogleSignIn'
 import OnboardingForm from '@/components/OnboardingForm'
+import SourcingProfileCard from '@/components/dashboard/SourcingProfileCard'
 import { dashboardClient } from '@/lib/api/dashboardClient'
 import { m } from '@/lib/motion'
 import { staggerContainer, cardEntrance, fadeUp, slideInLeft } from '@/lib/motion/variants'
@@ -40,6 +41,19 @@ function visualClass(variant: number): string {
   if (variant === 2) return 'dash-proj-vis-2'
   if (variant === 3) return 'dash-proj-vis-3'
   return 'dash-proj-vis-1'
+}
+
+function projectNarrative(project: DashboardProjectCard): string {
+  if (project.stats.best_price) {
+    return `Best quoted price so far: ${project.stats.best_price}`
+  }
+  if (project.stats.quotes_count > 0) {
+    return `${project.stats.quotes_count} quotes collected so far`
+  }
+  if (project.status === 'complete') {
+    return 'Completed. Ready to continue supplier conversations.'
+  }
+  return project.description
 }
 
 function DashboardPageContent() {
@@ -381,7 +395,8 @@ function DashboardPageContent() {
 
                   <div className="dash-proj-body">
                     <div className="dash-proj-name">{project.name}</div>
-                    <div className="dash-proj-desc">{project.description}</div>
+                    <div className="dash-proj-desc">{projectNarrative(project)}</div>
+                    <div className="dash-proj-outcome">{project.status_note}</div>
 
                     <div className="dash-proj-progress">
                       {Array.from({ length: project.progress_total }).map((_, idx) => {
@@ -403,6 +418,7 @@ function DashboardPageContent() {
                     </div>
 
                     <div className={`dash-proj-status ${statusClass(project)}`}>{project.status_note}</div>
+                    <div className="dash-proj-continue">Continue &rarr;</div>
                   </div>
                 </m.button>
               ))}
@@ -423,6 +439,10 @@ function DashboardPageContent() {
               </m.button>
             </m.div>
           </div>
+        )}
+
+        {tab !== 'contacts' && (
+          <SourcingProfileCard authUser={authUser} projects={summary?.projects || []} />
         )}
 
         {tab !== 'contacts' && (

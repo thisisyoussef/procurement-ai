@@ -12,7 +12,7 @@ import FunnelSummary from './FunnelSummary'
  * Shows:
  *  1. Executive summary (the agent's judgment in prose)
  *  2. Compact ranked list (top 3 picks)
- *  3. Primary CTA (Approve & send outreach)
+ *  3. Primary CTA (review outreach plan)
  *  4. Funnel summary (34 found → 3 recommended)
  *  5. Link to FullComparisonView for detail
  * ──────────────────────────────────────────────────────── */
@@ -221,7 +221,7 @@ export default function VerdictView({
           className="px-5 py-2.5 bg-teal text-white rounded-lg text-[13px] font-medium
                      hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {approvalLoading ? 'Sending outreach\u2026' : 'Approve & send outreach'}
+          {approvalLoading ? 'Preparing\u2026' : 'Review outreach plan'}
         </button>
         <button
           onClick={onShowFullComparison}

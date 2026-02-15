@@ -4,11 +4,44 @@ import { useState, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import SupplierCard from '../SupplierCard'
+import ErrorRecoveryCard from '@/components/workspace/ErrorRecoveryCard'
+import FunnelSummary from '@/components/workspace/compare/FunnelSummary'
+import SmartLoader from '@/components/workspace/SmartLoader'
 import { m } from '@/lib/motion'
 import { staggerContainer, cardEntrance } from '@/lib/motion/variants'
-import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
 
 type SortKey = 'relevance' | 'rating' | 'verification' | 'name'
+
+const TEAM_LABELS: Record<string, string> = {
+  direct_manufacturer: 'Direct manufacturers',
+  market_intelligence: 'Market intelligence',
+  regional_deep_dive: 'Regional specialists',
+  reputation_trust: 'Trust-first suppliers',
+  proximity_logistics: 'Logistics optimized',
+}
+
+const TEAM_PRIORITY = [
+  'direct_manufacturer',
+  'reputation_trust',
+  'regional_deep_dive',
+  'proximity_logistics',
+  'market_intelligence',
+]
+
+function normalizeTeamLabel(team: string): string {
+  return TEAM_LABELS[team] || team.replace(/_/g, ' ')
+}
+
+function pickPrimaryTeam(supplier: any): string {
+  const teams = Array.isArray(supplier.discovery_teams) ? supplier.discovery_teams : []
+  if (!teams.length) return 'general'
+  const byPriority = [...teams].sort((a, b) => {
+    const aIdx = TEAM_PRIORITY.indexOf(a)
+    const bIdx = TEAM_PRIORITY.indexOf(b)
+    return (aIdx >= 0 ? aIdx : 999) - (bIdx >= 0 ? bIdx : 999)
+  })
+  return byPriority[0]
+}
 
 export default function SearchPhase() {
   const { status, loading, restartCurrentProject, setActivePhase } = useWorkspace()
@@ -30,6 +63,8 @@ export default function SearchPhase() {
   const productType = status?.parsed_requirements?.product_type || 'your product'
   const totalRawResults = discoveryResults?.total_raw_results || 0
   const deduplicatedCount = discoveryResults?.deduplicated_count || suppliers.length
+  const verifiedCount = verifications.length
+  const recommendedCount = status?.recommendation?.recommendations?.length || 0
 
   // Verification map
   const verificationMap = useMemo(() => {
@@ -94,11 +129,36 @@ export default function SearchPhase() {
     return list
   }, [suppliers, searchQuery, filterCountry, showIntermediaries, sortBy, verificationMap])
 
+  const groupedSuppliers = useMemo(() => {
+    const hasDiscoveryTeams = filtered.some(
+      (supplier: any) => Array.isArray(supplier.discovery_teams) && supplier.discovery_teams.length > 0
+    )
+    if (!hasDiscoveryTeams) return []
+
+    const groups = new Map<string, any[]>()
+    for (const supplier of filtered) {
+      const key = pickPrimaryTeam(supplier)
+      const existing = groups.get(key) || []
+      existing.push(supplier)
+      groups.set(key, existing)
+    }
+
+    return Array.from(groups.entries())
+      .map(([team, members]) => ({
+        team,
+        label: normalizeTeamLabel(team),
+        suppliers: members,
+      }))
+      .sort((left, right) => right.suppliers.length - left.suppliers.length)
+  }, [filtered])
+
   const visible = filtered.slice(0, visibleCount)
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) || filterCountry !== 'all' || !showIntermediaries
 
   // ─── Searching / discovering / verifying state ───────
   if (!discoveryResults) {
-    if (loading) return <StageAnimationRouter />
+    if (loading) return <SmartLoader stage={currentStage} loading />
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <p className="text-ink-4 text-[13px]">
@@ -126,10 +186,20 @@ export default function SearchPhase() {
           </div>
 
           {hasPipelineError && (
-            <div className="card border-l-[3px] border-l-red-400 px-5 py-4">
-              <p className="text-[12px] font-medium text-ink-2">Pipeline stopped before shortlist generation.</p>
-              <p className="text-[11px] text-ink-3 mt-1">{status?.error}</p>
-            </div>
+            <ErrorRecoveryCard
+              error={status?.error || 'No suppliers available yet.'}
+              stage={currentStage}
+              retrying={restarting}
+              onRetry={async () => {
+                setRestarting(true)
+                try {
+                  await restartCurrentProject({ fromStage: 'discovering' })
+                } finally {
+                  setRestarting(false)
+                }
+              }}
+              onEditBrief={() => setActivePhase('brief')}
+            />
           )}
 
           <div className="card p-6">
@@ -198,6 +268,27 @@ export default function SearchPhase() {
           )}
         </div>
 
+        {discoveryResults?.discovery_briefing && (
+          <div className="card border-l-[3px] border-l-teal px-5 py-4 mb-4">
+            <p className="text-[13px] text-ink-2 leading-relaxed">
+              {discoveryResults.discovery_briefing}
+            </p>
+          </div>
+        )}
+
+        <div className="mb-5 rounded-xl border border-surface-3 px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[1.4px] text-ink-4 mb-1">
+            Funnel summary
+          </p>
+          <FunnelSummary
+            totalRaw={totalRawResults}
+            deduplicated={deduplicatedCount}
+            verified={verifiedCount}
+            compared={status?.comparison_result?.comparisons?.length || 0}
+            recommended={recommendedCount}
+          />
+        </div>
+
         {/* Filter Bar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <input
@@ -245,30 +336,73 @@ export default function SearchPhase() {
           </span>
         </div>
 
-        {/* Supplier list */}
-        <m.div
-          className="space-y-2"
-          variants={staggerContainer}
-          initial="hidden"
-          animate="visible"
-        >
-          {visible.map((supplier: any, i: number) => {
-            const originalIndex = suppliers.indexOf(supplier)
-            return (
-              <m.div key={`${supplier.name}-${i}`} variants={cardEntrance}>
-                <SupplierCard
-                  supplier={supplier}
-                  verification={verificationMap.get(supplier.name)}
-                  onViewProfile={originalIndex >= 0 ? () => {
-                    const params = new URLSearchParams(searchParams.toString())
-                    params.set('supplierIndex', String(originalIndex))
-                    router.push(`/product?${params.toString()}`)
-                  } : undefined}
-                />
-              </m.div>
-            )
-          })}
-        </m.div>
+        {groupedSuppliers.length > 0 ? (
+          <div className="space-y-6">
+            {groupedSuppliers.map((group) => (
+              <section key={group.team}>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-[13px] font-semibold text-ink">{group.label}</h3>
+                  <span className="text-[11px] text-ink-4">{group.suppliers.length}</span>
+                </div>
+                <m.div className="space-y-2" variants={staggerContainer} initial="hidden" animate="visible">
+                  {group.suppliers.slice(0, visibleCount).map((supplier: any, i: number) => {
+                    const originalIndex = suppliers.indexOf(supplier)
+                    const badges: string[] = []
+                    if ((supplier.cross_reference_count || 0) > 1) {
+                      badges.push(`Found by ${supplier.cross_reference_count} teams`)
+                    }
+                    if (Array.isArray(supplier.discovery_teams) && supplier.discovery_teams.length > 0) {
+                      badges.push(normalizeTeamLabel(pickPrimaryTeam(supplier)))
+                    }
+                    return (
+                      <m.div key={`${group.team}-${supplier.name}-${i}`} variants={cardEntrance}>
+                        <SupplierCard
+                          supplier={supplier}
+                          verification={verificationMap.get(supplier.name)}
+                          badges={badges}
+                          onViewProfile={originalIndex >= 0 ? () => {
+                            const params = new URLSearchParams(searchParams.toString())
+                            params.set('supplierIndex', String(originalIndex))
+                            router.push(`/product?${params.toString()}`)
+                          } : undefined}
+                        />
+                      </m.div>
+                    )
+                  })}
+                </m.div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <m.div
+            className="space-y-2"
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+          >
+            {visible.map((supplier: any, i: number) => {
+              const originalIndex = suppliers.indexOf(supplier)
+              const badges: string[] = []
+              if ((supplier.cross_reference_count || 0) > 1) {
+                badges.push(`Found by ${supplier.cross_reference_count} teams`)
+              }
+              return (
+                <m.div key={`${supplier.name}-${i}`} variants={cardEntrance}>
+                  <SupplierCard
+                    supplier={supplier}
+                    verification={verificationMap.get(supplier.name)}
+                    badges={badges}
+                    onViewProfile={originalIndex >= 0 ? () => {
+                      const params = new URLSearchParams(searchParams.toString())
+                      params.set('supplierIndex', String(originalIndex))
+                      router.push(`/product?${params.toString()}`)
+                    } : undefined}
+                  />
+                </m.div>
+              )
+            })}
+          </m.div>
+        )}
 
         {/* Show more */}
         {filtered.length > 12 && (
@@ -295,7 +429,11 @@ export default function SearchPhase() {
 
         {filtered.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-ink-4 text-[13px]">No suppliers match your filters.</p>
+            <p className="text-ink-4 text-[13px]">
+              {hasActiveFilters
+                ? 'No suppliers match your current filters.'
+                : 'No suppliers are currently available to display.'}
+            </p>
             <button
               onClick={() => {
                 setSearchQuery('')

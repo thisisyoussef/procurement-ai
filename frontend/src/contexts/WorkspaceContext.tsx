@@ -14,10 +14,19 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { AuthUser, authFetch, clearAuthSession } from '@/lib/auth'
 import { trackTraceEvent } from '@/lib/telemetry'
-import { DecisionLane, Phase, PHASE_ORDER, PipelineStatus, phaseIndex, stageToPhase } from '@/types/pipeline'
+import {
+  CheckpointResponse,
+  DecisionLane,
+  Phase,
+  PHASE_ORDER,
+  PipelineStatus,
+  phaseIndex,
+  stageToPhase,
+} from '@/types/pipeline'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const POLL_INTERVAL_MS = 1200
+const STEERING_POLL_INTERVAL_MS = 3000
 const TERMINAL_STATUSES = new Set<string>(['complete', 'failed', 'canceled'])
 
 export interface WorkspaceProjectSummary {
@@ -60,6 +69,7 @@ interface WorkspaceContextValue {
   setDecisionPreference: (
     lanePreference: Exclude<DecisionLane, 'alternative'>
   ) => Promise<boolean>
+  respondToCheckpoint: (response: CheckpointResponse) => Promise<boolean>
   handleClarifyingAnswered: () => void
   refreshStatus: () => void
   refreshProjectList: () => Promise<void>
@@ -112,9 +122,15 @@ function normalizeProjectId(value: string | null | undefined): string | null {
 
 function shouldContinuePolling(status: PipelineStatus): boolean {
   if (TERMINAL_STATUSES.has(status.status)) return false
-  // Pause polling on clarifying; slow-poll on steering (checkpoint auto-continues)
+  // Pause polling on clarifying; keep polling on steering so we can observe resume.
   if (status.status === 'clarifying') return false
   return true
+}
+
+function pollingIntervalFor(status: PipelineStatus | null): number {
+  if (!status) return POLL_INTERVAL_MS
+  if (status.status === 'steering') return STEERING_POLL_INTERVAL_MS
+  return POLL_INTERVAL_MS
 }
 
 function applyStatus(state: WorkspaceState, status: PipelineStatus): WorkspaceState {
@@ -383,9 +399,10 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
         }
 
         if (shouldContinuePolling(status)) {
+          const nextInterval = pollingIntervalFor(status)
           pollTimerRef.current = setTimeout(() => {
             void runPoll('interval')
-          }, POLL_INTERVAL_MS)
+          }, nextInterval)
           return
         }
 
@@ -753,6 +770,57 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
     [fetchProjectStatus, handleUnauthorized, state.projectId]
   )
 
+  const respondToCheckpoint = useCallback(
+    async (response: CheckpointResponse): Promise<boolean> => {
+      const projectId = state.projectId
+      if (!projectId) return false
+      try {
+        const res = await authFetch(`${API_BASE}/api/v1/projects/${projectId}/checkpoint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            checkpoint_type: response.checkpoint_type,
+            answers: response.answers || {},
+            parameter_overrides: response.parameter_overrides || {},
+            action: response.action || 'continue',
+            redirect_instructions: response.redirect_instructions || null,
+          }),
+        })
+
+        if (res.status === 401) {
+          handleUnauthorized()
+          return false
+        }
+
+        if (!res.ok) {
+          let detail = `HTTP ${res.status}`
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            detail = payload.detail || detail
+          } catch {
+            // Keep HTTP detail
+          }
+          throw new Error(detail)
+        }
+
+        startPollingForProject(projectId, 'checkpoint_response')
+        return true
+      } catch (err) {
+        trackTraceEvent(
+          'workspace_checkpoint_response_error',
+          {
+            project_id: projectId,
+            checkpoint_type: response.checkpoint_type,
+            detail: err instanceof Error ? err.message : String(err),
+          },
+          { projectId, level: 'warn' }
+        )
+        return false
+      }
+    },
+    [handleUnauthorized, startPollingForProject, state.projectId]
+  )
+
   const handleSignOut = useCallback(() => {
     clearAuthSession()
     onSignOut()
@@ -864,6 +932,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       cancelCurrentProject,
       restartCurrentProject,
       setDecisionPreference,
+      respondToCheckpoint,
       handleClarifyingAnswered,
       refreshStatus,
       refreshProjectList,
@@ -878,6 +947,7 @@ export function WorkspaceProvider({ authUser, onSignOut, children }: WorkspacePr
       openProject,
       restartCurrentProject,
       setDecisionPreference,
+      respondToCheckpoint,
       refreshProjectList,
       refreshStatus,
       setErrorMessage,

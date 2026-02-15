@@ -24,6 +24,8 @@ interface Supplier {
   language_discovered: string | null
   logo_url?: string | null
   product_images?: string[]
+  discovery_teams?: string[]
+  cross_reference_count?: number
 }
 
 interface Verification {
@@ -39,6 +41,7 @@ interface SupplierCardProps {
   verification?: Verification
   dark?: boolean
   onViewProfile?: () => void
+  badges?: string[]
 }
 
 function getRiskDot(risk: string): string {
@@ -73,6 +76,7 @@ export default function SupplierCard({
   verification,
   dark = false,
   onViewProfile,
+  badges = [],
 }: SupplierCardProps) {
   const [expanded, setExpanded] = useState(false)
   const sourceLabel = getSourceLabel(supplier.source)
@@ -118,6 +122,22 @@ export default function SupplierCard({
             <p className={`text-[10px] ${textMuted}`}>
               {supplier.city}{supplier.country ? `, ${supplier.country}` : ''}
             </p>
+          )}
+          {badges.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {badges.slice(0, 2).map((badge) => (
+                <span
+                  key={badge}
+                  className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] ${
+                    dark
+                      ? 'border-white/20 text-white/80'
+                      : 'border-surface-3 text-ink-4'
+                  }`}
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 

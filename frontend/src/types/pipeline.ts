@@ -4,6 +4,7 @@ export interface ProgressEvent {
   detail: string
   progress_pct: number | null
   timestamp: number
+  narrative?: boolean
 }
 
 export type CheckpointType =
@@ -30,6 +31,14 @@ export interface CheckpointEvent {
   auto_continue_seconds: number
   requires_explicit_approval: boolean
   timestamp: number
+}
+
+export interface CheckpointResponse {
+  checkpoint_type: CheckpointType
+  answers?: Record<string, unknown>
+  parameter_overrides?: Record<string, unknown>
+  action?: 'continue' | 'redirect' | 'pause' | 'restart_stage'
+  redirect_instructions?: string | null
 }
 
 export type DecisionLane =
@@ -103,11 +112,14 @@ export interface PipelineStatus {
   verification_results: any
   comparison_result: any
   recommendation: RecommendationResult | null
+  outreach_state?: any
   progress_events?: ProgressEvent[]
   clarifying_questions?: ClarifyingQuestion[] | null
   decision_preference?: DecisionLane | null
   buyer_context?: Record<string, unknown> | null
   active_checkpoint?: CheckpointEvent | null
+  checkpoint_responses?: Record<string, CheckpointResponse>
+  user_sourcing_profile?: Record<string, unknown> | null
   proactive_alerts?: Array<{
     id: string
     title: string

@@ -8,13 +8,12 @@ import OutreachPhase from './phases/OutreachPhase'
 import ComparePhase from './phases/ComparePhase'
 import SamplesPhase from './phases/SamplesPhase'
 import OrderPhase from './phases/OrderPhase'
-import LiveProgressFeed from './LiveProgressFeed'
 import DebugConsoleFeed from './DebugConsoleFeed'
-import CheckpointBanner from './CheckpointBanner'
 import StageTransitionToast from './StageTransitionToast'
 import SupplierProfileView from './supplier-profile/SupplierProfileView'
 import { AnimatePresence, m } from '@/lib/motion'
 import { phaseTransition } from '@/lib/motion/variants'
+import AgentNarrationPanel from './AgentNarrationPanel'
 
 const PHASE_COMPONENTS: Record<string, React.ComponentType> = {
   brief: BriefPhase,
@@ -56,8 +55,7 @@ export default function CenterStage() {
         />
       ) : (
         <>
-          <CheckpointBanner />
-          <LiveProgressFeed />
+          <AgentNarrationPanel />
           <DebugConsoleFeed />
           <AnimatePresence mode="wait">
             <m.div

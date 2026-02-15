@@ -9,10 +9,11 @@ import ProactiveAlerts from '@/components/workspace/ProactiveAlerts'
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
 export default function OrderPhase() {
-  const { projectId } = useWorkspace()
+  const { projectId, status } = useWorkspace()
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const canSubmitRetrospective = status?.current_stage === 'complete'
 
   async function handleRetrospective(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -59,6 +60,25 @@ export default function OrderPhase() {
       <ProactiveAlerts />
 
       <div className="card px-6 py-5">
+        <h2 className="font-heading text-2xl text-ink">Order Management</h2>
+        <p className="mt-2 text-[13px] text-ink-3">
+          After choosing a supplier, this workspace tracks purchase order milestones, payment checkpoints, and delivery readiness.
+        </p>
+        <div className="mt-4 rounded-xl border border-surface-3 bg-surface-2/40 px-4 py-3">
+          <ul className="space-y-1 text-[12px] text-ink-3">
+            <li>Create and track purchase orders</li>
+            <li>Monitor payment and production milestones</li>
+            <li>Keep delivery and receiving updates in one timeline</li>
+          </ul>
+        </div>
+        {!canSubmitRetrospective && (
+          <p className="mt-3 text-[12px] text-ink-4">
+            You are still in the sourcing or outreach flow. Retrospective unlocks after this run reaches complete.
+          </p>
+        )}
+      </div>
+
+      <div className="card px-6 py-5">
         <h2 className="font-heading text-2xl text-ink">Order & Retrospective</h2>
         <p className="mt-2 text-[13px] text-ink-3">
           Capture outcome feedback so Tamkin can learn your preferences and supplier reliability patterns.
@@ -67,6 +87,10 @@ export default function OrderPhase() {
         {submitted ? (
           <div className="mt-5 rounded-xl border border-[#d3e9d4] bg-[#f3fff4] px-4 py-3 text-[13px] text-[#2f6b31]">
             Retrospective submitted. Future sourcing runs will use this feedback.
+          </div>
+        ) : !canSubmitRetrospective ? (
+          <div className="mt-5 rounded-xl border border-surface-3 bg-surface-2/40 px-4 py-3 text-[12px] text-ink-3">
+            Finish this run to unlock retrospective capture and profile learning.
           </div>
         ) : (
           <form className="mt-5 grid gap-3" onSubmit={handleRetrospective}>

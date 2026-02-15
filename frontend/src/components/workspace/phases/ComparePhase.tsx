@@ -10,10 +10,11 @@ import { DecisionLane } from '@/types/pipeline'
 import { m, AnimatePresence } from '@/lib/motion'
 import { staggerContainer, cardEntrance } from '@/lib/motion/variants'
 import { EASE_OUT_EXPO, DURATION } from '@/lib/motion/config'
-import StageAnimationRouter from '@/components/animation/StageAnimationRouter'
 import VerdictView from '@/components/workspace/compare/VerdictView'
+import OutreachApproval from '@/components/workspace/compare/OutreachApproval'
+import SmartLoader from '@/components/workspace/SmartLoader'
 
-type CompareView = 'verdict' | 'full_comparison'
+type CompareView = 'verdict' | 'full_comparison' | 'outreach_approval'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 const PRIMARY_LANES: Array<Exclude<DecisionLane, 'alternative'>> = [
@@ -355,7 +356,7 @@ export default function ComparePhase() {
 
   // Loading / empty state (must come after hooks so hook order is stable across renders)
   if (!comparison && !recommendation) {
-    if (loading) return <StageAnimationRouter />
+    if (loading) return <SmartLoader stage={status?.current_stage || 'comparing'} loading />
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <p className="text-ink-4 text-[13px]">
@@ -374,10 +375,27 @@ export default function ComparePhase() {
         discoveryResults={status?.discovery_results}
         verificationResults={verifications}
         comparisonResult={comparison}
-        onApproveOutreach={() => void approveAndSendOutreach()}
+        onApproveOutreach={() => setCompareView('outreach_approval')}
         onShowFullComparison={() => setCompareView('full_comparison')}
         onOpenSupplierProfile={openSupplierProfile}
+        approvalLoading={false}
+      />
+    )
+  }
+
+  if (compareView === 'outreach_approval' && suppliers) {
+    return (
+      <OutreachApproval
+        selectedSuppliers={selectedSuppliers}
+        selectedSupplierIndices={selectedSupplierIndices}
+        plainLanguagePreview={plainLanguagePreview}
         approvalLoading={approvalLoading}
+        approvalError={approvalError}
+        approvalSuccess={approvalSuccess}
+        onToggleSupplier={toggleSupplierSelection}
+        onOpenSupplierProfile={openSupplierProfile}
+        onConfirmSend={() => void approveAndSendOutreach()}
+        onBackToVerdict={() => setCompareView('verdict')}
       />
     )
   }
