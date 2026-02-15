@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, TypedDict
 
-from langgraph.graph import add
+from operator import add
 
 from automotive.schemas.comparison import ComparisonMatrix
 from automotive.schemas.discovery import DiscoveryResult
