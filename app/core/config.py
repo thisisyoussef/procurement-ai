@@ -40,9 +40,6 @@ class Settings(BaseSettings):
     enable_buyer_context: bool = False
     enable_proactive_intelligence: bool = False
 
-    # Project flag: "procurement" or "automotive" — controls which frontend is served
-    active_project: str = "procurement"
-
     # Database
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/procurement"
 
