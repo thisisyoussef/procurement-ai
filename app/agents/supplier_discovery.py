@@ -108,6 +108,53 @@ CONSUMER_MERCH_INDICATORS = {
     "e-commerce store",
 }
 
+# Products that are inherently consumer-facing — retail/e-commerce suppliers
+# are legitimate matches rather than noise for these categories.
+CONSUMER_PRODUCT_CATEGORIES = {
+    "hoodie", "hoodies", "t-shirt", "t-shirts", "tshirt", "tshirts",
+    "shirt", "shirts", "jacket", "jackets", "dress", "dresses",
+    "pants", "jeans", "sweater", "sweaters", "shorts", "socks",
+    "hat", "hats", "cap", "caps", "beanie", "beanies",
+    "sneakers", "shoes", "boots", "sandals",
+    "bag", "bags", "backpack", "backpacks", "tote", "totes",
+    "jewelry", "necklace", "bracelet", "ring", "earrings",
+    "candle", "candles", "soap", "soaps", "skincare", "cosmetics",
+    "mug", "mugs", "tumbler", "tumblers", "water bottle",
+    "phone case", "sticker", "stickers", "poster", "posters",
+    "pillow", "pillows", "blanket", "blankets",
+    "toy", "toys", "plush", "plushie",
+}
+
+# Category synonyms — when searching for one term, related terms should also
+# be accepted during product-anchor matching.  Maps anchor token → set of
+# additional tokens that count as a match.
+PRODUCT_SYNONYM_MAP: dict[str, set[str]] = {
+    "hoodie":    {"hoodies", "sweatshirt", "sweatshirts", "pullover", "apparel", "clothing", "garment", "knitwear", "fleece"},
+    "hoodies":   {"hoodie", "sweatshirt", "sweatshirts", "pullover", "apparel", "clothing", "garment", "knitwear", "fleece"},
+    "tshirt":    {"t-shirt", "tee", "shirt", "apparel", "clothing", "garment"},
+    "shirt":     {"shirts", "tshirt", "t-shirt", "tee", "apparel", "clothing", "garment"},
+    "jacket":    {"jackets", "outerwear", "coat", "apparel", "clothing", "garment"},
+    "dress":     {"dresses", "apparel", "clothing", "garment"},
+    "pants":     {"trousers", "jeans", "apparel", "clothing", "garment", "bottoms"},
+    "sweater":   {"sweaters", "knitwear", "pullover", "apparel", "clothing", "garment"},
+    "bag":       {"bags", "tote", "backpack", "handbag", "pouch"},
+    "candle":    {"candles", "wax", "fragrance", "home decor"},
+    "soap":      {"soaps", "bath", "body care", "skincare"},
+    "mug":       {"mugs", "cup", "drinkware", "tumbler"},
+    "shoes":     {"sneakers", "boots", "sandals", "footwear"},
+    "jewelry":   {"necklace", "bracelet", "ring", "earrings", "accessories"},
+}
+
+
+def _is_consumer_product(requirements: ParsedRequirements) -> bool:
+    """Detect whether the sourcing request is for a consumer product.
+
+    Consumer products shouldn't be penalized for having retail/e-commerce
+    suppliers — those are legitimate channels for these categories.
+    """
+    blob = (requirements.product_type or "").lower()
+    return any(cat in blob for cat in CONSUMER_PRODUCT_CATEGORIES)
+
 GENERIC_QUERY_TERMS = {
     "manufacturer",
     "manufacturers",
@@ -218,6 +265,9 @@ def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) ->
     - If there are 3+ anchor terms, require at least 2 matches to prevent
       single-token false positives (e.g. "rubber" matching a tire company
       when looking for "gumball machine rubber balls").
+
+    Synonym expansion: for each anchor, also check category synonyms so that
+    e.g. a "hoodie" search matches a supplier described as "apparel manufacturer".
     """
     if not anchors:
         return True
@@ -231,7 +281,17 @@ def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) ->
     ).lower()
     if not blob.strip():
         return True
-    hits = sum(1 for anchor in anchors if anchor in blob)
+
+    def _anchor_hit(anchor: str) -> bool:
+        if anchor in blob:
+            return True
+        # Check synonyms
+        for syn in PRODUCT_SYNONYM_MAP.get(anchor, set()):
+            if syn in blob:
+                return True
+        return False
+
+    hits = sum(1 for anchor in anchors if _anchor_hit(anchor))
     # Require stronger match when we have more anchor terms available
     min_required = 2 if len(anchors) >= 3 else 1
     return hits >= min_required
@@ -240,24 +300,30 @@ def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) ->
 def _is_promotable_filtered_supplier(
     supplier: DiscoveredSupplier,
     industrial_mode: bool,
+    desperate: bool = False,
 ) -> bool:
-    """Whether a filtered supplier can be promoted for broad-net verification."""
+    """Whether a filtered supplier can be promoted for broad-net verification.
+
+    When `desperate` is True (zero viable suppliers), we relax the rules and
+    allow promotion of retail and product-type mismatches — having something
+    to verify is better than returning nothing.
+    """
     reason = (supplier.filtered_reason or "").lower()
 
     # Never promote clearly wrong industry in industrial mode.
     if industrial_mode and reason == "wrong_industry":
         return False
 
-    # Never promote pure retail-store profiles.
-    if reason == "retail_store":
-        return False
-
-    # Keep off-category suppliers out of surfaced results.
-    if reason == "wrong_product_type":
-        return False
+    if not desperate:
+        # Normal mode — keep strict filters
+        if reason == "retail_store":
+            return False
+        if reason == "wrong_product_type":
+            return False
 
     # Keep some quality floor for broad-net promotions.
-    if reason == "low_relevance" and supplier.relevance_score < 28:
+    floor = 20 if desperate else 28
+    if reason == "low_relevance" and supplier.relevance_score < floor:
         return False
 
     return True
@@ -778,13 +844,27 @@ async def _score_and_deduplicate(
     emit_progress("discovering", "scoring",
                   f"AI analyzing and ranking {len(all_raw)} raw results...")
 
-    industrial_guardrail = """
+    consumer_product = _is_consumer_product(requirements)
+
+    if industrial_mode:
+        mode_guardrail = """
 
 INDUSTRIAL/OEM GUARDRAIL:
 - This request is industrial/OEM sourcing. Strongly penalize consumer-merch and retail results.
 - Consumer storefronts, promotional-merch sellers, and generic e-commerce listings should score below 20 unless they clearly manufacture the exact requested part.
 - Prefer suppliers mentioning OEM, manufacturing, factory, tooling, stamping, machining, APQP/PPAP/IATF readiness.
-""" if industrial_mode else ""
+"""
+    elif consumer_product:
+        mode_guardrail = """
+
+CONSUMER PRODUCT SOURCING:
+- This request is for a consumer product. Retail stores, online shops, boutiques, and e-commerce suppliers are VALID sources — do NOT penalize them.
+- Score suppliers based on whether they sell or manufacture the actual product requested.
+- Both manufacturers AND established retailers/wholesalers of this product type are valuable.
+- Only penalize suppliers that are in a completely unrelated industry.
+"""
+    else:
+        mode_guardrail = ""
 
     prompt = f"""Product requirements:
 {requirements.model_dump_json(indent=2)}
@@ -808,11 +888,10 @@ Return ALL plausible suppliers (relevance_score >= 25) as a JSON array — do NO
 A supplier that is in a completely different industry from the requested product MUST score below 20 regardless of other factors.
 
 CRITICAL SCORING RULES:
-1. PRODUCT TYPE is king — a supplier MUST make the actual product requested to score above 50. Material match alone is NOT enough.
-2. PENALIZE retail stores — shops, boutiques, e-commerce stores that sell to consumers (not B2B) get -30 to -40 points.
-3. PRIORITIZE factories — actual manufacturers, factories, OEM producers get a +10-15 bonus.
-4. Geographic material signals — if the product references a material origin (Egyptian cotton, Italian leather), prefer manufacturers FROM that region.
-{industrial_guardrail}
+1. PRODUCT TYPE is king — a supplier MUST make or sell the actual product requested to score above 50. Material match alone is NOT enough.
+2. PRIORITIZE factories — actual manufacturers, factories, OEM producers get a +10-15 bonus.
+3. Geographic material signals — if the product references a material origin (Egyptian cotton, Italian leather), prefer manufacturers FROM that region.
+{mode_guardrail}
 
 MARKETPLACE RESULTS:
 - Results with source starting with "marketplace_" come from real marketplace product listings (Etsy, Alibaba, Amazon, etc.).
@@ -1184,6 +1263,7 @@ async def discover_suppliers(
         "shopping mall", "department store", "gift shop",
         "appears to be retail", "sells to consumers",
     ]
+    consumer_product = _is_consumer_product(requirements)
     product_anchors = _product_anchor_terms(requirements)
 
     main_suppliers = []
@@ -1194,8 +1274,10 @@ async def discover_suppliers(
     for s in suppliers:
         reason = None
 
-        # Check low relevance — raised threshold to catch more off-category suppliers
-        if s.relevance_score < 35:
+        # Check low relevance — use a softer threshold for consumer products
+        # since the LLM scoring is already more lenient for them
+        relevance_floor = 25 if consumer_product else 35
+        if s.relevance_score < relevance_floor:
             reason = "low_relevance"
         # In industrial mode, remove consumer-merch results aggressively.
         elif industrial_mode:
@@ -1211,8 +1293,8 @@ async def discover_suppliers(
                 reason = "wrong_industry"
             elif s.source in {"marketplace_etsy", "marketplace_amazon", "marketplace_faire"}:
                 reason = "wrong_industry"
-        # Check retail indicators at moderate relevance
-        elif s.relevance_score < 50 and s.description:
+        # Skip retail filtering for consumer products — retail is a valid channel
+        elif not consumer_product and s.relevance_score < 50 and s.description:
             desc_lower = s.description.lower()
             if any(ind in desc_lower for ind in RETAIL_INDICATORS):
                 reason = "retail_store"
@@ -1240,16 +1322,18 @@ async def discover_suppliers(
 
     # Keep a broad verification pool: if strict filters leave too few suppliers,
     # promote top borderline suppliers for downstream verification.
+    # When zero suppliers survive, enter "desperate" mode to relax promotion rules.
     target_min_viable = max(
         TARGET_SURFACED_SUPPLIERS_MIN,
         min(40, max(20, len(suppliers) // 3)),
     )
     if len(main_suppliers) < target_min_viable and filtered_suppliers:
+        desperate = len(main_suppliers) == 0
         needed = target_min_viable - len(main_suppliers)
         promotable = [
             supplier
             for supplier in sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
-            if _is_promotable_filtered_supplier(supplier, industrial_mode)
+            if _is_promotable_filtered_supplier(supplier, industrial_mode, desperate=desperate)
         ]
         promoted = promotable[:needed]
 
