@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from automotive.services.project_service import (
+    _in_memory_projects,
     approve_stage,
     create_project,
     get_project,
@@ -198,3 +199,25 @@ async def get_project_quotes(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project.get("quote_ingestion") or {}
+
+
+@router.get("/{project_id}/debug")
+async def debug_project_state(project_id: str) -> dict[str, Any]:
+    """DEBUG: Return raw in-memory project state for troubleshooting."""
+    proj = _in_memory_projects.get(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Not found in memory")
+    # Return keys and types (truncate large values to avoid flooding)
+    summary: dict[str, Any] = {}
+    for k, v in proj.items():
+        if v is None:
+            summary[k] = None
+        elif isinstance(v, dict):
+            summary[k] = {"_type": "dict", "_keys": list(v.keys()), "_len": len(v)}
+        elif isinstance(v, list):
+            summary[k] = {"_type": "list", "_len": len(v)}
+        elif isinstance(v, str) and len(v) > 200:
+            summary[k] = v[:200] + "..."
+        else:
+            summary[k] = v
+    return summary

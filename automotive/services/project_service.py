@@ -117,8 +117,20 @@ async def _run_pipeline(
         emit_activity("parse", "start", "Parsing procurement requirements with AI...", project_id=project_id)
         # Run until first interrupt (HITL gate)
         result = await graph.ainvoke(initial_state, config)
-        _update_project_state(project_id, result, db)
-        stage = result.get("current_stage", "unknown")
+        logger.info("ainvoke returned type=%s, keys=%s", type(result).__name__, list(result.keys()) if isinstance(result, dict) else "N/A")
+
+        # ainvoke returns the state snapshot; however when an interrupt fires,
+        # the returned dict may be partial.  Always read the full checkpoint.
+        snapshot = await graph.aget_state(config)
+        state_values = snapshot.values if snapshot else {}
+        logger.info(
+            "State snapshot keys: %s, has parsed_requirement: %s",
+            list(state_values.keys()) if isinstance(state_values, dict) else "N/A",
+            "parsed_requirement" in state_values if isinstance(state_values, dict) else False,
+        )
+
+        _update_project_state(project_id, state_values, db)
+        stage = state_values.get("current_stage", "unknown") if isinstance(state_values, dict) else "unknown"
         emit_activity(stage, "paused", f"Pipeline paused — awaiting approval at {stage}", project_id=project_id)
         logger.info("Pipeline paused at stage: %s for project %s", stage, project_id)
     except Exception as exc:
@@ -230,8 +242,14 @@ async def approve_stage(
         from langgraph.types import Command
         emit_activity(stage, "resuming", f"Resuming pipeline from {stage}...", project_id=project_id)
         result = await graph.ainvoke(Command(resume=decision), config)
-        _update_project_state(project_id, result, db)
-        new_stage = result.get("current_stage", "unknown")
+
+        # Read the full checkpoint state (more reliable than ainvoke return)
+        snapshot = await graph.aget_state(config)
+        state_values = snapshot.values if snapshot else result
+        logger.info("Resume snapshot keys: %s", list(state_values.keys()) if isinstance(state_values, dict) else "N/A")
+
+        _update_project_state(project_id, state_values, db)
+        new_stage = state_values.get("current_stage", "unknown") if isinstance(state_values, dict) else "unknown"
         emit_activity(new_stage, "paused", f"Pipeline advanced to {new_stage}", project_id=project_id)
         return {"status": "resumed", "current_stage": new_stage}
     except Exception as exc:
