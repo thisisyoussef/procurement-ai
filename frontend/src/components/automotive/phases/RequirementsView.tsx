@@ -90,7 +90,7 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
           if (value === null || value === undefined || value === '') return null
 
           const display = Array.isArray(value)
-            ? value.join(', ')
+            ? (value as string[]).join(', ')
             : typeof value === 'boolean'
               ? value ? 'Yes' : 'No'
               : String(value)
@@ -110,7 +110,7 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
       </div>
 
       {/* Estimates section */}
-      {(data.estimated_tooling_range || data.estimated_lead_time) && (
+      {!!(data.estimated_tooling_range || data.estimated_lead_time) && (
         <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-900/50">
           <p className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Market Estimates</p>
           <div className="flex gap-6">
