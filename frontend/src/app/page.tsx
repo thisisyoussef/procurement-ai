@@ -146,11 +146,6 @@ export default function HomePage() {
   const demoStartedRef = useRef(false)
 
   useEffect(() => {
-    // Project flag: redirect to automotive frontend when active
-    if (process.env.NEXT_PUBLIC_ACTIVE_PROJECT === 'automotive') {
-      router.replace('/automotive')
-      return
-    }
     if (featureFlags.tamkinLandingBypass) {
       trackTraceEvent('landing_bypass_redirect', { to: '/product' })
       router.replace('/product')
