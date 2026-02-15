@@ -12,6 +12,7 @@ export default function AutomotiveDashboard() {
   const [buyerName, setBuyerName] = useState('')
   const [buyerEmail, setBuyerEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [projects, setProjects] = useState<any[]>([])
   const [loaded, setLoaded] = useState(false)
 
@@ -27,6 +28,17 @@ export default function AutomotiveDashboard() {
 
   if (!loaded) {
     loadProjects()
+  }
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const { example_request } = await automotiveClient.generateExample()
+      setRequest(example_request)
+    } catch (e) {
+      console.error('Failed to generate example', e)
+    }
+    setGenerating(false)
   }
 
   const handleCreate = async () => {
@@ -62,9 +74,30 @@ export default function AutomotiveDashboard() {
 
       {/* New Project Card */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 mb-10">
-        <h2 className="text-xl font-semibold mb-2">New Procurement Project</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-xl font-semibold">New Procurement Project</h2>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-700 hover:border-zinc-600 transition-colors disabled:opacity-40"
+          >
+            {generating ? (
+              <>
+                <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2L10 6L14 6.5L11 9.5L12 14L8 11.5L4 14L5 9.5L2 6.5L6 6L8 2Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" fill="none" />
+                </svg>
+                Generate Example
+              </>
+            )}
+          </button>
+        </div>
         <p className="text-zinc-400 text-sm mb-6">
-          Describe what you need — Tamkin will find, vet, and compare suppliers for you.
+          Describe what you need — or generate an example to see how Tamkin works.
         </p>
 
         <textarea
@@ -132,7 +165,7 @@ export default function AutomotiveDashboard() {
 
       {loaded && projects.length === 0 && (
         <div className="text-center text-zinc-500 py-12">
-          <p>No projects yet. Describe your sourcing need above to get started.</p>
+          <p>No projects yet. Describe your sourcing need above — or click Generate Example to try it out.</p>
         </div>
       )}
     </div>

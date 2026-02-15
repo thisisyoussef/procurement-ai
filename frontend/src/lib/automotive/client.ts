@@ -117,4 +117,13 @@ export const automotiveClient = {
   getQuotes(projectId: string) {
     return getJson<Record<string, unknown>>(`/projects/${projectId}/quotes`)
   },
+
+  generateExample() {
+    return postJson<{ example_request: string }>('/generate-example', {})
+  },
+
+  /** Returns an EventSource URL for SSE streaming of project activity. */
+  getEventStreamUrl(projectId: string) {
+    return `${API_BASE}${PREFIX}/projects/${projectId}/events/stream`
+  },
 }

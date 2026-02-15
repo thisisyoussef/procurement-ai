@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from automotive.agents.orchestrator import compile_graph
+from automotive.api.v1.events import automotive_project_id, emit_activity
 from automotive.models.project import AutomotiveProject, AutomotiveProjectEvent
 from automotive.schemas.pipeline_state import ProcurementState
 
@@ -78,6 +79,11 @@ async def _run_pipeline(
     In production with PostgresSaver, the graph persists state and
     pauses at HITL gates. For MVP, we run without interrupts.
     """
+    # Set context var so agents can emit activity events
+    automotive_project_id.set(project_id)
+
+    emit_activity("pipeline", "start", f"Pipeline started for project {project_id[:8]}", project_id=project_id)
+
     graph = compile_graph()
 
     initial_state: ProcurementState = {
@@ -99,12 +105,16 @@ async def _run_pipeline(
     config = {"configurable": {"thread_id": project_id}}
 
     try:
+        emit_activity("parse", "start", "Parsing procurement requirements with AI...", project_id=project_id)
         # Run until first interrupt (HITL gate)
         result = await graph.ainvoke(initial_state, config)
         _update_project_state(project_id, result, db)
-        logger.info("Pipeline paused at stage: %s for project %s", result.get("current_stage"), project_id)
-    except Exception:
+        stage = result.get("current_stage", "unknown")
+        emit_activity(stage, "paused", f"Pipeline paused — awaiting approval at {stage}", project_id=project_id)
+        logger.info("Pipeline paused at stage: %s for project %s", stage, project_id)
+    except Exception as exc:
         logger.exception("Pipeline failed for project %s", project_id)
+        emit_activity("pipeline", "error", f"Pipeline error: {exc}", project_id=project_id)
         _update_project_state(project_id, {"status": "error", "current_stage": "error"}, db)
 
 
@@ -174,14 +184,21 @@ async def approve_stage(
 
     In production, this resumes the LangGraph graph via Command(resume=...).
     """
+    automotive_project_id.set(project_id)
+    emit_activity(stage, "approved", f"Human approved stage: {stage}", project_id=project_id)
+
     graph = compile_graph()
     config = {"configurable": {"thread_id": project_id}}
 
     try:
         from langgraph.types import Command
+        emit_activity(stage, "resuming", f"Resuming pipeline from {stage}...", project_id=project_id)
         result = await graph.ainvoke(Command(resume=decision), config)
         _update_project_state(project_id, result, db)
-        return {"status": "resumed", "current_stage": result.get("current_stage")}
-    except Exception:
+        new_stage = result.get("current_stage", "unknown")
+        emit_activity(new_stage, "paused", f"Pipeline advanced to {new_stage}", project_id=project_id)
+        return {"status": "resumed", "current_stage": new_stage}
+    except Exception as exc:
         logger.exception("Failed to resume pipeline for project %s at stage %s", project_id, stage)
+        emit_activity(stage, "error", f"Resume failed: {exc}", project_id=project_id)
         return {"status": "error", "error": "Failed to resume pipeline"}

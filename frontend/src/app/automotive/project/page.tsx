@@ -13,6 +13,7 @@ import ReportsView from '@/components/automotive/phases/ReportsView'
 import RFQView from '@/components/automotive/phases/RFQView'
 import QuotesView from '@/components/automotive/phases/QuotesView'
 import CompleteView from '@/components/automotive/phases/CompleteView'
+import ActivityConsole from '@/components/automotive/workspace/ActivityConsole'
 
 function ProjectContent() {
   const params = useSearchParams()
@@ -184,6 +185,11 @@ function ProjectContent() {
         {activeTab === 'complete' && (
           <CompleteView project={project} />
         )}
+      </div>
+
+      {/* Live activity console */}
+      <div className="mt-6">
+        <ActivityConsole projectId={project.project_id} />
       </div>
     </div>
   )
