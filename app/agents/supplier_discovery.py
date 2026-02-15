@@ -72,262 +72,6 @@ INDUSTRIAL_MARKETPLACE_NAMES = {
     "indiamart",
 }
 
-INDUSTRIAL_SIGNALS = {
-    "automotive",
-    "oem",
-    "tier 1",
-    "tier-1",
-    "tier 2",
-    "tier-2",
-    "iatf",
-    "ppap",
-    "apqp",
-    "stamped steel",
-    "stamping",
-    "seat bracket",
-    "wire harness",
-    "machining",
-    "forging",
-    "drivetrain",
-    "inverter",
-    "die cast",
-    "gm",
-}
-
-CONSUMER_MERCH_INDICATORS = {
-    "tote",
-    "hoodie",
-    "hoodies",
-    "streetwear",
-    "apparel",
-    "merch",
-    "gift shop",
-    "boutique",
-    "canvas bag",
-    "promotional bag",
-    "e-commerce store",
-}
-
-# Products that are inherently consumer-facing — retail/e-commerce suppliers
-# are legitimate matches rather than noise for these categories.
-CONSUMER_PRODUCT_CATEGORIES = {
-    "hoodie", "hoodies", "t-shirt", "t-shirts", "tshirt", "tshirts",
-    "shirt", "shirts", "jacket", "jackets", "dress", "dresses",
-    "pants", "jeans", "sweater", "sweaters", "shorts", "socks",
-    "hat", "hats", "cap", "caps", "beanie", "beanies",
-    "sneakers", "shoes", "boots", "sandals",
-    "bag", "bags", "backpack", "backpacks", "tote", "totes",
-    "jewelry", "necklace", "bracelet", "ring", "earrings",
-    "candle", "candles", "soap", "soaps", "skincare", "cosmetics",
-    "mug", "mugs", "tumbler", "tumblers", "water bottle",
-    "phone case", "sticker", "stickers", "poster", "posters",
-    "pillow", "pillows", "blanket", "blankets",
-    "toy", "toys", "plush", "plushie",
-}
-
-# Category synonyms — when searching for one term, related terms should also
-# be accepted during product-anchor matching.  Maps anchor token → set of
-# additional tokens that count as a match.
-PRODUCT_SYNONYM_MAP: dict[str, set[str]] = {
-    "hoodie":    {"hoodies", "sweatshirt", "sweatshirts", "pullover", "apparel", "clothing", "garment", "knitwear", "fleece"},
-    "hoodies":   {"hoodie", "sweatshirt", "sweatshirts", "pullover", "apparel", "clothing", "garment", "knitwear", "fleece"},
-    "tshirt":    {"t-shirt", "tee", "shirt", "apparel", "clothing", "garment"},
-    "shirt":     {"shirts", "tshirt", "t-shirt", "tee", "apparel", "clothing", "garment"},
-    "jacket":    {"jackets", "outerwear", "coat", "apparel", "clothing", "garment"},
-    "dress":     {"dresses", "apparel", "clothing", "garment"},
-    "pants":     {"trousers", "jeans", "apparel", "clothing", "garment", "bottoms"},
-    "sweater":   {"sweaters", "knitwear", "pullover", "apparel", "clothing", "garment"},
-    "bag":       {"bags", "tote", "backpack", "handbag", "pouch"},
-    "candle":    {"candles", "wax", "fragrance", "home decor"},
-    "soap":      {"soaps", "bath", "body care", "skincare"},
-    "mug":       {"mugs", "cup", "drinkware", "tumbler"},
-    "shoes":     {"sneakers", "boots", "sandals", "footwear"},
-    "jewelry":   {"necklace", "bracelet", "ring", "earrings", "accessories"},
-}
-
-
-def _is_consumer_product(requirements: ParsedRequirements) -> bool:
-    """Detect whether the sourcing request is for a consumer product.
-
-    Consumer products shouldn't be penalized for having retail/e-commerce
-    suppliers — those are legitimate channels for these categories.
-    """
-    blob = (requirements.product_type or "").lower()
-    return any(cat in blob for cat in CONSUMER_PRODUCT_CATEGORIES)
-
-GENERIC_QUERY_TERMS = {
-    "manufacturer",
-    "manufacturers",
-    "factory",
-    "factories",
-    "supplier",
-    "suppliers",
-    "oem",
-    "wholesale",
-    "bulk",
-    "custom",
-    "production",
-    "producer",
-    "makers",
-    "maker",
-}
-
-TOKEN_STOPWORDS = {
-    "the",
-    "and",
-    "for",
-    "with",
-    "from",
-    "need",
-    "needs",
-    "looking",
-    "source",
-    "find",
-    "made",
-    "make",
-    "unit",
-    "units",
-    "piece",
-    "pieces",
-    "pcs",
-    "per",
-}
-
-
-def _select_b2b_marketplaces(product_type: str, max_count: int = 3) -> list[dict]:
-    """Pick the most relevant B2B marketplaces for the product type."""
-    product_lower = product_type.lower()
-    scored = []
-    for mp in B2B_MARKETPLACES:
-        score = sum(2 if kw in product_lower or product_lower in kw else
-                    1 if any(w in kw for w in product_lower.split()) else 0
-                    for kw in mp["tags"])
-        scored.append((score, mp))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [mp for _, mp in scored[:max_count]]
-
-
-def _is_industrial_oem_requirements(requirements: ParsedRequirements) -> bool:
-    blob = " ".join(
-        [
-            requirements.product_type or "",
-            requirements.material or "",
-            requirements.customization or "",
-            requirements.sourcing_strategy or "",
-            " ".join(requirements.certifications_needed or []),
-            " ".join(requirements.search_queries or []),
-        ]
-    ).lower()
-    return any(signal in blob for signal in INDUSTRIAL_SIGNALS)
-
-
-def _tokenize_product_terms(text: str) -> list[str]:
-    terms: list[str] = []
-    for token in re.split(r"[^a-zA-Z0-9]+", text.lower()):
-        cleaned = token.strip()
-        if len(cleaned) < 3:
-            continue
-        if cleaned in TOKEN_STOPWORDS:
-            continue
-        if cleaned in GENERIC_QUERY_TERMS:
-            continue
-        terms.append(cleaned)
-    return terms
-
-
-def _product_anchor_terms(requirements: ParsedRequirements) -> list[str]:
-    """Extract anchor terms for product-type relevance matching.
-
-    Priority ordering:
-    1. product_type tokens (strongest signal — these define the product)
-    2. material tokens (secondary signal)
-    Search queries are intentionally excluded because they contain
-    generic B2B terms ("manufacturer", "OEM", "factory") that would
-    match nearly any supplier and defeat the purpose of filtering.
-    """
-    anchors: list[str] = []
-    seen: set[str] = set()
-    # Only use product_type and material — NOT search_queries
-    for phrase in [requirements.product_type or "", requirements.material or ""]:
-        for token in _tokenize_product_terms(phrase):
-            if token in seen:
-                continue
-            seen.add(token)
-            anchors.append(token)
-    return anchors[:8]
-
-
-def _matches_product_anchor(supplier: DiscoveredSupplier, anchors: list[str]) -> bool:
-    """Check whether a supplier's text matches product anchor terms.
-
-    Uses a tiered matching strategy:
-    - If there are 1-2 anchor terms, require at least 1 match (any).
-    - If there are 3+ anchor terms, require at least 2 matches to prevent
-      single-token false positives (e.g. "rubber" matching a tire company
-      when looking for "gumball machine rubber balls").
-
-    Synonym expansion: for each anchor, also check category synonyms so that
-    e.g. a "hoodie" search matches a supplier described as "apparel manufacturer".
-    """
-    if not anchors:
-        return True
-    blob = " ".join(
-        [
-            supplier.name or "",
-            supplier.description or "",
-            " ".join(supplier.categories or []),
-            str((supplier.raw_data or {}).get("snippet") or ""),
-        ]
-    ).lower()
-    if not blob.strip():
-        return True
-
-    def _anchor_hit(anchor: str) -> bool:
-        if anchor in blob:
-            return True
-        # Check synonyms
-        for syn in PRODUCT_SYNONYM_MAP.get(anchor, set()):
-            if syn in blob:
-                return True
-        return False
-
-    hits = sum(1 for anchor in anchors if _anchor_hit(anchor))
-    # Require stronger match when we have more anchor terms available
-    min_required = 2 if len(anchors) >= 3 else 1
-    return hits >= min_required
-
-
-def _is_promotable_filtered_supplier(
-    supplier: DiscoveredSupplier,
-    industrial_mode: bool,
-    desperate: bool = False,
-) -> bool:
-    """Whether a filtered supplier can be promoted for broad-net verification.
-
-    When `desperate` is True (zero viable suppliers), we relax the rules and
-    allow promotion of retail and product-type mismatches — having something
-    to verify is better than returning nothing.
-    """
-    reason = (supplier.filtered_reason or "").lower()
-
-    # Never promote clearly wrong industry in industrial mode.
-    if industrial_mode and reason == "wrong_industry":
-        return False
-
-    if not desperate:
-        # Normal mode — keep strict filters
-        if reason == "retail_store":
-            return False
-        if reason == "wrong_product_type":
-            return False
-
-    # Keep some quality floor for broad-net promotions.
-    floor = 20 if desperate else 28
-    if reason == "low_relevance" and supplier.relevance_score < floor:
-        return False
-
-    return True
-
 
 def _dedupe_raw_candidates(raw_results: list[dict]) -> list[dict]:
     """Deduplicate raw search candidates by URL/name signature."""
@@ -436,19 +180,12 @@ async def _search_web(
 async def _search_marketplaces(
     product_type: str,
     material: str | None = None,
-    industrial_mode: bool = False,
     max_per_query: int = 6,
 ) -> list[dict]:
     """Search Etsy, Alibaba, Amazon, and B2B marketplaces via Firecrawl site: queries."""
     search_term = f"{material} {product_type}" if material else product_type
-    selected_b2b = _select_b2b_marketplaces(product_type, max_count=4)
-    if industrial_mode:
-        all_mps = [
-            mp for mp in (COMMON_MARKETPLACES + selected_b2b)
-            if mp["name"] in INDUSTRIAL_MARKETPLACE_NAMES
-        ]
-    else:
-        all_mps = COMMON_MARKETPLACES + selected_b2b
+    # Search all marketplaces — the LLM decides relevance, not keyword heuristics
+    all_mps = COMMON_MARKETPLACES + B2B_MARKETPLACES
 
     logger.info("🏪 Searching %d marketplaces for '%s'...", len(all_mps), search_term)
     emit_progress("discovering", "searching_marketplaces",
@@ -838,33 +575,14 @@ Return a JSON array of query strings. Example: ["query1", "query2", "query3"]"""
 async def _score_and_deduplicate(
     all_raw: list[dict],
     requirements: ParsedRequirements,
-    industrial_mode: bool = False,
 ) -> list[DiscoveredSupplier]:
-    """Send raw results to LLM for scoring, deduplication, and ranking."""
+    """Send raw results to LLM for scoring, deduplication, ranking, and filtering.
+
+    The LLM makes all relevance and filtering decisions via its
+    `filter_decision` field — no Python post-filtering heuristics.
+    """
     emit_progress("discovering", "scoring",
                   f"AI analyzing and ranking {len(all_raw)} raw results...")
-
-    consumer_product = _is_consumer_product(requirements)
-
-    if industrial_mode:
-        mode_guardrail = """
-
-INDUSTRIAL/OEM GUARDRAIL:
-- This request is industrial/OEM sourcing. Strongly penalize consumer-merch and retail results.
-- Consumer storefronts, promotional-merch sellers, and generic e-commerce listings should score below 20 unless they clearly manufacture the exact requested part.
-- Prefer suppliers mentioning OEM, manufacturing, factory, tooling, stamping, machining, APQP/PPAP/IATF readiness.
-"""
-    elif consumer_product:
-        mode_guardrail = """
-
-CONSUMER PRODUCT SOURCING:
-- This request is for a consumer product. Retail stores, online shops, boutiques, and e-commerce suppliers are VALID sources — do NOT penalize them.
-- Score suppliers based on whether they sell or manufacture the actual product requested.
-- Both manufacturers AND established retailers/wholesalers of this product type are valuable.
-- Only penalize suppliers that are in a completely unrelated industry.
-"""
-    else:
-        mode_guardrail = ""
 
     prompt = f"""Product requirements:
 {requirements.model_dump_json(indent=2)}
@@ -872,37 +590,9 @@ CONSUMER PRODUCT SOURCING:
 Raw search results from multiple sources ({len(all_raw)} total):
 {json.dumps(all_raw[:150], indent=2, default=str)[:38000]}
 
-Analyze these results. Score each supplier on relevance to the product requirements.
-Deduplicate suppliers that appear in multiple sources.
-Flag intermediaries/directories with suspected_intermediary: true.
-Normalize multilingual entries to English.
-PRODUCT PAGE URL RULES:
-- ONLY set product_page_url if the raw search data contains a URL that is clearly a product/listing page (URL path contains /product/, /listing/, /item/, /shop/, /dp/, etc.).
-- If the only URL is a homepage (e.g., "https://example.com"), set product_page_url to null.
-- If the source is "google_places", product_page_url MUST be null (Google only returns homepages).
-- Marketplace result URLs (from "marketplace_*" sources) ARE real product pages — always use them.
-- NEVER fabricate or guess URLs. If unsure, set product_page_url to null.
+Analyze these results following your system instructions. For each supplier return all standard fields plus filter_decision and filter_reason.
 
-Include estimated_shipping_cost for international suppliers based on typical freight from their country.
-Return ALL plausible suppliers (relevance_score >= 25) as a JSON array — do NOT cap at an arbitrary number.
-A supplier that is in a completely different industry from the requested product MUST score below 20 regardless of other factors.
-
-CRITICAL SCORING RULES:
-1. PRODUCT TYPE is king — a supplier MUST make or sell the actual product requested to score above 50. Material match alone is NOT enough.
-2. PRIORITIZE factories — actual manufacturers, factories, OEM producers get a +10-15 bonus.
-3. Geographic material signals — if the product references a material origin (Egyptian cotton, Italian leather), prefer manufacturers FROM that region.
-{mode_guardrail}
-
-MARKETPLACE RESULTS:
-- Results with source starting with "marketplace_" come from real marketplace product listings (Etsy, Alibaba, Amazon, etc.).
-- Their "url" field IS the product listing URL — use it as product_page_url.
-- Do NOT flag marketplace product listings as suspected_intermediary.
-- Preserve the source tag (e.g., "marketplace_etsy") in the output.
-
-Each supplier object must have these fields:
-name, website, product_page_url, email, phone, address, city, country, description, categories, certifications, source, relevance_score, estimated_shipping_cost, google_rating, google_review_count, suspected_intermediary, language_discovered
-
-Return ONLY a JSON array. No explanation."""
+Respond ONLY with valid JSON matching the output format in your instructions. No explanation."""
 
     response_text = await call_llm_structured(
         prompt=prompt,
@@ -970,6 +660,13 @@ Return ONLY a JSON array. No explanation."""
     suppliers = []
     for s in supplier_data:
         try:
+            # Map LLM filter_decision to filtered_reason for downstream compat
+            filter_decision = (s.get("filter_decision") or "include").lower().strip()
+            filter_reason = s.get("filter_reason")
+            filtered_reason = None
+            if filter_decision == "exclude":
+                filtered_reason = filter_reason or "llm_excluded"
+
             suppliers.append(DiscoveredSupplier(
                 name=s.get("name", "Unknown"),
                 website=s.get("website"),
@@ -989,6 +686,7 @@ Return ONLY a JSON array. No explanation."""
                 google_review_count=s.get("google_review_count"),
                 raw_data=s,
                 language_discovered=s.get("language_discovered"),
+                filtered_reason=filtered_reason,
             ))
         except Exception as e:
             logger.warning("Failed to parse supplier entry: %s", str(e)[:100])
@@ -1017,9 +715,6 @@ async def discover_suppliers(
     """
     logger.info("🏭 Starting supplier discovery with %d search queries, %d regional configs",
                 len(requirements.search_queries), len(requirements.regional_searches))
-    industrial_mode = _is_industrial_oem_requirements(requirements)
-    if industrial_mode:
-        logger.info("🏭 Industrial/OEM mode enabled for discovery guardrails")
     queries = requirements.search_queries
     if not queries:
         queries = [f"{requirements.product_type} manufacturer"]
@@ -1057,7 +752,6 @@ async def discover_suppliers(
         _search_marketplaces(
             product_type=requirements.product_type,
             material=requirements.material,
-            industrial_mode=industrial_mode,
             max_per_query=6,
         ),
     ]
@@ -1185,7 +879,7 @@ async def discover_suppliers(
     # ── Step 2: LLM scoring and deduplication ─────────────────
     if all_raw:
         emit_progress("discovering", "scoring", f"Found {len(all_raw)} raw results. AI is scoring and ranking...")
-        suppliers = await _score_and_deduplicate(all_raw, requirements, industrial_mode=industrial_mode)
+        suppliers = await _score_and_deduplicate(all_raw, requirements, )
     else:
         suppliers = []
 
@@ -1248,7 +942,7 @@ async def discover_suppliers(
             if len(all_raw) > TARGET_INITIAL_RAW_MAX:
                 all_raw = all_raw[:TARGET_INITIAL_RAW_MAX]
             # Re-score combined results
-            suppliers = await _score_and_deduplicate(all_raw, requirements, industrial_mode=industrial_mode)
+            suppliers = await _score_and_deduplicate(all_raw, requirements, )
             if memory_results:
                 suppliers = _merge_supplier_lists(suppliers, memory_results)
             suppliers, extra_resolved = await _filter_and_resolve_intermediaries(
@@ -1256,15 +950,10 @@ async def discover_suppliers(
             )
             intermediaries_resolved += extra_resolved
 
-    # ── Step 5: Filter low-quality / irrelevant suppliers ─────
-    RETAIL_INDICATORS = [
-        "retail store", "retail-focused", "retail shop", "boutique",
-        "e-commerce store", "online shop", "consumer store",
-        "shopping mall", "department store", "gift shop",
-        "appears to be retail", "sells to consumers",
-    ]
-    consumer_product = _is_consumer_product(requirements)
-    product_anchors = _product_anchor_terms(requirements)
+    # ── Step 5: Split by LLM filter_decision ──────────────────
+    # The LLM has already evaluated every supplier and set filter_decision
+    # ("include" / "borderline" / "exclude") with filter_reason.
+    # We trust the LLM's judgment instead of applying keyword heuristics.
 
     main_suppliers = []
     filtered_suppliers = []
@@ -1272,69 +961,28 @@ async def discover_suppliers(
     deduplicated_total = len(suppliers)
 
     for s in suppliers:
-        reason = None
-
-        # Check low relevance — use a softer threshold for consumer products
-        # since the LLM scoring is already more lenient for them
-        relevance_floor = 25 if consumer_product else 35
-        if s.relevance_score < relevance_floor:
-            reason = "low_relevance"
-        # In industrial mode, remove consumer-merch results aggressively.
-        elif industrial_mode:
-            blob = " ".join(
-                [
-                    s.name or "",
-                    s.description or "",
-                    " ".join(s.categories or []),
-                    s.source or "",
-                ]
-            ).lower()
-            if any(ind in blob for ind in CONSUMER_MERCH_INDICATORS):
-                reason = "wrong_industry"
-            elif s.source in {"marketplace_etsy", "marketplace_amazon", "marketplace_faire"}:
-                reason = "wrong_industry"
-        # Skip retail filtering for consumer products — retail is a valid channel
-        elif not consumer_product and s.relevance_score < 50 and s.description:
-            desc_lower = s.description.lower()
-            if any(ind in desc_lower for ind in RETAIL_INDICATORS):
-                reason = "retail_store"
-        # Require lexical product-anchor match to avoid cross-category leakage
-        elif not _matches_product_anchor(s, product_anchors):
-            reason = "wrong_product_type"
-        # Check wrong product type at low-moderate relevance
-        elif s.relevance_score < 40 and s.description:
-            desc_lower = s.description.lower()
-            if "wrong product" in desc_lower or "does not manufacture" in desc_lower:
-                reason = "wrong_product_type"
-
-        if reason:
-            s.filtered_reason = reason
+        if s.filtered_reason:
+            # LLM marked this supplier as "exclude" during scoring
             filtered_suppliers.append(s)
         else:
             main_suppliers.append(s)
 
     if filtered_suppliers:
-        logger.info("🔍 Filtered %d suppliers: %s",
+        logger.info("🔍 LLM excluded %d suppliers: %s",
                     len(filtered_suppliers),
                     ", ".join(f"{s.name} ({s.filtered_reason})" for s in filtered_suppliers[:5]))
         emit_progress("discovering", "filtering",
-                      f"Filtered {len(filtered_suppliers)} low-quality results (retail stores, irrelevant matches)")
+                      f"Filtered {len(filtered_suppliers)} irrelevant results based on LLM analysis")
 
-    # Keep a broad verification pool: if strict filters leave too few suppliers,
-    # promote top borderline suppliers for downstream verification.
-    # When zero suppliers survive, enter "desperate" mode to relax promotion rules.
+    # Safety net: if too few suppliers survived, promote top excluded ones
+    # by relevance score. This handles edge cases where the LLM was overly strict.
     target_min_viable = max(
         TARGET_SURFACED_SUPPLIERS_MIN,
         min(40, max(20, len(suppliers) // 3)),
     )
     if len(main_suppliers) < target_min_viable and filtered_suppliers:
-        desperate = len(main_suppliers) == 0
         needed = target_min_viable - len(main_suppliers)
-        promotable = [
-            supplier
-            for supplier in sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
-            if _is_promotable_filtered_supplier(supplier, industrial_mode, desperate=desperate)
-        ]
+        promotable = sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
         promoted = promotable[:needed]
 
         if promoted:
@@ -1348,14 +996,14 @@ async def discover_suppliers(
             filtered_suppliers = [s for s in filtered_suppliers if id(s) not in promoted_ids]
 
             logger.warning(
-                "Broad-net backfill promoted %d suppliers (target=%d, now=%d)",
+                "Safety-net backfill promoted %d suppliers (target=%d, now=%d)",
                 len(promoted),
                 target_min_viable,
                 len(main_suppliers),
             )
             emit_progress(
                 "discovering",
-                "broad_net_backfill",
+                "backfill",
                 (
                     f"Promoted {len(promoted)} borderline suppliers for broader verification "
                     f"coverage (now {len(main_suppliers)} candidates)."
