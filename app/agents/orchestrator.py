@@ -277,6 +277,17 @@ async def verify_node(state: GraphState) -> GraphState:
         discovery = DiscoveryResults(**state["discovery_results"])
         buyer_context = _load_buyer_context(state)
 
+        if not discovery.suppliers:
+            logger.error("Verification aborted: discovery returned zero viable suppliers")
+            return {
+                **state,
+                "current_stage": PipelineStage.FAILED.value,
+                "error": (
+                    "No viable suppliers were available after discovery filtering. "
+                    "Restart supplier search or refine your brief and restart from parsing."
+                ),
+            }
+
         top_suppliers = sorted(
             discovery.suppliers, key=lambda s: s.relevance_score, reverse=True
         )[:20]

@@ -1054,6 +1054,47 @@ async def discover_suppliers(
         emit_progress("discovering", "filtering",
                       f"Filtered {len(filtered_suppliers)} low-quality results (retail stores, irrelevant matches)")
 
+    # If strict filters remove every candidate, keep a small set of strongest
+    # borderline matches so verification can still run and provide signal.
+    if not main_suppliers and filtered_suppliers:
+        rescue_pool = sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
+        rescued: list[DiscoveredSupplier] = []
+        for supplier in rescue_pool:
+            reason = supplier.filtered_reason or ""
+
+            # In industrial mode, do not rescue clearly consumer/merch suppliers.
+            if industrial_mode and reason == "wrong_industry":
+                continue
+
+            # Ignore very weak matches.
+            if reason == "low_relevance" and supplier.relevance_score < 30:
+                continue
+            if reason == "wrong_product_type" and supplier.relevance_score < 55:
+                continue
+
+            supplier.raw_data["rescued_from_filter_reason"] = reason
+            supplier.filtered_reason = None
+            rescued.append(supplier)
+            if len(rescued) >= 5:
+                break
+
+        if rescued:
+            rescued_ids = {id(s) for s in rescued}
+            main_suppliers = rescued
+            filtered_suppliers = [s for s in filtered_suppliers if id(s) not in rescued_ids]
+            logger.warning(
+                "Filter fallback triggered: rescued %d suppliers so pipeline can continue",
+                len(rescued),
+            )
+            emit_progress(
+                "discovering",
+                "filter_relaxed",
+                (
+                    "No suppliers passed strict filtering. Kept "
+                    f"{len(rescued)} borderline matches for verification."
+                ),
+            )
+
     # ── Step 6: Lightweight contact enrichment for top suppliers ─
     # Run cheap enrichment (Tiers 1 & 2 only) for top suppliers missing
     # emails. This ensures the top-20 sent to verification already have
