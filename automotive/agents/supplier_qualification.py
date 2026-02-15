@@ -32,23 +32,40 @@ You are Tamkin's Supplier Qualification Agent for automotive procurement.
 
 Given the verification data collected for a supplier, render a qualification verdict.
 
-Use the think tool approach — before deciding, list:
-1. The specific qualification criteria for this procurement
-2. How each criterion maps to the collected data
-3. Any gaps in the data
-4. Your verdict with rationale
+CRITICAL — understand the difference between these verification outcomes:
+- "evidence_found" / "found" → Positive verification. Data confirms the claim.
+- "not_found" → Search ran successfully but did NOT find evidence. This is a
+  WEAK negative — the data may exist but not be indexed online.
+- "data_unavailable" → The check COULD NOT RUN (API error, timeout, service
+  not configured). This is NOT a negative result. It means we simply don't know.
+  Treat this the same as "not checked."
 
 Verdict rules:
-- QUALIFIED: All hard criteria met (active IATF 16949 if required, acceptable
-  financial risk, confirmed registration), capability match >= 70%, no
-  disqualifying flags.
-- CONDITIONAL: Most criteria met but with noted gaps (IATF covers different
-  scope, moderate financial risk, limited capacity). Flagged for buyer review.
-- DISQUALIFIED: Hard criteria failed (no IATF 16949 when required, high
-  financial risk, company dissolved, fundamental capability mismatch).
+- QUALIFIED: Positive verification evidence for hard criteria (IATF, financial,
+  corporate), good capability match from website intelligence, no red flags.
+- CONDITIONAL: Use this when verification data is UNAVAILABLE or INCOMPLETE.
+  This is the CORRECT status when checks could not run, when IATF status is
+  "data_unavailable", when financial data is "data_unavailable", or when only
+  partial information could be gathered. Flag what needs manual verification.
+  Also use for: IATF covers different scope, moderate financial risk, limited capacity.
+- DISQUALIFIED: ONLY when there is CONFIRMED negative evidence — e.g. company
+  is confirmed dissolved, confirmed fraudulent, or the supplier's demonstrated
+  capabilities are a fundamental mismatch (e.g. they only do plastics and the
+  requirement is for metal stamping).
 
-Never qualify a supplier without verified IATF 16949 when IATF is required.
-Never disqualify solely based on missing soft criteria.
+Key principles:
+- When verification data is unavailable, default to CONDITIONAL, never DISQUALIFIED.
+- "data_unavailable" for IATF does NOT mean "no IATF certification" — it means
+  we couldn't check. Mark as CONDITIONAL with a concern noting manual IATF
+  verification is needed.
+- "data_unavailable" for financial risk does NOT mean "high risk" — it means
+  we have no data. This alone is never grounds for disqualification.
+- A supplier discovered from credible sources (Thomasnet, industry directories)
+  with relevant capabilities on their website deserves at least CONDITIONAL status.
+- List specific items that need manual verification in the "concerns" field.
+
+In your strengths, list what IS confirmed. In your concerns, list what NEEDS
+manual verification and why.
 """
 
 
@@ -77,10 +94,10 @@ async def _verify_single_supplier(
         return_exceptions=True,
     )
 
-    iatf = results[0] if not isinstance(results[0], Exception) else {"status": "check_failed"}
-    financial = results[1] if not isinstance(results[1], Exception) else {"risk_level": "unknown"}
-    corporate = results[2] if not isinstance(results[2], Exception) else {"status": "check_failed"}
-    reviews = results[3] if not isinstance(results[3], Exception) else {"rating": None, "review_count": 0}
+    iatf = results[0] if not isinstance(results[0], Exception) else {"status": "data_unavailable", "note": "Check threw exception"}
+    financial = results[1] if not isinstance(results[1], Exception) else {"risk_level": "data_unavailable", "note": "Check threw exception"}
+    corporate = results[2] if not isinstance(results[2], Exception) else {"status": "data_unavailable", "note": "Check threw exception"}
+    reviews = results[3] if not isinstance(results[3], Exception) else {"rating": None, "review_count": 0, "note": "Check threw exception"}
     website_caps = results[4] if not isinstance(results[4], Exception) else {}
 
     capabilities = WebsiteCapabilities(**website_caps) if isinstance(website_caps, dict) and website_caps else WebsiteCapabilities()
@@ -116,6 +133,22 @@ async def _verify_single_supplier(
     return qualified
 
 
+def _explain_check_status(check_name: str, status: str, note: str = "") -> str:
+    """Build a clear human-readable line explaining a verification check result."""
+    if status in ("evidence_found", "found"):
+        icon = "✓ VERIFIED"
+    elif status == "not_found":
+        icon = "⚠ NOT FOUND (search ran, no evidence found — may be indexed under different name)"
+    elif status in ("data_unavailable", "check_failed", "not_checked", "unknown"):
+        icon = "? DATA UNAVAILABLE (check could not run — this is NOT a negative result)"
+    else:
+        icon = f"  {status}"
+    line = f"  {check_name}: {icon}"
+    if note:
+        line += f"\n    Note: {note}"
+    return line
+
+
 async def _render_verdict(
     supplier: QualifiedSupplier,
     requirement: ParsedRequirement,
@@ -133,21 +166,52 @@ async def _render_verdict(
         "required": ["status", "strengths", "concerns", "confidence"],
     }
 
+    # Build capabilities summary
+    caps = supplier.capabilities
+    caps_lines = []
+    if caps.manufacturing_processes:
+        caps_lines.append(f"  Processes: {', '.join(caps.manufacturing_processes)}")
+    if caps.materials_processed:
+        caps_lines.append(f"  Materials: {', '.join(caps.materials_processed)}")
+    if caps.certifications_claimed:
+        caps_lines.append(f"  Certifications claimed on website: {', '.join(caps.certifications_claimed)}")
+    if caps.industries_served:
+        caps_lines.append(f"  Industries: {', '.join(caps.industries_served)}")
+    if caps.equipment_list:
+        caps_lines.append(f"  Equipment: {', '.join(caps.equipment_list[:5])}")
+    if caps.capacity_indicators:
+        caps_lines.append(f"  Capacity: {', '.join(caps.capacity_indicators)}")
+    if caps.company_description:
+        caps_lines.append(f"  Description: {caps.company_description[:200]}")
+
+    caps_text = "\n".join(caps_lines) if caps_lines else "  No website data available"
+
     user_msg = (
-        f"Supplier: {supplier.company_name}\n"
-        f"Location: {supplier.headquarters}\n"
-        f"IATF Status: {supplier.iatf_status}\n"
-        f"Financial Risk: {supplier.financial_risk}\n"
-        f"Corporate Status: {supplier.corporate_status}\n"
-        f"Google Rating: {supplier.google_rating} ({supplier.review_count} reviews)\n"
-        f"Capabilities: {supplier.capabilities.model_dump_json()}\n\n"
-        f"Requirement:\n"
+        f"=== SUPPLIER ===\n"
+        f"Company: {supplier.company_name}\n"
+        f"Location: {supplier.headquarters}\n\n"
+
+        f"=== VERIFICATION RESULTS ===\n"
+        f"(Remember: 'DATA UNAVAILABLE' means the check could NOT run — it is NOT a negative result)\n\n"
+        f"{_explain_check_status('IATF 16949', supplier.iatf_status)}\n"
+        f"{_explain_check_status('Financial Risk', supplier.financial_risk)}\n"
+        f"{_explain_check_status('Corporate Registration', supplier.corporate_status)}\n"
+        f"  Google Reviews: {supplier.google_rating or 'N/A'} ({supplier.review_count or 0} reviews)\n\n"
+
+        f"=== WEBSITE INTELLIGENCE ===\n"
+        f"{caps_text}\n\n"
+
+        f"=== REQUIREMENT ===\n"
         f"Part: {requirement.part_description}\n"
         f"Process: {requirement.manufacturing_process}\n"
         f"Material: {requirement.material_family}\n"
         f"Certifications Required: {', '.join(requirement.certifications_required)}\n"
         f"Region Preference: {', '.join(requirement.preferred_regions)}\n"
-        f"Volume: {requirement.annual_volume}/year"
+        f"Volume: {requirement.annual_volume}/year\n\n"
+
+        f"=== INSTRUCTIONS ===\n"
+        f"If verification data is unavailable, use CONDITIONAL status and note what needs manual verification.\n"
+        f"Only use DISQUALIFIED if there is CONFIRMED evidence of non-compliance or fundamental mismatch."
     )
 
     try:

@@ -73,13 +73,20 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
 
   const handleConfirm = async () => {
     setSubmitting(true)
-    const answeredAmbiguities = Object.entries(answers)
+    // Build clarification notes from answers — handle both structured & legacy formats
+    const answeredClarifications = Object.entries(answers)
       .filter(([, v]) => v.trim())
-      .map(([idx, v]) => `Q: ${(data?.ambiguities as string[])?.[Number(idx)]} → A: ${v}`)
+      .map(([idx, v]) => {
+        const i = Number(idx)
+        const question = clarifications.length > 0
+          ? clarifications[i]?.question
+          : (data?.ambiguities as string[])?.[i]
+        return `Q: ${question} → A: ${v}`
+      })
 
     const finalEdits = {
       ...edits,
-      ...(answeredAmbiguities.length > 0 ? { clarification_notes: answeredAmbiguities } : {}),
+      ...(answeredClarifications.length > 0 ? { clarification_notes: answeredClarifications } : {}),
     }
 
     const hasEdits = Object.keys(finalEdits).length > 0
@@ -92,6 +99,12 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
   }
 
   const ambiguities = (data.ambiguities as string[]) || []
+  const clarifications = (data.clarifications as Array<{
+    question: string
+    suggestions?: string[]
+    suggested_default?: string
+    impact?: string
+  }>) || []
   const editCount = Object.keys(edits).length
 
   // Current value = edit override or original
@@ -133,35 +146,87 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
       </div>
 
       {/* Clarification questions — elevated, above fields */}
-      {ambiguities.length > 0 && (
+      {(clarifications.length > 0 || ambiguities.length > 0) && (
         <div className="px-6 py-4 bg-amber-500/10 border-b border-amber-500/20 border-l-4 border-l-amber-500">
           <div className="flex items-center gap-2 mb-3">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M8 2L10 6L14 6.5L11 9.5L12 14L8 11.5L4 14L5 9.5L2 6.5L6 6L8 2Z" stroke="#f59e0b" strokeWidth="1.2" fill="none" />
             </svg>
             <p className="text-sm text-amber-400 font-medium">
-              {ambiguities.length} clarification question{ambiguities.length > 1 ? 's' : ''}
+              {clarifications.length || ambiguities.length} clarification question{(clarifications.length || ambiguities.length) > 1 ? 's' : ''}
             </p>
             <span className="text-xs text-amber-500/70">— answering these helps AI find better suppliers</span>
           </div>
-          <div className="space-y-3">
-            {ambiguities.map((q, i) => (
-              <div key={i} className="flex gap-3 items-start">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 text-xs flex items-center justify-center mt-0.5 font-medium">
-                  {i + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-amber-300/80 mb-1.5">{q}</p>
-                  <input
-                    type="text"
-                    value={answers[i] || ''}
-                    onChange={(e) => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
-                    placeholder="AI will use its best guess if left blank"
-                    className="w-full bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500/40"
-                  />
-                </div>
-              </div>
-            ))}
+          <div className="space-y-4">
+            {/* Structured clarifications with quick-select */}
+            {clarifications.length > 0
+              ? clarifications.map((c, i) => (
+                  <div key={i} className="flex gap-3 items-start">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 text-xs flex items-center justify-center mt-0.5 font-medium">
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-amber-300/80 mb-1.5">{c.question}</p>
+                      {c.impact && (
+                        <p className="text-[10px] text-zinc-500 mb-2">Impact: {c.impact}</p>
+                      )}
+                      {/* Quick-select suggestion chips */}
+                      {c.suggestions && c.suggestions.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {c.suggestions.map((s, si) => {
+                            const isSelected = answers[i] === s
+                            return (
+                              <button
+                                key={si}
+                                onClick={() => setAnswers(prev => ({
+                                  ...prev,
+                                  [i]: isSelected ? '' : s,
+                                }))}
+                                className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${
+                                  isSelected
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                    : 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:border-zinc-600 hover:text-zinc-300'
+                                }`}
+                              >
+                                {s}
+                                {c.suggested_default === s && !isSelected && (
+                                  <span className="ml-1 text-[9px] text-zinc-600">(default)</span>
+                                )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {/* Free-text fallback */}
+                      <input
+                        type="text"
+                        value={answers[i] || ''}
+                        onChange={(e) => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                        placeholder={c.suggested_default ? `Default: ${c.suggested_default}` : 'Type a custom answer or pick above'}
+                        className="w-full bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500/40"
+                      />
+                    </div>
+                  </div>
+                ))
+              : /* Fallback: bare ambiguities (backwards compat) */
+                ambiguities.map((q, i) => (
+                  <div key={i} className="flex gap-3 items-start">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 text-xs flex items-center justify-center mt-0.5 font-medium">
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-amber-300/80 mb-1.5">{q}</p>
+                      <input
+                        type="text"
+                        value={answers[i] || ''}
+                        onChange={(e) => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                        placeholder="AI will use its best guess if left blank"
+                        className="w-full bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500/40"
+                      />
+                    </div>
+                  </div>
+                ))
+            }
           </div>
         </div>
       )}

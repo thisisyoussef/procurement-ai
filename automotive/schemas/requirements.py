@@ -36,6 +36,36 @@ def _coerce_optional_int(v: object) -> int | None:
     return None
 
 
+class ClarificationQuestion(BaseModel):
+    """A clarification question with quick-select suggestions."""
+
+    question: str = Field(description="The clarification question to ask the buyer")
+    suggestions: list[str] = Field(
+        default_factory=list,
+        description="2-4 quick-select answer options the buyer can click",
+    )
+    suggested_default: Optional[str] = Field(
+        default=None,
+        description="The answer AI will assume if the buyer skips this question",
+    )
+    impact: str = Field(
+        default="",
+        description="Brief note on how the answer affects supplier search",
+    )
+
+    @field_validator("suggestions", mode="before")
+    @classmethod
+    def _coerce_suggestions(cls, v: object) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            parts = re.split(r"[,;\n]+", v)
+            return [p.strip() for p in parts if p.strip()]
+        return []
+
+
 class ParsedRequirement(BaseModel):
     """Structured procurement specification extracted from natural language."""
 
@@ -82,8 +112,12 @@ class ParsedRequirement(BaseModel):
     min_revenue: Optional[int] = Field(default=None, description="Minimum annual revenue USD")
     min_employees: Optional[int] = Field(default=None)
 
-    # Meta
-    ambiguities: list[str] = Field(default_factory=list, description="Fields needing human clarification")
+    # Meta — clarifications
+    ambiguities: list[str] = Field(default_factory=list, description="DEPRECATED: use clarifications instead")
+    clarifications: list[ClarificationQuestion] = Field(
+        default_factory=list,
+        description="Structured clarification questions with quick-select suggestions",
+    )
     complexity_score: Literal["simple", "moderate", "complex"] = "moderate"
     estimated_tooling_range: str = Field(default="", description="e.g. $50K–$150K")
     estimated_lead_time: str = Field(default="", description="e.g. 12–16 weeks tooling")
@@ -106,6 +140,16 @@ class ParsedRequirement(BaseModel):
             # Split on common delimiters: commas, semicolons, newlines
             parts = re.split(r"[,;\n]+", v)
             return [p.strip() for p in parts if p.strip()]
+        return []
+
+    @field_validator("clarifications", mode="before")
+    @classmethod
+    def _coerce_clarifications(cls, v: object) -> list:
+        """LLM might return None or a non-list. Coerce to list."""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
         return []
 
     @field_validator("annual_volume", mode="before")

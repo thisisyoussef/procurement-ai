@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _coerce_str_list(v: object) -> list[str]:
+    """Coerce LLM output that should be a list[str] but sometimes arrives as a plain string."""
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        parts = re.split(r"[,;\n]+", v)
+        return [p.strip() for p in parts if p.strip()]
+    return []
 
 
 class WebsiteCapabilities(BaseModel):
@@ -21,6 +34,16 @@ class WebsiteCapabilities(BaseModel):
     secondary_operations: list[str] = Field(default_factory=list)
     prototype_capability: bool = False
     geographic_notes: str = ""
+
+    @field_validator(
+        "manufacturing_processes", "materials_processed", "equipment_list",
+        "certifications_claimed", "industries_served", "key_customers",
+        "capacity_indicators", "secondary_operations",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)
 
 
 class QualifiedSupplier(BaseModel):

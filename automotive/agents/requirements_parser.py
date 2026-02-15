@@ -37,8 +37,14 @@ Rules:
    - If "EV" or "electric vehicle" → consider thermal management, high-voltage
      isolation, and lightweight material requirements
    - If Mexico/USMCA mentioned → USMCA compliance is required
-3. Flag critical ambiguities that MUST be resolved before searching. Put them
-   in the "ambiguities" list with clear, specific questions.
+3. For any ambiguity, produce a "clarifications" entry with:
+   - "question": The specific clarification question
+   - "suggestions": 2-4 clickable quick-select answers the buyer can pick from.
+     These should be realistic automotive industry options — NOT generic placeholders.
+   - "suggested_default": What you'll assume if the buyer skips this question.
+     Always provide a reasonable default so the pipeline can proceed.
+   - "impact": One sentence on how this affects supplier matching.
+   Also put the bare question text in "ambiguities" for backwards compatibility.
 4. Never hallucinate specifications — if uncertain, flag as ambiguous.
 5. Estimate market parameters (tooling cost range, lead time) based on the
    part category to set buyer expectations.
@@ -46,6 +52,14 @@ Rules:
    - simple: single process, standard material, loose tolerances
    - moderate: 1-2 secondary ops, engineering material, standard tolerances
    - complex: multi-operation, specialty alloy, tight tolerances, complex geometry
+
+Example clarification:
+{
+  "question": "What PPAP level is required for this program?",
+  "suggestions": ["Level 3 (standard)", "Level 2 (reduced)", "Level 5 (full)", "Not required"],
+  "suggested_default": "Level 3 (standard)",
+  "impact": "PPAP level determines documentation requirements in the RFQ package"
+}
 """
 
 
