@@ -1,5 +1,6 @@
 """Outreach API endpoints — manage RFQ emails, responses, and follow-ups."""
 
+import asyncio
 import logging
 import re
 import time
@@ -566,6 +567,9 @@ async def _draft_and_send_initial_outreach(
                 },
             )
 
+        # Rate-limit: Resend allows max 2 req/sec
+        await asyncio.sleep(0.6)
+
     return {
         "sent_count": sent_count,
         "failed_count": failed_count,
@@ -920,6 +924,9 @@ async def retry_failed_outreach(
                     "recipient": recipient,
                 },
             )
+
+        # Rate-limit: Resend allows max 2 req/sec
+        await asyncio.sleep(0.6)
 
     project["outreach_state"] = outreach.model_dump(mode="json")
     await record_project_event(
@@ -1698,6 +1705,9 @@ async def trigger_auto_send(
                 reason=result.get("error", "unknown"),
                 source="auto_send_endpoint",
             )
+
+        # Rate-limit: Resend allows max 2 req/sec
+        await asyncio.sleep(0.6)
 
     project["outreach_state"] = outreach.model_dump(mode="json")
     await _save_project(project)
