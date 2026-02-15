@@ -40,7 +40,6 @@ async def search_web_firecrawl(query: str) -> list[DiscoveredSupplier]:
         for item in data.get("data", []):
             title = item.get("metadata", {}).get("title", "")
             url = item.get("metadata", {}).get("sourceURL", "")
-            description = item.get("metadata", {}).get("description", "")
 
             if not title:
                 continue
@@ -59,6 +58,11 @@ async def search_web_firecrawl(query: str) -> list[DiscoveredSupplier]:
             ))
 
         logger.info("Firecrawl web search returned %d results for: %s", len(suppliers), query)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 402, 403):
+            logger.warning("Firecrawl billing/auth error (%s) — skipping web search for: %s", e.response.status_code, query)
+        else:
+            logger.exception("Firecrawl web search failed for: %s", query)
     except Exception:
         logger.exception("Firecrawl web search failed for: %s", query)
 

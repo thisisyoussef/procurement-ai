@@ -66,7 +66,7 @@ async def search_thomasnet(query: str) -> list[DiscoveredSupplier]:
 
             await browser.close()
 
-        bb.sessions.update(session.id, status="REQUEST_RELEASE")
+        bb.sessions.update(session.id, project_id=settings.browserbase_project_id, status="REQUEST_RELEASE")
         logger.info("Thomasnet returned %d results for: %s", len(suppliers), query)
 
     except ImportError:
