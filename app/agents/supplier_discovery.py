@@ -40,6 +40,12 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "discovery.md").read_text()
 
+# Discovery volume targets
+TARGET_INITIAL_RAW_MIN = 100
+TARGET_INITIAL_RAW_MAX = 150
+TARGET_SURFACED_SUPPLIERS_MIN = 20
+MAX_VOLUME_EXPANSION_ROUNDS = 3
+
 
 # ── Marketplace Constants ────────────────────────────────────────
 
@@ -246,13 +252,35 @@ def _is_promotable_filtered_supplier(
     if reason == "retail_store":
         return False
 
+    # Keep off-category suppliers out of surfaced results.
+    if reason == "wrong_product_type":
+        return False
+
     # Keep some quality floor for broad-net promotions.
     if reason == "low_relevance" and supplier.relevance_score < 28:
         return False
-    if reason == "wrong_product_type" and supplier.relevance_score < 55:
-        return False
 
     return True
+
+
+def _dedupe_raw_candidates(raw_results: list[dict]) -> list[dict]:
+    """Deduplicate raw search candidates by URL/name signature."""
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for row in raw_results:
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or row.get("website") or "").strip().lower()
+        name = str(row.get("name") or row.get("title") or "").strip().lower()
+        key = url or name
+        if not key:
+            snippet = str(row.get("description") or row.get("snippet") or "")[:120].lower()
+            key = f"{name}|{snippet}"
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 # ── Product Page URL Validation ──────────────────────────────────
@@ -296,12 +324,18 @@ def _validate_product_page_url(product_url: str | None, website: str | None) -> 
 
 # ── Search Functions ─────────────────────────────────────────────
 
-async def _search_google(queries: list[str], max_per_query: int = 5, location_hint: str | None = None) -> list[dict]:
+async def _search_google(
+    queries: list[str],
+    max_per_query: int = 8,
+    location_hint: str | None = None,
+    query_limit: int = 8,
+) -> list[dict]:
     """Run multiple Google Places searches in parallel."""
-    logger.info("🔍 Searching Google Places with %d queries...", len(queries[:3]))
+    effective_queries = queries[:query_limit]
+    logger.info("🔍 Searching Google Places with %d queries...", len(effective_queries))
     emit_progress("discovering", "searching_google",
-                  f"Searching Google Places with {len(queries[:3])} queries...")
-    tasks = [search_google_places(q, location_bias=location_hint, max_results=max_per_query) for q in queries[:3]]
+                  f"Searching Google Places with {len(effective_queries)} queries...")
+    tasks = [search_google_places(q, location_bias=location_hint, max_results=max_per_query) for q in effective_queries]
     results_lists = await asyncio.gather(*tasks, return_exceptions=True)
     all_results = []
     for r in results_lists:
@@ -311,13 +345,18 @@ async def _search_google(queries: list[str], max_per_query: int = 5, location_hi
     return all_results
 
 
-async def _search_web(queries: list[str], max_per_query: int = 3) -> list[dict]:
+async def _search_web(
+    queries: list[str],
+    max_per_query: int = 6,
+    query_limit: int = 8,
+) -> list[dict]:
     """Run Firecrawl web searches for supplier directories."""
-    logger.info("🔍 Searching web via Firecrawl with %d queries...", len(queries[:2]))
+    effective_queries = queries[:query_limit]
+    logger.info("🔍 Searching web via Firecrawl with %d queries...", len(effective_queries))
     emit_progress("discovering", "searching_web",
-                  f"Searching web directories with {len(queries[:2])} queries...")
+                  f"Searching web directories with {len(effective_queries)} queries...")
     # Add "supplier" and "manufacturer" modifiers
-    modified = [f"{q} factory manufacturer wholesale" for q in queries[:2]]
+    modified = [f"{q} factory manufacturer wholesale" for q in effective_queries]
     tasks = [search_web(q, max_results=max_per_query) for q in modified]
     results_lists = await asyncio.gather(*tasks, return_exceptions=True)
     all_results = []
@@ -332,7 +371,7 @@ async def _search_marketplaces(
     product_type: str,
     material: str | None = None,
     industrial_mode: bool = False,
-    max_per_query: int = 3,
+    max_per_query: int = 6,
 ) -> list[dict]:
     """Search Etsy, Alibaba, Amazon, and B2B marketplaces via Firecrawl site: queries."""
     search_term = f"{material} {product_type}" if material else product_type
@@ -372,7 +411,8 @@ async def _search_marketplaces(
 
 async def _search_regional(
     regional_configs: list[RegionalSearchConfig],
-    max_per_query: int = 3,
+    max_per_query: int = 5,
+    query_limit_per_region: int = 3,
 ) -> list[dict]:
     """Run regional searches in multiple languages in parallel.
 
@@ -389,7 +429,7 @@ async def _search_regional(
     for config in regional_configs:
         emit_progress("discovering", "searching_regional",
                       f"Searching in {config.language_name} for {config.region}-based manufacturers...")
-        for query in config.search_queries[:2]:
+        for query in config.search_queries[:query_limit_per_region]:
             # Google Places with regional language
             all_tasks.append(search_google_places(
                 query, max_results=max_per_query, language_code=config.language_code
@@ -665,6 +705,8 @@ def _should_expand_search(
     """
     quality_suppliers = [s for s in suppliers if s.relevance_score >= 60 and not s.is_intermediary]
 
+    if len(suppliers) < TARGET_SURFACED_SUPPLIERS_MIN:
+        return True, "below_target_final_count"
     if len(quality_suppliers) < 3:
         return True, "insufficient_results"
     if len(quality_suppliers) < 5 and len(suppliers) > 10:
@@ -689,7 +731,7 @@ Reason: {reason}
 Existing queries that were used: {requirements.search_queries[:5]}
 Suppliers already found: {existing_names}
 
-Generate 3-5 NEW, DIFFERENT search queries to find more manufacturers. Think strategically:
+Generate 6-10 NEW, DIFFERENT search queries to find more manufacturers. Think strategically:
 - Use alternative product names or industry terms
 - Try different geographic angles
 - Search for industry associations or trade show exhibitors
@@ -710,7 +752,7 @@ Return a JSON array of query strings. Example: ["query1", "query2", "query3"]"""
             text = text.split("\n", 1)[1].rsplit("```", 1)[0]
         queries = json.loads(text)
         if isinstance(queries, list):
-            return [q for q in queries if isinstance(q, str)][:5]
+            return [q for q in queries if isinstance(q, str)][:10]
     except Exception as e:
         logger.warning("Failed to generate expansion queries: %s", e)
 
@@ -719,6 +761,9 @@ Return a JSON array of query strings. Example: ["query1", "query2", "query3"]"""
         f"{requirements.product_type} factory OEM",
         f"{requirements.product_type} manufacturer wholesale custom",
         f"custom {requirements.product_type} producer",
+        f"{requirements.product_type} contract manufacturing",
+        f"{requirements.product_type} private label manufacturer",
+        f"{requirements.product_type} supplier export",
     ]
 
 
@@ -745,7 +790,7 @@ INDUSTRIAL/OEM GUARDRAIL:
 {requirements.model_dump_json(indent=2)}
 
 Raw search results from multiple sources ({len(all_raw)} total):
-{json.dumps(all_raw[:120], indent=2, default=str)[:30000]}
+{json.dumps(all_raw[:150], indent=2, default=str)[:38000]}
 
 Analyze these results. Score each supplier on relevance to the product requirements.
 Deduplicate suppliers that appear in multiple sources.
@@ -759,7 +804,7 @@ PRODUCT PAGE URL RULES:
 - NEVER fabricate or guess URLs. If unsure, set product_page_url to null.
 
 Include estimated_shipping_cost for international suppliers based on typical freight from their country.
-Return ALL qualifying suppliers (relevance_score >= 35) as a JSON array — do NOT cap at an arbitrary number.
+Return ALL plausible suppliers (relevance_score >= 25) as a JSON array — do NOT cap at an arbitrary number.
 A supplier that is in a completely different industry from the requested product MUST score below 20 regardless of other factors.
 
 CRITICAL SCORING RULES:
@@ -888,16 +933,23 @@ async def discover_suppliers(
 
     # Run live external searches after memory retrieval.
     search_tasks = [
-        _search_google(queries, location_hint=delivery_hint),
-        _search_web(queries),
+        _search_google(queries, max_per_query=8, location_hint=delivery_hint, query_limit=8),
+        _search_web(queries, max_per_query=6, query_limit=8),
         _search_marketplaces(
             product_type=requirements.product_type,
             material=requirements.material,
             industrial_mode=industrial_mode,
+            max_per_query=6,
         ),
     ]
     if requirements.regional_searches:
-        search_tasks.append(_search_regional(requirements.regional_searches))
+        search_tasks.append(
+            _search_regional(
+                requirements.regional_searches[:4],
+                max_per_query=5,
+                query_limit_per_region=3,
+            )
+        )
 
     results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
@@ -944,6 +996,63 @@ async def discover_suppliers(
                 len(regional_results) if isinstance(regional_results, list) else 0,
                 len(memory_results))
 
+    all_raw = _dedupe_raw_candidates(all_raw)
+
+    # Expand the net until we hit enterprise-scale initial volume.
+    volume_round = 0
+    while len(all_raw) < TARGET_INITIAL_RAW_MIN and volume_round < MAX_VOLUME_EXPANSION_ROUNDS:
+        volume_round += 1
+        emit_progress(
+            "discovering",
+            "volume_expansion",
+            (
+                f"Volume expansion round {volume_round}: {len(all_raw)} unique raw candidates so far. "
+                f"Targeting {TARGET_INITIAL_RAW_MIN}-{TARGET_INITIAL_RAW_MAX}."
+            ),
+        )
+        volume_queries = await _generate_expansion_queries(
+            requirements,
+            existing_results=[],
+            reason="volume_target",
+        )
+        volume_tasks = [
+            _search_google(volume_queries, max_per_query=8, location_hint=delivery_hint, query_limit=8),
+            _search_web(volume_queries, max_per_query=6, query_limit=8),
+        ]
+        if requirements.regional_searches:
+            volume_tasks.append(
+                _search_regional(
+                    requirements.regional_searches[:4],
+                    max_per_query=5,
+                    query_limit_per_region=2,
+                )
+            )
+
+        volume_results = await asyncio.gather(*volume_tasks, return_exceptions=True)
+        newly_found = 0
+        for vr in volume_results:
+            if isinstance(vr, list):
+                newly_found += len(vr)
+                all_raw.extend(vr)
+
+        all_raw = _dedupe_raw_candidates(all_raw)
+        logger.info(
+            "Volume expansion round %d added %d raw rows (unique total=%d)",
+            volume_round,
+            newly_found,
+            len(all_raw),
+        )
+        if newly_found == 0:
+            break
+
+    if len(all_raw) > TARGET_INITIAL_RAW_MAX:
+        all_raw = all_raw[:TARGET_INITIAL_RAW_MAX]
+        emit_progress(
+            "discovering",
+            "raw_volume_capped",
+            f"Capped initial candidate set to top {TARGET_INITIAL_RAW_MAX} raw suppliers for scoring.",
+        )
+
     if not all_raw and not memory_results:
         logger.warning("⚠️ No raw or memory results from any source")
         return DiscoveryResults(
@@ -978,7 +1087,7 @@ async def discover_suppliers(
     search_rounds = 1
     expansion_reason = None
 
-    for round_num in range(2):  # Max 2 expansion rounds
+    for round_num in range(3):  # Max 3 quality expansion rounds
         should_expand, reason = _should_expand_search(suppliers, requirements)
         if not should_expand:
             break
@@ -995,11 +1104,17 @@ async def discover_suppliers(
 
         # Run expansion searches (English + regional if available)
         exp_tasks = [
-            _search_google(expansion_queries, max_per_query=5, location_hint=delivery_hint),
-            _search_web(expansion_queries, max_per_query=3),
+            _search_google(expansion_queries, max_per_query=8, location_hint=delivery_hint, query_limit=8),
+            _search_web(expansion_queries, max_per_query=6, query_limit=8),
         ]
         if requirements.regional_searches:
-            exp_tasks.append(_search_regional(requirements.regional_searches, max_per_query=3))
+            exp_tasks.append(
+                _search_regional(
+                    requirements.regional_searches[:4],
+                    max_per_query=5,
+                    query_limit_per_region=2,
+                )
+            )
 
         exp_results = await asyncio.gather(*exp_tasks, return_exceptions=True)
 
@@ -1010,6 +1125,9 @@ async def discover_suppliers(
 
         if new_raw:
             all_raw.extend(new_raw)
+            all_raw = _dedupe_raw_candidates(all_raw)
+            if len(all_raw) > TARGET_INITIAL_RAW_MAX:
+                all_raw = all_raw[:TARGET_INITIAL_RAW_MAX]
             # Re-score combined results
             suppliers = await _score_and_deduplicate(all_raw, requirements, industrial_mode=industrial_mode)
             if memory_results:
@@ -1030,6 +1148,8 @@ async def discover_suppliers(
 
     main_suppliers = []
     filtered_suppliers = []
+
+    deduplicated_total = len(suppliers)
 
     for s in suppliers:
         reason = None
@@ -1080,7 +1200,10 @@ async def discover_suppliers(
 
     # Keep a broad verification pool: if strict filters leave too few suppliers,
     # promote top borderline suppliers for downstream verification.
-    target_min_viable = min(30, max(12, len(suppliers) // 2))
+    target_min_viable = max(
+        TARGET_SURFACED_SUPPLIERS_MIN,
+        min(40, max(20, len(suppliers) // 3)),
+    )
     if len(main_suppliers) < target_min_viable and filtered_suppliers:
         needed = target_min_viable - len(main_suppliers)
         promotable = [
@@ -1204,7 +1327,7 @@ async def discover_suppliers(
         sources_searched=sources_searched,
         sources_failed=sources_failed,
         total_raw_results=len(all_raw),
-        deduplicated_count=len(main_suppliers),
+        deduplicated_count=deduplicated_total,
         regional_results=regional_counts,
         intermediaries_resolved=intermediaries_resolved,
         search_rounds=search_rounds,

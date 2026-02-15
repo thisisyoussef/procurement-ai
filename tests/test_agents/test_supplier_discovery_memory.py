@@ -6,6 +6,10 @@ from app.agents import supplier_discovery
 from app.schemas.agent_state import DiscoveredSupplier, ParsedRequirements
 
 
+def _fake_raw(name: str, url: str) -> dict:
+    return {"name": name, "url": url, "description": f"{name} factory"}
+
+
 @pytest.mark.asyncio
 async def test_discovery_merges_supplier_memory_results(monkeypatch):
     requirements = ParsedRequirements(
@@ -172,3 +176,71 @@ async def test_discovery_filters_cross_category_memory_suppliers(monkeypatch):
 
     assert [s.name for s in result.suppliers] == ["Northstar Apparel Factory"]
     assert any(s.name == "Atlas Packaging Group" and s.filtered_reason == "wrong_product_type" for s in result.filtered_suppliers)
+
+
+def test_should_expand_when_below_surface_target():
+    requirements = ParsedRequirements(product_type="hoodies")
+    suppliers = [
+        DiscoveredSupplier(name=f"Supplier {i}", relevance_score=70)
+        for i in range(supplier_discovery.TARGET_SURFACED_SUPPLIERS_MIN - 1)
+    ]
+
+    should_expand, reason = supplier_discovery._should_expand_search(suppliers, requirements)
+
+    assert should_expand is True
+    assert reason == "below_target_final_count"
+
+
+@pytest.mark.asyncio
+async def test_discovery_reports_dedup_count_before_filtering(monkeypatch):
+    requirements = ParsedRequirements(
+        product_type="heavyweight hoodies",
+        search_queries=["heavyweight hoodie manufacturer"],
+    )
+
+    valid_supplier = DiscoveredSupplier(
+        name="Northstar Apparel Factory",
+        website="https://northstar.example",
+        description="OEM hoodie manufacturer",
+        categories=["hoodies", "apparel"],
+        source="google_places",
+        relevance_score=72,
+    )
+    off_category_supplier = DiscoveredSupplier(
+        name="Atlas Packaging Group",
+        website="https://atlaspack.example",
+        description="Packaging and labels provider",
+        categories=["packaging", "labels"],
+        source="firecrawl_web",
+        relevance_score=66,
+    )
+
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_search_google",
+        AsyncMock(return_value=[_fake_raw("Northstar Apparel Factory", "https://northstar.example")]),
+    )
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_search_web",
+        AsyncMock(return_value=[_fake_raw("Atlas Packaging Group", "https://atlaspack.example")]),
+    )
+    monkeypatch.setattr(supplier_discovery, "_search_marketplaces", AsyncMock(return_value=[]))
+    monkeypatch.setattr(supplier_discovery, "_search_supplier_memory", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_score_and_deduplicate",
+        AsyncMock(return_value=[valid_supplier, off_category_supplier]),
+    )
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_filter_and_resolve_intermediaries",
+        AsyncMock(side_effect=lambda suppliers, _requirements: (suppliers, 0)),
+    )
+    monkeypatch.setattr(supplier_discovery, "_should_expand_search", lambda *_: (False, ""))
+
+    result = await supplier_discovery.discover_suppliers(requirements)
+
+    assert len(result.suppliers) == 1
+    assert len(result.filtered_suppliers) == 1
+    assert result.deduplicated_count == 2

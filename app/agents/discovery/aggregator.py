@@ -16,6 +16,8 @@ from app.schemas.agent_state import (
 from app.schemas.buyer_context import BuyerContext
 from .strategy_selector import DiscoveryTeam
 
+TARGET_SURFACED_SUPPLIERS_MIN = 20
+
 
 class TeamResult(BaseModel):
     """Output from a single discovery team."""
@@ -155,7 +157,17 @@ async def aggregate_team_results(
                 merged[key] = supplier
 
     suppliers = list(merged.values())
+    pre_filter_suppliers = list(suppliers)
     suppliers = await haiku_relevance_filter(suppliers, requirements)
+
+    if len(suppliers) < TARGET_SURFACED_SUPPLIERS_MIN and pre_filter_suppliers:
+        existing_keys = {_supplier_key(s) for s in suppliers}
+        backfill_candidates = [
+            s for s in sorted(pre_filter_suppliers, key=lambda item: item.relevance_score, reverse=True)
+            if _supplier_key(s) not in existing_keys
+        ]
+        needed = TARGET_SURFACED_SUPPLIERS_MIN - len(suppliers)
+        suppliers.extend(backfill_candidates[:needed])
 
     cross_reference_boost: dict[str, float] = {}
     for supplier in suppliers:
