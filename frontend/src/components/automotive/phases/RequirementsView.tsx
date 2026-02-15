@@ -114,13 +114,13 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
         <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-900/50">
           <p className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Market Estimates</p>
           <div className="flex gap-6">
-            {data.estimated_tooling_range && (
+            {!!data.estimated_tooling_range && (
               <div>
                 <span className="text-xs text-zinc-500">Tooling:</span>
                 <span className="ml-2 text-sm text-zinc-300">{String(data.estimated_tooling_range)}</span>
               </div>
             )}
-            {data.estimated_lead_time && (
+            {!!data.estimated_lead_time && (
               <div>
                 <span className="text-xs text-zinc-500">Lead Time:</span>
                 <span className="ml-2 text-sm text-zinc-300">{String(data.estimated_lead_time)}</span>
