@@ -118,6 +118,20 @@ export const automotiveClient = {
     return getJson<Record<string, unknown>>(`/projects/${projectId}/quotes`)
   },
 
+  sendQualificationEmails(projectId: string, supplierIds: string[]) {
+    return postJson<{ sent_count: number; pending_count: number; suppliers: Array<{ supplier_id: string; company_name: string; qualification_email_status: string }> }>(
+      `/projects/${projectId}/qualification/send-emails`,
+      { supplier_ids: supplierIds },
+    )
+  },
+
+  parseQualificationResponse(projectId: string, supplierId: string, responseText: string) {
+    return postJson<Record<string, unknown>>(
+      `/projects/${projectId}/qualification/parse-response`,
+      { supplier_id: supplierId, response_text: responseText },
+    )
+  },
+
   generateExample() {
     return postJson<{ example_request: string }>('/generate-example', {})
   },

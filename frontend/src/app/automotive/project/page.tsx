@@ -221,6 +221,7 @@ function ProjectContent() {
                 data={project.qualification_result}
                 isActive={project.current_stage === 'qualify'}
                 onApprove={(overrides) => handleApprove('qualify', { status_overrides: overrides })}
+                projectId={projectId!}
               />
             )}
             {activeTab === 'compare' && (

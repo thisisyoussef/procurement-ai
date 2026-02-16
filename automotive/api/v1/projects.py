@@ -1,5 +1,6 @@
 """API endpoints for automotive procurement projects."""
 
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,13 +8,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from automotive.api.v1.events import emit_activity
 from automotive.services.project_service import (
     _in_memory_projects,
+    _persist_state,
     approve_stage,
     create_project,
     get_project,
     list_projects,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["automotive-projects"])
 
@@ -35,6 +40,16 @@ class ApproveStageRequest(BaseModel):
     corrections: Optional[list[dict]] = None
     reason: Optional[str] = None
     notes: Optional[str] = None
+
+
+class SendQualificationEmailsRequest(BaseModel):
+    supplier_ids: list[str]
+    custom_questions: Optional[list[str]] = None
+
+
+class ParseQualificationResponseRequest(BaseModel):
+    supplier_id: str
+    response_text: str
 
 
 @router.post("")
@@ -199,6 +214,104 @@ async def get_project_quotes(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project.get("quote_ingestion") or {}
+
+
+@router.post("/{project_id}/qualification/send-emails")
+async def send_qualification_emails(
+    project_id: str,
+    body: SendQualificationEmailsRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Send qualification questionnaire emails to selected suppliers."""
+    from automotive.agents.qualification_outreach import send_qualification_emails as _send
+    from automotive.schemas.qualification import QualificationResult
+    from automotive.schemas.requirements import ParsedRequirement
+
+    project = await get_project(db=db, project_id=project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    qual_data = project.get("qualification_result")
+    req_data = project.get("parsed_requirement")
+    if not qual_data or not req_data:
+        raise HTTPException(status_code=400, detail="Qualification or requirement data not available")
+
+    emit_activity("qualify", "start", f"Sending qualification emails to {len(body.supplier_ids)} suppliers...", project_id=project_id)
+
+    qualification_result = QualificationResult(**qual_data)
+    requirement = ParsedRequirement(**req_data)
+
+    updated_result = await _send(
+        project_id=project_id,
+        supplier_ids=body.supplier_ids,
+        qualification_result=qualification_result,
+        requirement=requirement,
+        buyer_company=project.get("buyer_company", ""),
+        buyer_contact_name=project.get("buyer_contact_name", ""),
+        buyer_contact_email=project.get("buyer_contact_email", ""),
+    )
+
+    # Persist updated qualification result
+    await _persist_state(project_id, {"qualification_result": updated_result.model_dump()})
+
+    return {
+        "sent_count": updated_result.outreach_sent_count,
+        "pending_count": updated_result.outreach_pending_count,
+        "suppliers": [
+            {
+                "supplier_id": s.supplier_id,
+                "company_name": s.company_name,
+                "qualification_email_status": s.qualification_email_status,
+            }
+            for s in updated_result.suppliers
+            if s.supplier_id in body.supplier_ids
+        ],
+    }
+
+
+@router.post("/{project_id}/qualification/parse-response")
+async def parse_qualification_response(
+    project_id: str,
+    body: ParseQualificationResponseRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Parse a manually-pasted supplier qualification response."""
+    from automotive.agents.qualification_response_parser import parse_and_apply_response
+    from automotive.schemas.qualification import QualificationResult
+    from automotive.schemas.requirements import ParsedRequirement
+
+    project = await get_project(db=db, project_id=project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    qual_data = project.get("qualification_result")
+    req_data = project.get("parsed_requirement")
+    if not qual_data:
+        raise HTTPException(status_code=400, detail="Qualification data not available")
+
+    qualification_result = QualificationResult(**qual_data)
+    requirement = ParsedRequirement(**req_data) if req_data else None
+
+    emit_activity("qualify", "start", f"Parsing qualification response for supplier {body.supplier_id[:8]}...", project_id=project_id)
+
+    updated_result = await parse_and_apply_response(
+        qualification_result=qualification_result,
+        supplier_id=body.supplier_id,
+        response_text=body.response_text,
+        requirement=requirement,
+    )
+
+    # Persist updated qualification result
+    await _persist_state(project_id, {"qualification_result": updated_result.model_dump()})
+
+    # Find the updated supplier to return
+    supplier = next((s for s in updated_result.suppliers if s.supplier_id == body.supplier_id), None)
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    emit_activity("qualify", "complete", f"Response parsed for {supplier.company_name}", project_id=project_id)
+
+    return supplier.model_dump()
 
 
 @router.get("/{project_id}/debug")

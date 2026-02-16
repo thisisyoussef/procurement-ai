@@ -6,6 +6,7 @@ on each discovered supplier and renders a qualification verdict.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from automotive.core.config import MODEL_TIER_BALANCED
@@ -103,6 +104,7 @@ async def _verify_single_supplier(
     capabilities = WebsiteCapabilities(**website_caps) if isinstance(website_caps, dict) and website_caps else WebsiteCapabilities()
 
     # Build the qualified supplier record
+    now_iso = datetime.now(timezone.utc).isoformat()
     qualified = QualifiedSupplier(
         supplier_id=supplier.supplier_id,
         company_name=supplier.company_name,
@@ -129,6 +131,48 @@ async def _verify_single_supplier(
         email=supplier.email,
         sources=supplier.sources,
     )
+
+    # ── Timeline: record auto-check results ──
+    check_details = []
+    iatf_s = iatf.get("status", "unknown")
+    fin_s = financial.get("risk_level", "unknown")
+    corp_s = corporate.get("status", "unknown")
+    rating = reviews.get("rating")
+    review_n = reviews.get("review_count", 0)
+
+    check_details.append(f"IATF: {iatf_s}")
+    check_details.append(f"Financial: {fin_s}")
+    check_details.append(f"Corporate: {corp_s}")
+    if rating:
+        check_details.append(f"Rating: {rating}/5 ({review_n} reviews)")
+    else:
+        check_details.append("Rating: no data")
+    if capabilities.manufacturing_processes:
+        check_details.append(f"Website: {', '.join(capabilities.manufacturing_processes[:3])}")
+    else:
+        check_details.append("Website: no capabilities extracted")
+
+    qualified.qualification_events.append({
+        "timestamp": now_iso,
+        "event": "auto_checks_complete",
+        "detail": " · ".join(check_details),
+    })
+
+    # Log data gaps that email outreach could fill
+    data_gaps = []
+    if iatf_s in ("data_unavailable", "unknown", "not_found", "check_failed"):
+        data_gaps.append("IATF certification status")
+    if fin_s in ("data_unavailable", "unknown", "check_failed"):
+        data_gaps.append("financial health data")
+    if not capabilities.manufacturing_processes:
+        data_gaps.append("manufacturing capability details")
+
+    if data_gaps:
+        qualified.qualification_events.append({
+            "timestamp": now_iso,
+            "event": "data_gaps_identified",
+            "detail": f"Email verification recommended for: {', '.join(data_gaps)}",
+        })
 
     return qualified
 

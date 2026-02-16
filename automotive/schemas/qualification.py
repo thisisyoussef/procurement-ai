@@ -92,6 +92,36 @@ class QualifiedSupplier(BaseModel):
     email: Optional[str] = None
     sources: list[str] = Field(default_factory=list)
 
+    # ── Qualification outreach tracking ──
+    qualification_email_status: Literal[
+        "not_sent", "sent", "delivered", "opened", "responded", "bounced", "skipped"
+    ] = "not_sent"
+    qualification_email_id: Optional[str] = None  # Resend email ID
+    qualification_email_sent_at: Optional[str] = None
+    qualification_email_responded_at: Optional[str] = None
+
+    # Parsed qualification response
+    qual_response: Optional[dict] = None  # Structured response from LLM parse
+    qualification_events: list[dict] = Field(
+        default_factory=list,
+        description="[{timestamp, event, detail}] — chronological activity log",
+    )
+
+
+class QualificationResponseParsed(BaseModel):
+    """Structured data extracted from a supplier's qualification email response."""
+
+    iatf_confirmed: Optional[bool] = None
+    iatf_cert_number: Optional[str] = None
+    iatf_expiry: Optional[str] = None
+    capacity_description: Optional[str] = None
+    lead_time_estimate: Optional[str] = None
+    similar_projects: Optional[str] = None
+    additional_certifications: list[str] = Field(default_factory=list)
+    financial_info: Optional[str] = None
+    notes: Optional[str] = None
+    confidence: float = 0.5
+
 
 class QualificationResult(BaseModel):
     """Complete output from the Qualification agent."""
@@ -101,3 +131,8 @@ class QualificationResult(BaseModel):
     disqualified_count: int = 0
     suppliers: list[QualifiedSupplier] = Field(default_factory=list)
     verification_summary: str = ""
+
+    # ── Email outreach tracking ──
+    outreach_sent_count: int = 0
+    outreach_responded_count: int = 0
+    outreach_pending_count: int = 0

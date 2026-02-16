@@ -46,6 +46,34 @@ export interface DiscoveredSupplier {
   estimated_revenue?: string
 }
 
+export type QualificationEmailStatus =
+  | 'not_sent'
+  | 'sent'
+  | 'delivered'
+  | 'opened'
+  | 'responded'
+  | 'bounced'
+  | 'skipped'
+
+export interface QualificationEvent {
+  timestamp: string
+  event: string
+  detail: string
+}
+
+export interface QualificationResponseParsed {
+  iatf_confirmed?: boolean
+  iatf_cert_number?: string
+  iatf_expiry?: string
+  capacity_description?: string
+  lead_time_estimate?: string
+  similar_projects?: string
+  additional_certifications?: string[]
+  financial_info?: string
+  notes?: string
+  confidence?: number
+}
+
 export interface QualifiedSupplier extends DiscoveredSupplier {
   qualification_status: 'qualified' | 'conditional' | 'disqualified'
   iatf_status: string
@@ -56,6 +84,13 @@ export interface QualifiedSupplier extends DiscoveredSupplier {
   overall_confidence: number
   google_rating?: number
   review_count?: number
+
+  // Qualification outreach
+  qualification_email_status?: QualificationEmailStatus
+  qualification_email_sent_at?: string
+  qualification_email_responded_at?: string
+  qual_response?: QualificationResponseParsed
+  qualification_events?: QualificationEvent[]
 }
 
 export interface SupplierComparison {
