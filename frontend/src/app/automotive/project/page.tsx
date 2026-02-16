@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { automotiveClient, type ProjectDetail } from '@/lib/automotive/client'
 import { STAGE_LABELS, STAGE_ORDER, type PipelineStage } from '@/types/automotive'
+import { m, AnimatePresence, toastSlide, DURATION } from '@/lib/motion'
 import PipelineNav from '@/components/automotive/workspace/PipelineNav'
 import RequirementsView from '@/components/automotive/phases/RequirementsView'
 import DiscoveryView from '@/components/automotive/phases/DiscoveryView'
@@ -33,12 +34,25 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
   }, [onDone])
 
   return (
-    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-300">
+    <m.div
+      variants={toastSlide}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="fixed top-6 left-1/2 -translate-x-1/2 z-50"
+    >
       <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl flex items-center gap-3">
         <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
         <p className="text-sm text-zinc-200">{message}</p>
+        {/* Progress bar */}
+        <m.div
+          className="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-amber-500/40 origin-left"
+          initial={{ scaleX: 1 }}
+          animate={{ scaleX: 0 }}
+          transition={{ duration: 4, ease: 'linear' }}
+        />
       </div>
-    </div>
+    </m.div>
   )
 }
 
@@ -138,7 +152,9 @@ function ProjectContent() {
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       {/* Transition toast */}
-      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      <AnimatePresence>
+        {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      </AnimatePresence>
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -177,62 +193,71 @@ function ProjectContent() {
         processingStage={processingStage}
       />
 
-      {/* Stage content */}
+      {/* Stage content — animated transitions */}
       <div className="mt-6">
-        {activeTab === 'parse' && (
-          <RequirementsView
-            data={project.parsed_requirement}
-            isActive={project.current_stage === 'parse'}
-            onApprove={(edits) => handleApprove('parse', { edits })}
-          />
-        )}
-        {activeTab === 'discover' && (
-          <DiscoveryView
-            data={project.discovery_result}
-            isActive={project.current_stage === 'discover'}
-            onApprove={(removedIds) => handleApprove('discover', { removed_supplier_ids: removedIds })}
-          />
-        )}
-        {activeTab === 'qualify' && (
-          <QualificationView
-            data={project.qualification_result}
-            isActive={project.current_stage === 'qualify'}
-            onApprove={(overrides) => handleApprove('qualify', { status_overrides: overrides })}
-          />
-        )}
-        {activeTab === 'compare' && (
-          <ComparisonView
-            data={project.comparison_matrix}
-            isActive={project.current_stage === 'compare'}
-            onApprove={(weights) => handleApprove('compare', { weight_adjustments: weights })}
-            weightProfile={project.weight_profile}
-          />
-        )}
-        {activeTab === 'report' && (
-          <ReportsView
-            data={project.intelligence_reports}
-            projectId={project.project_id}
-            isActive={project.current_stage === 'report'}
-            onApprove={() => handleApprove('report', {})}
-          />
-        )}
-        {activeTab === 'rfq' && (
-          <RFQView
-            data={project.rfq_result}
-            isActive={project.current_stage === 'rfq'}
-            onApprove={() => handleApprove('rfq_send', {})}
-          />
-        )}
-        {activeTab === 'quote_ingest' && (
-          <QuotesView
-            data={project.quote_ingestion}
-            isActive={project.current_stage === 'quote_ingest'}
-            onApprove={() => handleApprove('quotes', {})}
-          />
-        )}
-        {activeTab === 'complete' && (
-          <CompleteView project={project} />
-        )}
+        <AnimatePresence mode="wait">
+          <m.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] } }}
+            exit={{ opacity: 0, y: -8, transition: { duration: DURATION.fast } }}
+          >
+            {activeTab === 'parse' && (
+              <RequirementsView
+                data={project.parsed_requirement}
+                isActive={project.current_stage === 'parse'}
+                onApprove={(edits) => handleApprove('parse', { edits })}
+              />
+            )}
+            {activeTab === 'discover' && (
+              <DiscoveryView
+                data={project.discovery_result}
+                isActive={project.current_stage === 'discover'}
+                onApprove={(removedIds) => handleApprove('discover', { removed_supplier_ids: removedIds })}
+              />
+            )}
+            {activeTab === 'qualify' && (
+              <QualificationView
+                data={project.qualification_result}
+                isActive={project.current_stage === 'qualify'}
+                onApprove={(overrides) => handleApprove('qualify', { status_overrides: overrides })}
+              />
+            )}
+            {activeTab === 'compare' && (
+              <ComparisonView
+                data={project.comparison_matrix}
+                isActive={project.current_stage === 'compare'}
+                onApprove={(weights) => handleApprove('compare', { weight_adjustments: weights })}
+                weightProfile={project.weight_profile}
+              />
+            )}
+            {activeTab === 'report' && (
+              <ReportsView
+                data={project.intelligence_reports}
+                projectId={project.project_id}
+                isActive={project.current_stage === 'report'}
+                onApprove={() => handleApprove('report', {})}
+              />
+            )}
+            {activeTab === 'rfq' && (
+              <RFQView
+                data={project.rfq_result}
+                isActive={project.current_stage === 'rfq'}
+                onApprove={() => handleApprove('rfq_send', {})}
+              />
+            )}
+            {activeTab === 'quote_ingest' && (
+              <QuotesView
+                data={project.quote_ingestion}
+                isActive={project.current_stage === 'quote_ingest'}
+                onApprove={() => handleApprove('quotes', {})}
+              />
+            )}
+            {activeTab === 'complete' && (
+              <CompleteView project={project} />
+            )}
+          </m.div>
+        </AnimatePresence>
       </div>
 
       {/* Live activity console */}

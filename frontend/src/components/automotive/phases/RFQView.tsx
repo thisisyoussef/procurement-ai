@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { m, AnimatePresence, expandCollapse, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import ConfirmDialog from '@/components/automotive/shared/ConfirmDialog'
 import ProcessingState from '@/components/automotive/shared/ProcessingState'
@@ -62,7 +63,11 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
   const [showConfirm, setShowConfirm] = useState(false)
 
   if (!data) {
-    return <ProcessingState stage="rfq" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="rfq" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const rfqPackage = (data.rfq_package || {}) as RFQPackage
@@ -71,7 +76,12 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
   const totalBounced = data.total_bounced as number || 0
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold">RFQ & Outreach</h3>
@@ -100,7 +110,9 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
       </div>
 
       {/* RFQ Preview */}
+      <AnimatePresence>
       {showPreview && rfqPackage.rfq_id && (
+        <m.div variants={expandCollapse} initial="hidden" animate="visible" exit="exit" className="overflow-hidden">
         <div className="px-6 py-5 border-b border-zinc-800 bg-zinc-800/20">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div>
@@ -160,7 +172,9 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
             </div>
           )}
         </div>
+        </m.div>
       )}
+      </AnimatePresence>
 
       {/* Outreach tracker */}
       <div className="divide-y divide-zinc-800">
@@ -211,6 +225,6 @@ export default function RFQView({ data, isActive, onApprove }: Props) {
         onConfirm={() => { setShowConfirm(false); onApprove() }}
         onCancel={() => setShowConfirm(false)}
       />
-    </div>
+    </m.div>
   )
 }

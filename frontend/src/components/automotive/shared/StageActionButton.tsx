@@ -1,5 +1,7 @@
 'use client'
 
+import { useState, useCallback } from 'react'
+import { m, AnimatePresence, SPRING_BOUNCY } from '@/lib/motion'
 import type { PipelineStage } from '@/types/automotive'
 
 interface StageActionButtonProps {
@@ -52,6 +54,8 @@ const BUTTON_CONFIG: Record<string, ButtonConfig> = {
   },
 }
 
+type ButtonState = 'idle' | 'success' | 'loading'
+
 export default function StageActionButton({
   stage,
   onClick,
@@ -60,6 +64,8 @@ export default function StageActionButton({
   supplierCount,
   editCount,
 }: StageActionButtonProps) {
+  const [btnState, setBtnState] = useState<ButtonState>('idle')
+
   const config = BUTTON_CONFIG[stage]
   if (!config) return null
 
@@ -70,18 +76,64 @@ export default function StageActionButton({
     label = config.labelWithCount.replace('{n}', String(supplierCount))
   }
 
+  const handleClick = useCallback(() => {
+    if (btnState !== 'idle' || disabled || loading) return
+    setBtnState('success')
+    setTimeout(() => {
+      setBtnState('loading')
+      onClick()
+    }, 600)
+  }, [btnState, disabled, loading, onClick])
+
+  const isDisabled = disabled || loading || btnState !== 'idle'
+  const isLoading = loading || btnState === 'loading'
+  const isSuccess = btnState === 'success'
+
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
-        onClick={onClick}
-        disabled={disabled || loading}
-        className="px-5 py-2 text-sm bg-amber-500 text-zinc-950 font-semibold rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+      <m.button
+        onClick={handleClick}
+        disabled={isDisabled}
+        whileHover={!isDisabled ? { scale: 1.02 } : undefined}
+        whileTap={!isDisabled ? { scale: 0.97 } : undefined}
+        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+        className="px-5 py-2 text-sm bg-amber-500 text-zinc-950 font-semibold rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 relative overflow-hidden"
       >
-        {loading && (
-          <div className="w-3.5 h-3.5 border-2 border-zinc-800 border-t-transparent rounded-full animate-spin" />
-        )}
-        {loading ? 'Processing...' : label}
-      </button>
+        <AnimatePresence mode="wait">
+          {isSuccess ? (
+            <m.span
+              key="success"
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
+              transition={SPRING_BOUNCY}
+              className="flex items-center gap-1.5"
+            >
+              <span className="text-base">✓</span> Approved!
+            </m.span>
+          ) : isLoading ? (
+            <m.span
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-2"
+            >
+              <div className="w-3.5 h-3.5 border-2 border-zinc-800 border-t-transparent rounded-full animate-spin" />
+              Processing...
+            </m.span>
+          ) : (
+            <m.span
+              key="idle"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {label}
+            </m.span>
+          )}
+        </AnimatePresence>
+      </m.button>
       <span className="text-[10px] text-zinc-600 max-w-xs text-right">
         Next: {config.next}
       </span>

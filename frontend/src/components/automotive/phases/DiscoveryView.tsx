@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { DiscoveredSupplier } from '@/types/automotive'
+import { m, StaggerList, StaggerItem, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import ProcessingState from '@/components/automotive/shared/ProcessingState'
 
@@ -16,7 +17,11 @@ export default function DiscoveryView({ data, isActive, onApprove }: Props) {
   const [sortBy, setSortBy] = useState<'initial_score' | 'capability_match' | 'geographic_fit'>('initial_score')
 
   if (!data) {
-    return <ProcessingState stage="discover" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="discover" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const allSuppliers = ((data.suppliers || []) as DiscoveredSupplier[])
@@ -96,7 +101,12 @@ export default function DiscoveryView({ data, isActive, onApprove }: Props) {
   )
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Supplier Discovery</h3>
@@ -150,9 +160,13 @@ export default function DiscoveryView({ data, isActive, onApprove }: Props) {
       )}
 
       {/* Kept suppliers */}
-      <div className="divide-y divide-zinc-800">
-        {keptSuppliers.map((s, idx) => renderSupplier(s, idx, false))}
-      </div>
+      <StaggerList className="divide-y divide-zinc-800">
+        {keptSuppliers.map((s, idx) => (
+          <StaggerItem key={s.supplier_id}>
+            {renderSupplier(s, idx, false)}
+          </StaggerItem>
+        ))}
+      </StaggerList>
 
       {/* Removed suppliers section */}
       {removedSuppliers.length > 0 && (
@@ -167,6 +181,6 @@ export default function DiscoveryView({ data, isActive, onApprove }: Props) {
           </div>
         </>
       )}
-    </div>
+    </m.div>
   )
 }

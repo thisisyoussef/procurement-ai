@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { automotiveClient } from '@/lib/automotive/client'
+import { m, AnimatePresence, StaggerList, StaggerItem, expandCollapse, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import ScoreBar from '@/components/automotive/shared/ScoreBar'
 import ProcessingState from '@/components/automotive/shared/ProcessingState'
@@ -68,7 +69,11 @@ export default function ReportsView({ data, projectId, isActive, onApprove }: Pr
   const [detailReport, setDetailReport] = useState<Report | null>(null)
 
   if (!data) {
-    return <ProcessingState stage="report" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="report" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const reports = (data.reports || []) as Report[]
@@ -103,7 +108,12 @@ export default function ReportsView({ data, projectId, isActive, onApprove }: Pr
   const getSection = (supplierId: string): SectionKey => activeSection[supplierId] || 'summary'
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Intelligence Reports</h3>
@@ -122,7 +132,7 @@ export default function ReportsView({ data, projectId, isActive, onApprove }: Pr
       )}
 
       {/* Summary cards — always visible */}
-      <div className="divide-y divide-zinc-800">
+      <StaggerList className="divide-y divide-zinc-800">
         {reports.map((r) => {
           const isExpanded = expandedId === r.supplier_id
           const detail = isExpanded ? (detailReport || r) : r
@@ -130,7 +140,8 @@ export default function ReportsView({ data, projectId, isActive, onApprove }: Pr
           const section = getSection(r.supplier_id)
 
           return (
-            <div key={r.supplier_id}>
+            <StaggerItem key={r.supplier_id}>
+            <div>
               {/* Collapsed summary card */}
               <div className="px-6 py-4">
                 <div className="flex items-start justify-between mb-2">
@@ -208,7 +219,9 @@ export default function ReportsView({ data, projectId, isActive, onApprove }: Pr
               </div>
 
               {/* Expanded full report */}
+              <AnimatePresence>
               {isExpanded && (
+                <m.div variants={expandCollapse} initial="hidden" animate="visible" exit="exit" className="overflow-hidden">
                 <div className="px-6 pb-6 border-t border-zinc-800/50">
                   {loadingDetail ? (
                     <div className="flex items-center gap-2 py-6">
@@ -319,11 +332,14 @@ export default function ReportsView({ data, projectId, isActive, onApprove }: Pr
                     </div>
                   )}
                 </div>
+                </m.div>
               )}
+              </AnimatePresence>
             </div>
+            </StaggerItem>
           )
         })}
-      </div>
-    </div>
+      </StaggerList>
+    </m.div>
   )
 }

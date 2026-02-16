@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { SupplierComparison } from '@/types/automotive'
+import { m, AnimatePresence, StaggerList, StaggerItem, expandCollapse, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import ScoreBar from '@/components/automotive/shared/ScoreBar'
 import ProcessingState from '@/components/automotive/shared/ProcessingState'
@@ -27,7 +28,11 @@ export default function ComparisonView({ data, isActive, onApprove, weightProfil
   const [weights, setWeights] = useState<Record<string, number>>(weightProfile || DEFAULT_WEIGHTS)
 
   if (!data) {
-    return <ProcessingState stage="compare" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="compare" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const suppliers = (data.suppliers || []) as SupplierComparison[]
@@ -59,7 +64,12 @@ export default function ComparisonView({ data, isActive, onApprove, weightProfil
   })
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <h3 className="font-semibold">Supplier Comparison Matrix</h3>
         <div className="flex items-center gap-3">
@@ -81,7 +91,9 @@ export default function ComparisonView({ data, isActive, onApprove, weightProfil
       </div>
 
       {/* Weight adjustment sliders */}
+      <AnimatePresence>
       {showWeights && (
+        <m.div variants={expandCollapse} initial="hidden" animate="visible" exit="exit" className="overflow-hidden">
         <div className="px-6 py-4 bg-zinc-800/30 border-b border-zinc-800">
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs text-zinc-400">Adjust dimension weights to change ranking priorities</p>
@@ -109,7 +121,9 @@ export default function ComparisonView({ data, isActive, onApprove, weightProfil
             ))}
           </div>
         </div>
+        </m.div>
       )}
+      </AnimatePresence>
 
       {/* Recommendation */}
       {topRec && (
@@ -190,9 +204,10 @@ export default function ComparisonView({ data, isActive, onApprove, weightProfil
       </div>
 
       {/* Supplier detail cards */}
-      <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <StaggerList className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {suppliers.map((s) => (
-          <div key={s.supplier_id} className="bg-zinc-800/50 rounded-lg p-4">
+          <StaggerItem key={s.supplier_id}>
+          <div className="bg-zinc-800/50 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <h4 className="font-medium text-sm text-zinc-200">{s.company_name}</h4>
               <ScoreBar value={s.composite_score} size="sm" />
@@ -215,8 +230,9 @@ export default function ComparisonView({ data, isActive, onApprove, weightProfil
               <p className="text-xs text-zinc-500 italic">{s.best_fit_for}</p>
             )}
           </div>
+          </StaggerItem>
         ))}
-      </div>
-    </div>
+      </StaggerList>
+    </m.div>
   )
 }

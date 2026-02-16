@@ -1,6 +1,7 @@
 'use client'
 
 import type { ParsedQuote } from '@/types/automotive'
+import { m, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import ScoreBar from '@/components/automotive/shared/ScoreBar'
 import Tooltip from '@/components/automotive/shared/Tooltip'
@@ -23,7 +24,11 @@ const formatUSD = (n: number) =>
 
 export default function QuotesView({ data, isActive, onApprove }: Props) {
   if (!data) {
-    return <ProcessingState stage="quote_ingest" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="quote_ingest" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const quotes = (data.quotes || []) as ParsedQuote[]
@@ -35,7 +40,12 @@ export default function QuotesView({ data, isActive, onApprove }: Props) {
   const hasLowConfidence = sortedQuotes.some(q => q.low_confidence_fields.length > 0)
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Quote Analysis</h3>
@@ -196,6 +206,6 @@ export default function QuotesView({ data, isActive, onApprove }: Props) {
           </p>
         </div>
       )}
-    </div>
+    </m.div>
   )
 }

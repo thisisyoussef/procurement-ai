@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { m, AnimatePresence, expandCollapse } from '@/lib/motion'
 import { automotiveClient } from '@/lib/automotive/client'
 
 interface ActivityEvent {
@@ -112,66 +113,80 @@ export default function ActivityConsole({ projectId }: Props) {
             </span>
           )}
         </div>
-        <span className="text-zinc-600 text-xs">{collapsed ? '▶' : '▼'}</span>
+        <m.span
+          className="text-zinc-600 text-xs"
+          animate={{ rotate: collapsed ? -90 : 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          ▼
+        </m.span>
       </button>
 
-      {/* Content */}
-      {!collapsed && (
-        <>
-          {/* Filter chips */}
-          <div className="px-4 py-2 border-t border-zinc-800/50 flex gap-1.5">
-            {filters.map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setFilter(key)}
-                className={`px-2.5 py-1 text-[10px] rounded-full transition-colors ${
-                  filter === key
-                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                    : 'text-zinc-600 hover:text-zinc-400 border border-transparent'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Event list */}
-          <div
-            ref={scrollRef}
-            className="h-48 overflow-y-auto px-4 py-2"
+      {/* Content — animated collapse */}
+      <AnimatePresence>
+        {!collapsed && (
+          <m.div
+            variants={expandCollapse}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="overflow-hidden"
           >
-            {filteredEvents.length === 0 && (
-              <div className="flex items-center justify-center h-full">
-                <span className="text-zinc-600 text-xs">
-                  {events.length === 0 ? 'Waiting for activity...' : `No ${filter} events`}
-                </span>
-              </div>
-            )}
-            {filteredEvents.map((e, i) => {
-              const icon = ACTION_ICONS[e.action] || '·'
-              const colorClass = ACTION_COLORS[e.action] || 'text-zinc-400'
+            {/* Filter chips */}
+            <div className="px-4 py-2 border-t border-zinc-800/50 flex gap-1.5">
+              {filters.map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  className={`px-2.5 py-1 text-[10px] rounded-full transition-colors ${
+                    filter === key
+                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                      : 'text-zinc-600 hover:text-zinc-400 border border-transparent'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-              return (
-                <div key={`${e.ts}-${i}`} className="flex items-start gap-2.5 py-1.5 group">
-                  {/* Icon */}
-                  <span className={`w-4 h-4 flex items-center justify-center text-[10px] rounded ${colorClass} bg-zinc-800/50 flex-shrink-0 mt-0.5`}>
-                    {icon}
+            {/* Event list */}
+            <div
+              ref={scrollRef}
+              className="h-48 overflow-y-auto px-4 py-2"
+            >
+              {filteredEvents.length === 0 && (
+                <div className="flex items-center justify-center h-full">
+                  <span className="text-zinc-600 text-xs">
+                    {events.length === 0 ? 'Waiting for activity...' : `No ${filter} events`}
                   </span>
+                </div>
+              )}
+              {filteredEvents.map((e, i) => {
+                const icon = ACTION_ICONS[e.action] || '·'
+                const colorClass = ACTION_COLORS[e.action] || 'text-zinc-400'
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-zinc-300 leading-relaxed">{e.detail}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-zinc-600">{e.time}</span>
-                      <span className="text-[10px] px-1.5 py-0 rounded bg-zinc-800/80 text-zinc-600">{e.stage}</span>
+                return (
+                  <div key={`${e.ts}-${i}`} className="flex items-start gap-2.5 py-1.5 group">
+                    {/* Icon */}
+                    <span className={`w-4 h-4 flex items-center justify-center text-[10px] rounded ${colorClass} bg-zinc-800/50 flex-shrink-0 mt-0.5`}>
+                      {icon}
+                    </span>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-zinc-300 leading-relaxed">{e.detail}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-zinc-600">{e.time}</span>
+                        <span className="text-[10px] px-1.5 py-0 rounded bg-zinc-800/80 text-zinc-600">{e.stage}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
+                )
+              })}
+            </div>
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

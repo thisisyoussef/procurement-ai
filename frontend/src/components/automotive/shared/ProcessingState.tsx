@@ -1,5 +1,6 @@
 'use client'
 
+import { m } from '@/lib/motion'
 import type { PipelineStage } from '@/types/automotive'
 
 interface ProcessingStateProps {
@@ -80,11 +81,21 @@ export default function ProcessingState({ stage, variant }: ProcessingStateProps
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8">
       <div className="flex items-center justify-center gap-3 mb-3">
-        {/* Animated multi-dot loader */}
-        <div className="flex gap-1">
-          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" style={{ animationDelay: '200ms' }} />
-          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" style={{ animationDelay: '400ms' }} />
+        {/* Animated bouncing dot loader */}
+        <div className="flex gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <m.span
+              key={i}
+              className="w-2 h-2 rounded-full bg-amber-500"
+              animate={{ y: [0, -6, 0] }}
+              transition={{
+                duration: 0.6,
+                repeat: Infinity,
+                delay: i * 0.15,
+                ease: 'easeInOut',
+              }}
+            />
+          ))}
         </div>
         <span className="text-zinc-300 font-medium">{msgs.processing}</span>
       </div>

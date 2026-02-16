@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { m, AnimatePresence, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import ProcessingState from '@/components/automotive/shared/ProcessingState'
 
@@ -95,7 +96,11 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
   }
 
   if (!data) {
-    return <ProcessingState stage="parse" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="parse" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const ambiguities = (data.ambiguities as string[]) || []
@@ -112,7 +117,12 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
   const edited = (key: string) => key in edits && edits[key] !== data[key]
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       {/* Header */}
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
@@ -356,6 +366,6 @@ export default function RequirementsView({ data, isActive, onApprove }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </m.div>
   )
 }

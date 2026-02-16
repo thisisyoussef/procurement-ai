@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { QualifiedSupplier } from '@/types/automotive'
+import { m, StaggerList, StaggerItem, DURATION } from '@/lib/motion'
 import StageActionButton from '@/components/automotive/shared/StageActionButton'
 import Tooltip from '@/components/automotive/shared/Tooltip'
 import ProcessingState from '@/components/automotive/shared/ProcessingState'
@@ -42,7 +43,11 @@ export default function QualificationView({ data, isActive, onApprove }: Props) 
   const [overrides, setOverrides] = useState<Record<string, string>>({})
 
   if (!data) {
-    return <ProcessingState stage="qualify" variant={isActive ? 'processing' : 'waiting'} />
+    return (
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: DURATION.normal }}>
+        <ProcessingState stage="qualify" variant={isActive ? 'processing' : 'waiting'} />
+      </m.div>
+    )
   }
 
   const suppliers = (data.suppliers || []) as QualifiedSupplier[]
@@ -54,7 +59,12 @@ export default function QualificationView({ data, isActive, onApprove }: Props) 
   const hasOverrides = Object.keys(overrides).length > 0
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <m.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DURATION.normal, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Supplier Qualification</h3>
@@ -89,13 +99,14 @@ export default function QualificationView({ data, isActive, onApprove }: Props) 
         </div>
       )}
 
-      <div className="divide-y divide-zinc-800">
+      <StaggerList className="divide-y divide-zinc-800">
         {suppliers.map((s) => {
           const status = getStatus(s)
           const isOverridden = s.supplier_id in overrides
 
           return (
-            <div key={s.supplier_id} className="px-6 py-5">
+            <StaggerItem key={s.supplier_id}>
+            <div className="px-6 py-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <h4 className="font-medium text-zinc-200">{s.company_name}</h4>
@@ -195,9 +206,10 @@ export default function QualificationView({ data, isActive, onApprove }: Props) 
                 )}
               </div>
             </div>
+            </StaggerItem>
           )
         })}
-      </div>
-    </div>
+      </StaggerList>
+    </m.div>
   )
 }

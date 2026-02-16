@@ -1,5 +1,6 @@
 'use client'
 
+import { m, AnimatePresence } from '@/lib/motion'
 import type { PipelineStage } from '@/types/automotive'
 import Tooltip from '@/components/automotive/shared/Tooltip'
 
@@ -59,7 +60,7 @@ export default function PipelineNav({
               }
             `}
           >
-            {/* Step indicator */}
+            {/* Step indicator — animated morph between number and checkmark */}
             <span className={`
               relative w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold
               ${isComplete
@@ -72,9 +73,41 @@ export default function PipelineNav({
               }
             `}>
               {isProcessing && (
-                <span className="absolute inset-0 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
+                <m.span
+                  className="absolute inset-0 rounded-full border-2 border-amber-500/40"
+                  animate={{
+                    scale: [1, 1.4, 1],
+                    opacity: [0.5, 0, 0.5],
+                  }}
+                  transition={{
+                    duration: 2,
+                    repeat: Infinity,
+                    ease: 'easeInOut',
+                  }}
+                />
               )}
-              {isComplete ? '✓' : idx + 1}
+              <AnimatePresence mode="wait">
+                {isComplete ? (
+                  <m.span
+                    key="check"
+                    initial={{ scale: 0, rotate: -90 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                  >
+                    ✓
+                  </m.span>
+                ) : (
+                  <m.span
+                    key="num"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                  >
+                    {idx + 1}
+                  </m.span>
+                )}
+              </AnimatePresence>
             </span>
             {labels[stage]}
           </button>
