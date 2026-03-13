@@ -10,6 +10,7 @@ import logging
 import time
 import traceback
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -147,6 +148,8 @@ def _enforce_project_ownership(project: dict, current_user: AuthUser) -> None:
 
 
 async def _save_project(project: dict) -> None:
+    project.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    project["updated_at"] = datetime.now(timezone.utc).isoformat()
     store = get_project_store()
     try:
         await store.save_project(project)
@@ -155,6 +158,9 @@ async def _save_project(project: dict) -> None:
 
 
 async def _create_project(project: dict) -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    project.setdefault("created_at", now_iso)
+    project.setdefault("updated_at", now_iso)
     store = get_project_store()
     try:
         await store.create_project(project)
@@ -1372,12 +1378,34 @@ async def submit_retro(
 async def list_projects(
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
-    """List all projects (for demo purposes)."""
+    """List current user's projects with active work first, then recent activity."""
     store = get_project_store()
     try:
         projects = await store.list_projects()
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+
+    def _timestamp_sort_value(project: dict, field: str) -> float:
+        value = project.get(field)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if not value:
+            return 0.0
+        try:
+            normalized = str(value).replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized).timestamp()
+        except ValueError:
+            return 0.0
+
+    def _sort_key(project: dict) -> tuple[int, float, float]:
+        status = str(project.get("status") or "")
+        is_active = 1 if status in ACTIVE_PIPELINE_STATUSES else 0
+        updated = _timestamp_sort_value(project, "updated_at")
+        created = _timestamp_sort_value(project, "created_at")
+        return (is_active, updated, created)
+
+    user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
+    ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
     return [
         {
@@ -1385,7 +1413,8 @@ async def list_projects(
             "title": p.get("title"),
             "status": p.get("status"),
             "current_stage": p.get("current_stage"),
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at"),
         }
-        for p in projects
-        if str(p.get("user_id")) == str(current_user.user_id)
+        for p in ordered_projects
     ]

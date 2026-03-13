@@ -14,3 +14,10 @@
 1. Reduce duplicated helper logic across route files.
 2. Standardize HTTP error mapping and payload consistency.
 3. Keep route function signatures stable for frontend compatibility.
+
+## User-Visible API Behavior
+- `GET /api/v1/projects` now returns authenticated projects ordered for actionability:
+  - Active pipeline runs first (`parsing`, `clarifying`, `discovering`, `verifying`, `steering`, `comparing`, `recommending`, `outreaching`)
+  - Then by most recent `updated_at`
+  - Then by `created_at` when needed as fallback
+- Project list items include optional `created_at` and `updated_at` timestamps.

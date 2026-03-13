@@ -39,6 +39,7 @@ def test_health():
 
 def test_create_project():
     """Test creating a new sourcing project."""
+    _projects.clear()
     response = client.post(
         "/api/v1/projects",
         json={
@@ -51,6 +52,9 @@ def test_create_project():
     data = response.json()
     assert "project_id" in data
     assert data["status"] == "started"
+    created = _projects[data["project_id"]]
+    assert isinstance(created.get("created_at"), str)
+    assert isinstance(created.get("updated_at"), str)
 
 
 def test_create_project_requires_auth():
@@ -85,9 +89,104 @@ def test_get_nonexistent_project():
 
 def test_list_projects():
     """Test listing projects."""
+    _projects.clear()
+
+    _projects["active-old"] = {
+        "id": "active-old",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active Old",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-10T12:00:00+00:00",
+        "updated_at": "2026-03-10T12:00:00+00:00",
+    }
+    _projects["complete-new"] = {
+        "id": "complete-new",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete New",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+    }
+    _projects["active-new"] = {
+        "id": "active-new",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active New",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-12T18:00:00+00:00",
+    }
+    _projects["other-user"] = {
+        "id": "other-user",
+        "user_id": "00000000-0000-0000-0000-000000000099",
+        "title": "Should be filtered",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "created_at": "2026-03-13T12:00:00+00:00",
+        "updated_at": "2026-03-13T12:00:00+00:00",
+    }
+
     response = client.get("/api/v1/projects", headers=_auth_headers())
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert [project["id"] for project in payload] == ["active-new", "active-old", "complete-new"]
+    assert "created_at" in payload[0]
+    assert "updated_at" in payload[0]
+
+
+def test_list_projects_sorts_legacy_projects_without_timestamps_last_within_status_group():
+    _projects.clear()
+
+    _projects["active-legacy"] = {
+        "id": "active-legacy",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active Legacy",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["active-timestamped"] = {
+        "id": "active-timestamped",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active Timestamped",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-11T13:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["active-timestamped", "active-legacy"]
+
+
+def test_list_projects_uses_created_at_fallback_when_updated_at_missing():
+    _projects.clear()
+
+    _projects["project-older-created"] = {
+        "id": "project-older-created",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Older Created",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-10T12:00:00+00:00",
+    }
+    _projects["project-newer-created"] = {
+        "id": "project-newer-created",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Newer Created",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-12T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["project-newer-created", "project-older-created"]
 
 
 def test_cancel_project():
