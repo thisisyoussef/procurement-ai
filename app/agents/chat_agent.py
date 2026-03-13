@@ -238,7 +238,7 @@ Return 2-4 sentences. Include what this quote means relative to alternatives and
     try:
         text = await call_llm_structured(
             prompt=prompt,
-            system="You are Tamkin, a procurement advisor. Be specific, concise, and decision-oriented.",
+            system="You are Procurement AI, a procurement advisor. Be specific, concise, and decision-oriented.",
             model=settings.model_balanced,
             max_tokens=500,
         )

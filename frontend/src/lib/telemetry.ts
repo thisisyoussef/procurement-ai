@@ -1,10 +1,10 @@
 'use client'
 
-import { tamkinClient } from '@/lib/api/tamkinClient'
+import { procurementClient } from '@/lib/api/procurementClient'
 import { featureFlags } from '@/lib/featureFlags'
 
-const TRACE_SESSION_KEY = 'tamkin_trace_session_id'
-const TRACE_PREFIX = '[tamkin-trace]'
+const TRACE_SESSION_KEY = 'procurement_trace_session_id'
+const TRACE_PREFIX = '[procurement-trace]'
 
 function truncate(value: string, max = 600): string {
   if (!value) return value
@@ -49,7 +49,7 @@ export function traceConsole(
   payload: Record<string, unknown> = {},
   level: 'info' | 'warn' | 'error' = 'info'
 ): void {
-  if (!featureFlags.tamkinClientTracing) return
+  if (!featureFlags.procurementClientTracing) return
 
   const entry = {
     event: eventName,
@@ -80,7 +80,7 @@ export function trackTraceEvent(
   const normalizedPayload = normalizePayload(payload)
   traceConsole(eventName, normalizedPayload, options.level || 'info')
 
-  if (!featureFlags.tamkinClientTracing) return
+  if (!featureFlags.procurementClientTracing) return
 
   const path =
     options.path ||
@@ -88,7 +88,7 @@ export function trackTraceEvent(
       ? `${window.location.pathname}${window.location.search}`
       : undefined)
 
-  void tamkinClient
+  void procurementClient
     .trackEvent({
       event_name: eventName,
       session_id: getTraceSessionId() || undefined,

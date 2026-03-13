@@ -140,7 +140,7 @@ class PhoneCallConfigRequest(BaseModel):
     default_questions: list[str] = Field(default_factory=list)
 
 
-# ── Tamkin landing + growth endpoints ───────────────────────
+# ── Procurement AI landing + growth endpoints ───────────────────────
 
 class IntakeStartRequest(BaseModel):
     message: str = Field(min_length=10, max_length=5000)

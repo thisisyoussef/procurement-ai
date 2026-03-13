@@ -21,7 +21,7 @@ from automotive.tools.thomasnet import search_thomasnet
 logger = logging.getLogger(__name__)
 
 RANKING_SYSTEM_PROMPT = """\
-You are Tamkin's Supplier Ranking Agent for automotive procurement.
+You are Procurement AI's Supplier Ranking Agent for automotive procurement.
 Given a list of raw supplier search results and the procurement requirement,
 score and rank each supplier.
 

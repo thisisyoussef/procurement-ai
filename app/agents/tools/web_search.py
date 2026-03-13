@@ -26,7 +26,7 @@ async def scrape_url_basic(url: str, max_length: int = 8000) -> dict:
     logger.info("  Basic scraping: %s", url)
     headers = {
         "User-Agent": (
-            "Mozilla/5.0 (compatible; Tamkin/1.0; +https://tamkin.ai)"
+            "Mozilla/5.0 (compatible; ProcurementAI/1.0; +https://example.com/procurement-ai)"
         )
     }
     async with httpx.AsyncClient(

@@ -1,6 +1,6 @@
-# Tamkin Procurement AI
+# Procurement AI
 
-Tamkin is an AI-assisted sourcing platform for finding, vetting, comparing, and contacting suppliers.
+Procurement AI is an AI-assisted sourcing platform for finding, vetting, comparing, and contacting suppliers.
 
 ## Repository Layout
 - `app/`: FastAPI backend, agents, persistence, and orchestration.
@@ -27,3 +27,29 @@ Tamkin is an AI-assisted sourcing platform for finding, vetting, comparing, and 
 - `docs/REFACTORING_TRACKER.md`
 - `docs/AGENTIC_SUITE_PRD.md`
 - Directory READMEs under `app/`, `frontend/src/`, `tests/`, and `alembic/`.
+
+## Agent Merge Protocol
+This repo uses short-lived feature branches that must be merged onto `main` before handing off work.
+
+### Pre-merge checklist (before touching `main`)
+1. Confirm you have no uncommitted local changes on your current branch.
+2. Sync remote refs (`git fetch --all --prune`) and confirm branch ownership.
+3. Validate branch scope in the PR body or branch name (one feature or one fix only).
+4. Ensure feature code has passable tests where available (`pytest`, targeted frontend checks as relevant).
+5. Rebase your feature branch onto latest `main` before merge.
+
+### Merge process for agent handoff
+1. Resolve local branch state: commit all changes and push branch.
+2. Open or update PR from the feature branch into `main`.
+3. Review diff for feature scope, migration impacts, and secret/config changes.
+4. Merge with a merge commit unless the repo policy is to squash/rebase; do not squash when preserving per-feature history is required.
+5. Run post-merge quick checks on `main` (`pytest`, API smoke checks, and frontend build).
+6. Mark branch as merged and archive or delete local branch when approved.
+
+### Emergency/cleanup policy
+- If any feature branch is behind, behind-checkpoint required: rebase/merge `main`, rerun tests, and re-check conflicts.
+- If you inherit an in-progress branch with missing commits, complete the work there and finalize in one commit before merge.
+- If a merge introduces regression, revert only the merge commit and reopen the branch for corrective follow-up.
+
+### Weekly consistency rule
+Before every handoff, ensure all in-scope branches are either merged into `main` or explicitly closed with a reason in the PR/repo tracker.

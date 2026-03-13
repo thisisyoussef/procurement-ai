@@ -24,7 +24,7 @@ export default function DebugConsoleFeed() {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [visibleEvents.length])
 
-  if (!featureFlags.tamkinDebugConsoleFeed || !projectId || !status) return null
+  if (!featureFlags.procurementDebugConsoleFeed || !projectId || !status) return null
 
   return (
     <div className="mx-6 mt-3 rounded-xl border border-surface-3 overflow-hidden">

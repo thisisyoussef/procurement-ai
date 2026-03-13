@@ -1,4 +1,4 @@
-"""Dashboard endpoints for Tamkin home experience."""
+"""Dashboard endpoints for Procurement AI home experience."""
 
 from __future__ import annotations
 

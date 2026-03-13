@@ -46,7 +46,7 @@ When materials reference a geographic origin (Egyptian cotton, Italian leather, 
 Example: "Egyptian cotton hoodies"
 - product_type: "hoodies"
 - material: "Egyptian cotton"
-- regional_searches should INCLUDE Egypt with Arabic queries for cotton garment/hoodie factories
+- regional_searches should INCLUDE Egypt with local-language queries for cotton garment/hoodie factories
 - search_queries should target hoodie/apparel manufacturers, NOT cotton retailers or stores
 
 Example: "Italian leather bags"

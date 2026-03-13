@@ -261,7 +261,7 @@ async def _search_regional(
 
 async def _search_supplier_memory(requirements: ParsedRequirements, max_results: int = 20) -> list[DiscoveredSupplier]:
     """Query internal supplier memory so discovery is hybrid, not web-only."""
-    emit_progress("discovering", "searching_supplier_memory", "Searching Tamkin supplier memory...")
+    emit_progress("discovering", "searching_supplier_memory", "Searching Procurement AI supplier memory...")
     return await search_supplier_memory_candidates(requirements, limit=max_results)
 
 
@@ -736,7 +736,7 @@ async def discover_suppliers(
             emit_progress(
                 "discovering",
                 "memory_candidates_loaded",
-                f"Found {len(memory_results)} previously indexed supplier profiles in Tamkin memory.",
+                f"Found {len(memory_results)} previously indexed supplier profiles in Procurement AI memory.",
             )
     except Exception:  # noqa: BLE001
         logger.warning("Supplier memory lookup failed in discovery", exc_info=True)

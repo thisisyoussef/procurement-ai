@@ -210,9 +210,9 @@ async def send_qualification_emails(
             body_html=body_html,
             reply_to=buyer_contact_email or None,
             headers={
-                "X-Tamkin-Project-Id": project_id,
-                "X-Tamkin-Supplier-Id": supplier.supplier_id,
-                "X-Tamkin-Email-Type": "qualification",
+                "X-Procurement-Project-Id": project_id,
+                "X-Procurement-Supplier-Id": supplier.supplier_id,
+                "X-Procurement-Email-Type": "qualification",
             },
         )
 

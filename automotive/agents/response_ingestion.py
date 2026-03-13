@@ -15,7 +15,7 @@ from automotive.schemas.rfq import RFQResult
 logger = logging.getLogger(__name__)
 
 QUOTE_EXTRACTION_PROMPT = """\
-You are Tamkin's Quote Extraction Agent for automotive procurement.
+You are Procurement AI's Quote Extraction Agent for automotive procurement.
 
 Extract structured pricing data from supplier quote responses. The input
 may be raw text from a PDF, Excel data, or an email body.

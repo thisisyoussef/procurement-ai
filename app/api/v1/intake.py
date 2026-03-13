@@ -1,4 +1,4 @@
-"""Tamkin landing intake endpoints."""
+"""Procurement AI landing intake endpoints."""
 
 import logging
 

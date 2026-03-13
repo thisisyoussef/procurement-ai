@@ -132,7 +132,7 @@ export default function BriefPhase() {
               {restarting ? 'Restarting…' : 'Restart with this context'}
             </button>
             <span className="text-[10px] text-ink-4">
-              Tamkin will run parsing and supplier search again.
+              Procurement AI will run parsing and supplier search again.
             </span>
           </div>
         </div>
@@ -213,7 +213,7 @@ function ClarifyingQuestionsInline({
         {questions.map((q) => (
           <div key={q.field}>
             <label className="text-[13px] text-ink-2 font-medium block mb-2">{q.question}</label>
-            {featureFlags.tamkinFocusCircleSearchV1 &&
+            {featureFlags.procurementFocusCircleSearchV1 &&
             (q.why_this_question || q.if_skipped_impact || q.suggested_default) && (
               <div className="mb-2 space-y-1 rounded-lg border border-surface-3 bg-cream/40 px-3 py-2">
                 {q.why_this_question ? (
@@ -275,7 +275,7 @@ function ClarifyingQuestionsInline({
       >
         {submitting ? 'Submitting...' : 'Continue'}
       </button>
-      {featureFlags.tamkinFocusCircleSearchV1 ? (
+      {featureFlags.procurementFocusCircleSearchV1 ? (
         <p className="mt-2 text-[10px] text-ink-4">
           You can leave answers blank and continue, but recommendations may be less tailored.
         </p>

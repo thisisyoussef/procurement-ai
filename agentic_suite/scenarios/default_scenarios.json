@@ -1,0 +1,37 @@
+[
+  {
+    "scenario_id": "coffee_pouches_us",
+    "title": "Custom Compostable Coffee Pouches",
+    "product_description": "Need suppliers for custom printed compostable stand-up coffee pouches with one-way degassing valve, matte finish, and zipper closure. Initial quantity 25,000 units, ship to Austin, Texas. Require food-safe compliance documents and lead time under 8 weeks.",
+    "auto_outreach": false,
+    "expected_focus": ["packaging", "food-safe compliance", "short lead time"]
+  },
+  {
+    "scenario_id": "bottle_private_label",
+    "title": "Private Label Stainless Steel Bottles",
+    "product_description": "Source manufacturers for 750ml double-wall stainless steel vacuum bottles with private label logo and custom retail packaging. Initial pilot order 5,000 units with ramp to 30,000 quarterly. Delivery target is Los Angeles, CA, budget should support mid-tier quality.",
+    "auto_outreach": false,
+    "expected_focus": ["customization", "scalable capacity", "MOQ negotiation"]
+  },
+  {
+    "scenario_id": "eco_mailers_d2c",
+    "title": "Biodegradable E-commerce Mailers",
+    "product_description": "Find suppliers for biodegradable polymailer alternatives for D2C apparel shipments. Sizes: 10x13 and 14.5x19 inches, white + one-color branding. Need stable monthly supply around 100,000 units and certifications proving compostability and material safety.",
+    "auto_outreach": false,
+    "expected_focus": ["certification verification", "high volume", "cost consistency"]
+  },
+  {
+    "scenario_id": "pcb_assembly_smb",
+    "title": "Low-Volume PCB Assembly Partner",
+    "product_description": "Looking for contract manufacturers who can handle low-to-mid volume PCB assembly for IoT sensor boards, including SMT assembly, testing, and RoHS compliance. First order 1,500 boards with recurring monthly batches. Must support engineering communication in English and ship to New York.",
+    "auto_outreach": false,
+    "expected_focus": ["technical capability", "quality verification", "communication reliability"]
+  },
+  {
+    "scenario_id": "tote_bags_retail",
+    "title": "Organic Cotton Branded Tote Bags",
+    "product_description": "Need ethical suppliers for organic cotton tote bags with two-color screen print logo for retail stores. Quantity 40,000 units split across three deliveries over a quarter. Looking for suppliers with social compliance certifications and realistic landed cost estimates for US East Coast delivery.",
+    "auto_outreach": false,
+    "expected_focus": ["ethical sourcing", "cost visibility", "delivery planning"]
+  }
+]

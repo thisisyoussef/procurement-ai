@@ -18,7 +18,7 @@ from automotive.schemas.requirements import ParsedRequirement
 logger = logging.getLogger(__name__)
 
 REPORT_SYSTEM_PROMPT = """\
-You are Tamkin's Intelligence Report Writer for automotive procurement.
+You are Procurement AI's Intelligence Report Writer for automotive procurement.
 
 Generate a comprehensive intelligence brief for the given supplier. The report
 should give a procurement buyer everything they need to decide whether to

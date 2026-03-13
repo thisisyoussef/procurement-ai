@@ -185,7 +185,7 @@ const GlobeSVG = forwardRef<SVGSVGElement, GlobeSVGProps>(function GlobeSVG(
             </g>
           ))}
 
-        {/* Center dot (Tamkin) */}
+        {/* Center dot (Procurement AI) */}
         <circle
           cx={CENTER_POINT.x}
           cy={CENTER_POINT.y}

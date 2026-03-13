@@ -72,7 +72,7 @@ function ProductPageContent() {
             T
           </div>
           <h1 className="text-2xl font-heading text-ink">
-            Sign in to Tamkin
+            Sign in to Procurement AI
           </h1>
           <p className="text-sm text-ink-3">
             Continue to the procurement workspace with your Google account.

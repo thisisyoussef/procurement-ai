@@ -29,7 +29,7 @@ from automotive.tools.verification import (
 logger = logging.getLogger(__name__)
 
 QUALIFICATION_SYSTEM_PROMPT = """\
-You are Tamkin's Supplier Qualification Agent for automotive procurement.
+You are Procurement AI's Supplier Qualification Agent for automotive procurement.
 
 Given the verification data collected for a supplier, render a qualification verdict.
 

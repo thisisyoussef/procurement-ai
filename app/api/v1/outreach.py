@@ -203,7 +203,7 @@ async def _send_and_track_email(
         body_html=body_html,
         cc=cc,
         reply_to=settings.from_email,
-        headers={"X-Tamkin-Project-ID": str(project.get("id", ""))},
+        headers={"X-Procurement-Project-ID": str(project.get("id", ""))},
     )
 
     if result.get("sent"):

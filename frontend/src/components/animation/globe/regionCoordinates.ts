@@ -114,5 +114,5 @@ export function resolveRegion(name: string): RegionPoint | null {
   return null
 }
 
-/** Center point on the SVG — "Tamkin HQ" origin for arcs */
+/** Center point on the SVG — "Procurement AI HQ" origin for arcs */
 export const CENTER_POINT = { x: 400, y: 200 }

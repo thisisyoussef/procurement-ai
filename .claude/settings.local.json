@@ -20,7 +20,21 @@
       "Bash(git pull:*)",
       "Bash(alembic upgrade:*)",
       "Bash(PYTHONPATH=. alembic upgrade:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "Bash(npx next lint:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx next build:*)",
+      "Bash(npm run:*)",
+      "WebFetch(domain:docs.browserbase.com)",
+      "WebFetch(domain:browserbase.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(npm install:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(python3:*)",
+      "Bash(manufacturer\" or \"clothing factory\" failed the anchor match because it\n   didn''t literally contain \"hoodie\". Added synonym expansion map so related\n   terms \\(clothing, apparel, garment, sweatshirt, knitwear, etc.\\) count as\n   matches.\n\n3. **Retail filter + unrescuable backfill** — suppliers scored <50 with\n   any retail indicator \\(\"online shop\", \"boutique\"\\) were filtered as\n   \"retail_store\", and the backfill promotion explicitly refused to rescue\n   \"retail_store\" or \"wrong_product_type\" suppliers. Now:\n   - Retail filtering is skipped entirely for consumer products\n   - Relevance floor lowered from 35→25 for consumer products\n   - Backfill enters \"desperate mode\" when zero suppliers survive,\n     relaxing promotion rules to rescue filtered candidates\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(find:*)",
+      "Bash(pip show:*)",
+      "WebFetch(domain:frontend-production-9cd3.up.railway.app)"
     ]
   }
 }

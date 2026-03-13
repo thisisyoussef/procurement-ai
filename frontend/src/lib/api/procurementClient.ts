@@ -5,7 +5,7 @@ import type {
   IntakeStartResponse,
   LeadCreateRequest,
   LeadCreateResponse,
-} from '@/lib/contracts/tamkin'
+} from '@/lib/contracts/procurement'
 import { authFetch } from '@/lib/auth'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
@@ -31,7 +31,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T
 }
 
-export const tamkinClient = {
+export const procurementClient = {
   startIntake(body: IntakeStartRequest) {
     return postJson<IntakeStartResponse>('/api/v1/intake/start', body)
   },

@@ -17,7 +17,7 @@ from automotive.schemas.requirements import ParsedRequirement
 logger = logging.getLogger(__name__)
 
 COMPARISON_SYSTEM_PROMPT = """\
-You are Tamkin's Comparison Engine for automotive procurement.
+You are Procurement AI's Comparison Engine for automotive procurement.
 
 Given a list of qualified suppliers and the procurement requirement, produce
 a comprehensive comparison matrix. For each supplier, score on these dimensions

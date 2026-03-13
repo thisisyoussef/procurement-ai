@@ -4,14 +4,14 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
-import { tamkinClient } from '@/lib/api/tamkinClient'
+import { procurementClient } from '@/lib/api/procurementClient'
 import { featureFlags } from '@/lib/featureFlags'
 import { trackTraceEvent } from '@/lib/telemetry'
 import { m, AnimatePresence } from '@/lib/motion'
 import { fadeUp, staggerContainer, cardEntrance } from '@/lib/motion/variants'
 import { useScrollTimeline } from '@/lib/motion/useScrollTimeline'
 
-import './tamkin-landing.css'
+import './procurement-landing.css'
 
 type ConvoBlock =
   | { kind: 'message'; role: 'u' | 'a'; text: string }
@@ -146,7 +146,7 @@ export default function HomePage() {
   const demoStartedRef = useRef(false)
 
   useEffect(() => {
-    if (featureFlags.tamkinLandingBypass) {
+    if (featureFlags.procurementLandingBypass) {
       trackTraceEvent('landing_bypass_redirect', { to: '/product' })
       router.replace('/product')
     }
@@ -301,7 +301,7 @@ export default function HomePage() {
     }
   })
 
-  if (featureFlags.tamkinLandingBypass) return null
+  if (featureFlags.procurementLandingBypass) return null
 
   const track = async (eventName: string, payload: Record<string, unknown> = {}) => {
     trackTraceEvent(eventName, payload, { path: '/' })
@@ -318,7 +318,7 @@ export default function HomePage() {
     await track('early_access_submit_attempt', { has_note: Boolean(leadNote.trim()) })
 
     try {
-      const result = await tamkinClient.submitLead({
+      const result = await procurementClient.submitLead({
         email: leadEmail,
         sourcing_note: leadNote.trim() || undefined,
         source: 'landing_early_access',
@@ -345,7 +345,7 @@ export default function HomePage() {
   return (
     <>
       <nav className="nav">
-        <a href="#" className="nav-word">tamkin</a>
+        <a href="#" className="nav-word">procurement ai</a>
         <div className="nav-links">
           <a href="#how">How It Works</a>
           <a href="#cases">Use Cases</a>
@@ -363,7 +363,7 @@ export default function HomePage() {
       </nav>
 
       <section className="hero">
-        <div className="hero-arabic">تمكين</div>
+        <div className="hero-mark">PROCUREMENT AI</div>
 
         {/* ── Hero decorations ── */}
         <svg className="deco deco-hex" width="120" height="120" viewBox="0 0 120 120" fill="none" aria-hidden>
@@ -392,7 +392,7 @@ export default function HomePage() {
         <div className="hero-foot">
           <div>
             <p>
-              Tamkin finds manufacturers around the world, verifies them, gets real quotes, and manages everything - from first search to first order.
+              Procurement AI finds manufacturers around the world, verifies them, gets real quotes, and manages everything - from first search to first order.
             </p>
             <div className="hero-ctas">
               <Link
@@ -424,7 +424,7 @@ export default function HomePage() {
             <div className="scene-tag">See it in action</div>
             <h2>Like having the world&apos;s best sourcing agent on call.</h2>
             <p>
-              Describe what you need in plain language. Tamkin searches global databases, verifies every match,
+              Describe what you need in plain language. Procurement AI searches global databases, verifies every match,
               reaches out for real quotes, and brings you options you can act on - in minutes.
             </p>
             <div className="scene-nums">
@@ -440,7 +440,7 @@ export default function HomePage() {
                 <div className="convo-placeholder-icon">
                   <AgentAvatar />
                 </div>
-                <p>Watch Tamkin work...</p>
+                <p>Watch Procurement AI work...</p>
               </div>
             )}
 
@@ -510,9 +510,9 @@ export default function HomePage() {
 
       <section className="manifesto rv">
         <blockquote>
-          The people who need sourcing tools the most have never heard the word <em>procurement</em>. We built Tamkin for them.
+          The people who need sourcing tools the most have never heard the word <em>procurement</em>. We built Procurement AI for them.
         </blockquote>
-        <cite>The idea behind Tamkin</cite>
+        <cite>The idea behind Procurement AI</cite>
       </section>
 
       <section className="steps-section" id="steps">
@@ -526,7 +526,7 @@ export default function HomePage() {
         <div className="steps-header rv">
           <h2>Four steps.<br />Zero friction.</h2>
           <p>
-            No sign-ups, no forms, no implementation. You talk to Tamkin like a person. It does the work of an entire sourcing team.
+            No sign-ups, no forms, no implementation. You talk to Procurement AI like a person. It does the work of an entire sourcing team.
           </p>
         </div>
 
@@ -535,7 +535,7 @@ export default function HomePage() {
           <div>
             <h3>Describe what you need</h3>
             <p>
-              "I need 500 custom hoodies with embroidered logos" is enough. Tamkin asks smart follow-ups to nail the details - fabric, colors, budget, timeline.
+              "I need 500 custom hoodies with embroidered logos" is enough. Procurement AI asks smart follow-ups to nail the details - fabric, colors, budget, timeline.
             </p>
           </div>
           <div className="step-details">
@@ -550,7 +550,7 @@ export default function HomePage() {
           <div>
             <h3>We search the world</h3>
             <p>
-              Tamkin scans thousands of manufacturers globally, filters by your exact needs, and verifies every match with real business data - before you see a single result.
+              Procurement AI scans thousands of manufacturers globally, filters by your exact needs, and verifies every match with real business data - before you see a single result.
             </p>
           </div>
           <div className="step-details">
@@ -565,7 +565,7 @@ export default function HomePage() {
           <div>
             <h3>We reach out and get quotes</h3>
             <p>
-              No cold emails that go nowhere. Tamkin contacts the best matches, follows up, gets detailed pricing, and brings everything back to you - automatically.
+              No cold emails that go nowhere. Procurement AI contacts the best matches, follows up, gets detailed pricing, and brings everything back to you - automatically.
             </p>
           </div>
           <div className="step-details">
@@ -580,7 +580,7 @@ export default function HomePage() {
           <div>
             <h3>You pick. We go.</h3>
             <p>
-              Compare verified manufacturers side by side with Tamkin&apos;s recommendation. Request samples or start your order - from the same conversation.
+              Compare verified manufacturers side by side with Procurement AI&apos;s recommendation. Request samples or start your order - from the same conversation.
             </p>
           </div>
           <div className="step-details">
@@ -596,17 +596,17 @@ export default function HomePage() {
           <div className="dark-header rv">
             <div>
               <div className="scene-tag" style={{ color: 'var(--accent)' }}>Before &amp; After</div>
-              <h2>Twenty hours of work.<br />Four minutes with Tamkin.</h2>
+              <h2>Twenty hours of work.<br />Four minutes with Procurement AI.</h2>
             </div>
             <p>
               The average small business spends 20+ hours on every sourcing project. Most of it is searching,
-              emailing, waiting, and hoping. Tamkin replaces all of it.
+              emailing, waiting, and hoping. Procurement AI replaces all of it.
             </p>
           </div>
 
           <div className="tl rv">
             <div className="tl-side">
-              <div className="tl-label">Without Tamkin</div>
+              <div className="tl-label">Without Procurement AI</div>
               <div className="tl-i"><span className="tl-ic">✕</span> Hours Googling "custom hoodie manufacturer"</div>
               <div className="tl-i"><span className="tl-ic">✕</span> Scrolling Alibaba hoping the reviews are real</div>
               <div className="tl-i"><span className="tl-ic">✕</span> Cold emails that get ignored for weeks</div>
@@ -616,7 +616,7 @@ export default function HomePage() {
             </div>
 
             <div className="tl-side">
-              <div className="tl-label">With Tamkin</div>
+              <div className="tl-label">With Procurement AI</div>
               <div className="tl-i"><span className="tl-ic">✓</span> Searches 12,000+ manufacturers instantly</div>
               <div className="tl-i"><span className="tl-ic">✓</span> Every match verified with real business data</div>
               <div className="tl-i"><span className="tl-ic">✓</span> Reaches out and follows up automatically</div>
@@ -732,7 +732,7 @@ export default function HomePage() {
           <a href="#">Twitter</a>
           <a href="#">LinkedIn</a>
         </div>
-        <div className="far">تمكين</div>
+        <div className="far">PROCUREMENT AI</div>
       </footer>
     </>
   )

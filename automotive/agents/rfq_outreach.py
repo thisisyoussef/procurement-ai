@@ -28,7 +28,7 @@ from automotive.schemas.rfq import (
 logger = logging.getLogger(__name__)
 
 RFQ_SYSTEM_PROMPT = """\
-You are Tamkin's RFQ Writer for automotive procurement.
+You are Procurement AI's RFQ Writer for automotive procurement.
 
 Generate a professional, concise RFQ email that:
 1. Opens with the buyer's company name and a brief context

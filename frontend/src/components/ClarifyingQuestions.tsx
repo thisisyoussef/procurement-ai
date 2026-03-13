@@ -164,7 +164,7 @@ export default function ClarifyingQuestions({
                   </span>
                 </div>
 
-                {featureFlags.tamkinFocusCircleSearchV1 &&
+                {featureFlags.procurementFocusCircleSearchV1 &&
                 (q.why_this_question || q.if_skipped_impact || q.suggested_default) && (
                   <div className="mb-3 space-y-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                     {q.why_this_question ? (
@@ -241,7 +241,7 @@ export default function ClarifyingQuestions({
             >
               Skip all &rarr;
             </button>
-            {featureFlags.tamkinFocusCircleSearchV1 ? (
+            {featureFlags.procurementFocusCircleSearchV1 ? (
               <p className="text-[10px] text-slate-500 mt-1">
                 Skipping is allowed, but recommendation confidence may be lower.
               </p>

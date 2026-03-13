@@ -18,7 +18,7 @@ const manrope = Manrope({
 })
 
 export const metadata: Metadata = {
-  title: 'Tamkin — Tell us what you need made',
+  title: 'Procurement AI — Tell us what you need made',
   description: 'Find the right people to make your stuff. Manage them like a pro.',
 }
 

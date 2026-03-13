@@ -272,7 +272,7 @@ def build_rfq_html(body: str) -> str:
             <!-- Footer -->
             <div style="padding: 14px 28px; border-top: 1px solid #eee;">
                 <p style="margin: 0; color: #aaa; font-size: 11px;">
-                    Sent via Tamkin
+                    Sent via Procurement AI
                 </p>
             </div>
         </div>

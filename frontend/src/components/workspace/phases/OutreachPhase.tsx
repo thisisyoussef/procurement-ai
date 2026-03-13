@@ -535,7 +535,7 @@ export default function OutreachPhase() {
       <div>
         <h2 className="font-heading text-2xl text-ink mb-1">Outreach approval</h2>
         <p className="text-[12px] text-ink-3">
-          One decision only. Tamkin drafts and sends outreach to top manufacturers automatically.
+          One decision only. Procurement AI drafts and sends outreach to top manufacturers automatically.
         </p>
       </div>
 
@@ -642,7 +642,7 @@ export default function OutreachPhase() {
           >
             {actionLoading === 'restart_context' ? 'Restarting…' : 'Restart with context'}
           </button>
-          <p className="text-[10px] text-ink-4">Tamkin will restart parsing and supplier search.</p>
+          <p className="text-[10px] text-ink-4">Procurement AI will restart parsing and supplier search.</p>
         </div>
       </div>
 

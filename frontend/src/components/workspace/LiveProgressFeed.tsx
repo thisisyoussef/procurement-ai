@@ -106,7 +106,7 @@ export default function LiveProgressFeed() {
   }, [events, latest?.timestamp, stage])
 
   const currentStageIdx = stageIndex(stage)
-  const focusCircleEnabled = featureFlags.tamkinFocusCircleSearchV1
+  const focusCircleEnabled = featureFlags.procurementFocusCircleSearchV1
   const stageElapsedSec = stageStartedAt
     ? Math.max(0, Date.now() / 1000 - stageStartedAt)
     : 0

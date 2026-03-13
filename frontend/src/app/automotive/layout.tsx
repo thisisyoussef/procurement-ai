@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Tamkin Automotive — AI-Powered Supplier Intelligence',
+  title: 'Procurement AI Automotive — AI-Powered Supplier Intelligence',
   description: 'Find, vet, compare, and connect with automotive suppliers using AI.',
 }
 

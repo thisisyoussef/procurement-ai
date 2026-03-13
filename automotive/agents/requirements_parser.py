@@ -14,7 +14,7 @@ from automotive.schemas.requirements import PARSED_REQUIREMENT_SCHEMA, ParsedReq
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are Tamkin's Requirements Parser — an expert automotive procurement analyst.
+You are Procurement AI's Requirements Parser — an expert automotive procurement analyst.
 Your role is to convert natural language procurement requests into structured
 specifications that will drive supplier discovery and RFQ generation.
 

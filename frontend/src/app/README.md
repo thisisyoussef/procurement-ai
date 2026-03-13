@@ -4,7 +4,7 @@
 - `layout.tsx`: root document shell and metadata.
 - `page.tsx`: landing experience.
 - `product/page.tsx`: product workspace route.
-- `globals.css`, `tamkin-landing.css`: global and landing-specific styles.
+- `globals.css`, `procurement-landing.css`: global and landing-specific styles.
 
 ## Refactor Guidance
 - Keep route-level files thin; move reusable logic to components/hooks.

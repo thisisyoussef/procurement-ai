@@ -144,7 +144,7 @@ export default function ComparePhase() {
   const persistedLanePreference = status?.decision_preference
 
   useEffect(() => {
-    if (!featureFlags.tamkinFocusCircleSearchV1) return
+    if (!featureFlags.procurementFocusCircleSearchV1) return
     if (!persistedLanePreference) return
     if (!PRIMARY_LANES.includes(persistedLanePreference as Exclude<DecisionLane, 'alternative'>)) return
     const persisted = persistedLanePreference as Exclude<DecisionLane, 'alternative'>
@@ -180,7 +180,7 @@ export default function ComparePhase() {
   const recommendationDefaults = useMemo(() => {
     const recommendations = recommendation?.recommendations || []
     const orderedRecommendations =
-      featureFlags.tamkinFocusCircleSearchV1
+      featureFlags.procurementFocusCircleSearchV1
         ? [
             ...recommendations.filter((rec: any) => rec?.lane === selectedLane),
             ...recommendations.filter((rec: any) => rec?.lane !== selectedLane),
@@ -195,7 +195,7 @@ export default function ComparePhase() {
   useEffect(() => {
     if (!recommendationDefaults.length) return
     setSelectedSupplierIndices((prev) => {
-      if (!featureFlags.tamkinFocusCircleSearchV1 && prev.length > 0) return prev
+      if (!featureFlags.procurementFocusCircleSearchV1 && prev.length > 0) return prev
       if (arraysEqual(prev, recommendationDefaults)) return prev
       return recommendationDefaults
     })
@@ -225,7 +225,7 @@ export default function ComparePhase() {
 
   const handleLaneSelection = useCallback(
     async (lane: Exclude<DecisionLane, 'alternative'>) => {
-      if (!featureFlags.tamkinFocusCircleSearchV1) return
+      if (!featureFlags.procurementFocusCircleSearchV1) return
       setSelectedLane(lane)
       if (!projectId) return
 
@@ -345,12 +345,12 @@ export default function ComparePhase() {
 
     return selectedSuppliers.map((row) => {
       const supplierName = row.supplier?.name || `Supplier ${row.idx + 1}`
-      return `Tamkin will ask ${supplierName} for a quote on ${product}, around ${quantity}, within ${budget}, delivered to ${location} by ${deadline}. It will request MOQ, unit price, lead time, and sample readiness.`
+      return `Procurement AI will ask ${supplierName} for a quote on ${product}, around ${quantity}, within ${budget}, delivered to ${location} by ${deadline}. It will request MOQ, unit price, lead time, and sample readiness.`
     })
   }, [requirements, selectedSuppliers])
 
   const missingPrimaryLanes = useMemo(() => {
-    if (!featureFlags.tamkinFocusCircleSearchV1 || !recommendation?.lane_coverage) return []
+    if (!featureFlags.procurementFocusCircleSearchV1 || !recommendation?.lane_coverage) return []
     return PRIMARY_LANES.filter((lane) => (recommendation.lane_coverage?.[lane] || 0) < 1)
   }, [recommendation?.lane_coverage])
 
@@ -417,7 +417,7 @@ export default function ComparePhase() {
           <div>
             <h2 className="font-heading text-2xl text-ink mb-1">Approve outreach shortlist</h2>
             <p className="text-[12px] text-ink-3">
-              Pick who Tamkin should contact next. You can add suppliers before outreach starts.
+              Pick who Procurement AI should contact next. You can add suppliers before outreach starts.
             </p>
           </div>
 
@@ -668,7 +668,7 @@ export default function ComparePhase() {
         <div>
           <h2 className="font-heading text-2xl text-ink mb-4">Recommendation</h2>
 
-          {featureFlags.tamkinFocusCircleSearchV1 && (
+          {featureFlags.procurementFocusCircleSearchV1 && (
             <div className="card p-5 mb-5 space-y-4">
               <div>
                 <p className="text-[10px] font-semibold tracking-[1.2px] uppercase text-ink-4">
@@ -699,7 +699,7 @@ export default function ComparePhase() {
             </div>
           )}
 
-          {featureFlags.tamkinFocusCircleSearchV1 &&
+          {featureFlags.procurementFocusCircleSearchV1 &&
           (recommendation.elimination_rationale || missingPrimaryLanes.length > 0) ? (
             <div className="mb-5 rounded-xl border border-warm/40 bg-warm/10 px-4 py-3">
               <p className="text-[11px] font-medium text-ink-2 mb-1">Why fewer options are shown</p>
@@ -766,7 +766,7 @@ export default function ComparePhase() {
                     {rec.reasoning}
                   </p>
 
-                  {featureFlags.tamkinFocusCircleSearchV1 &&
+                  {featureFlags.procurementFocusCircleSearchV1 &&
                   rec.needs_manual_verification &&
                   !dismissedManualVerification[rec.supplier_index] ? (
                     <div className="mt-3 inline-flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5">
@@ -810,7 +810,7 @@ export default function ComparePhase() {
                     </div>
                   )}
 
-                  {featureFlags.tamkinFocusCircleSearchV1 ? (
+                  {featureFlags.procurementFocusCircleSearchV1 ? (
                     <div className="mt-3 rounded-lg border border-surface-3 bg-surface-2/30 px-3 py-3">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-[10px] font-semibold uppercase tracking-[1px] text-ink-4">

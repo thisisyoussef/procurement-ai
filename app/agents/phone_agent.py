@@ -30,7 +30,7 @@ async def create_call_script(
     supplier_name: str,
     requirements: ParsedRequirements,
     custom_questions: list[str] | None = None,
-    company_name: str = "Tamkin",
+    company_name: str = "Procurement AI",
 ) -> str:
     """Generate a customized phone conversation script for a specific supplier.
 
@@ -112,7 +112,7 @@ async def initiate_supplier_call(
 
     # Create a Retell agent for this call
     agent_result = await phone_service.create_agent(
-        name=f"Tamkin — {supplier_name}",
+        name=f"Procurement AI — {supplier_name}",
         prompt=script,
         voice_id=voice_id,
         max_call_duration_seconds=max_duration,

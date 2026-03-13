@@ -26,7 +26,7 @@ def test_root():
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert data["app"] == "Tamkin"
+    assert data["app"] == "Procurement AI"
     assert data["status"] == "running"
 
 

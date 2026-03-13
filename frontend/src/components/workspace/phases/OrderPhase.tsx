@@ -81,7 +81,7 @@ export default function OrderPhase() {
       <div className="card px-6 py-5">
         <h2 className="font-heading text-2xl text-ink">Order & Retrospective</h2>
         <p className="mt-2 text-[13px] text-ink-3">
-          Capture outcome feedback so Tamkin can learn your preferences and supplier reliability patterns.
+          Capture outcome feedback so Procurement AI can learn your preferences and supplier reliability patterns.
         </p>
 
         {submitted ? (

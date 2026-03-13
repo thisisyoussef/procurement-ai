@@ -63,7 +63,7 @@ export default function AutomotiveDashboard() {
       <div className="flex items-center justify-between mb-12">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            <span className="text-amber-400">Tamkin</span> Automotive
+            <span className="text-amber-400">Procurement AI</span> Automotive
           </h1>
           <p className="text-zinc-400 mt-1">
             AI-Powered Supplier Intelligence for the Automotive Supply Chain
@@ -96,7 +96,7 @@ export default function AutomotiveDashboard() {
           </button>
         </div>
         <p className="text-zinc-400 text-sm mb-6">
-          Describe what you need — or generate an example to see how Tamkin works.
+          Describe what you need — or generate an example to see how Procurement AI works.
         </p>
 
         <textarea

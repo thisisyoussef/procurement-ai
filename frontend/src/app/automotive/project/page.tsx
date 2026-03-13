@@ -166,7 +166,7 @@ function ProjectContent() {
             ← Back to Dashboard
           </button>
           <h1 className="text-xl font-bold">
-            <span className="text-amber-400">Tamkin</span> Automotive
+            <span className="text-amber-400">Procurement AI</span> Automotive
           </h1>
         </div>
         <div className="text-right">

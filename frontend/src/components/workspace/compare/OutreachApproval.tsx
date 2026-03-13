@@ -45,7 +45,7 @@ export default function OutreachApproval({
         <div>
           <h2 className="font-heading text-2xl text-ink">Ready to reach out</h2>
           <p className="mt-1 text-[12px] text-ink-3">
-            Confirm suppliers and message intent before Tamkin sends outreach.
+            Confirm suppliers and message intent before Procurement AI sends outreach.
           </p>
         </div>
 

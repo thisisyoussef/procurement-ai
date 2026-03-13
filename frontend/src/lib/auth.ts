@@ -2,8 +2,8 @@
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
-export const AUTH_TOKEN_KEY = 'tamkin_access_token'
-export const AUTH_USER_KEY = 'tamkin_auth_user'
+export const AUTH_TOKEN_KEY = 'procurement_access_token'
+export const AUTH_USER_KEY = 'procurement_auth_user'
 
 export interface AuthUser {
   id: string

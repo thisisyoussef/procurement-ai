@@ -1,4 +1,4 @@
-"""Tests for Tamkin intake, lead capture, and first-party telemetry endpoints."""
+"""Tests for Procurement AI intake, lead capture, and first-party telemetry endpoints."""
 
 from unittest.mock import AsyncMock, patch
 

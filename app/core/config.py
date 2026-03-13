@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
-    app_title: str = "Tamkin"
+    app_title: str = "Procurement AI"
     app_version: str = "0.1.0"
     frontend_url: str = "http://localhost:3000"
     cors_allow_origins: str = ""

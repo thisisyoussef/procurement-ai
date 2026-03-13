@@ -237,7 +237,7 @@ function DashboardPageContent() {
           <div className="w-10 h-10 rounded-xl bg-teal text-white mx-auto flex items-center justify-center font-body font-extrabold text-lg">
             T
           </div>
-          <h1 className="text-2xl font-heading text-ink">Sign in to Tamkin</h1>
+          <h1 className="text-2xl font-heading text-ink">Sign in to Procurement AI</h1>
           <p className="text-sm text-ink-3">Open your dashboard and track all sourcing projects in one place.</p>
           <div className="pt-1 flex justify-center">
             <GoogleSignIn onAuthenticated={setAuthUser} />
@@ -297,7 +297,7 @@ function DashboardPageContent() {
             <em>.</em>
           </h1>
           <p className="dash-greeting-body">
-            {greeting?.body || 'Tamkin is running your sourcing pipeline and outreach in the background.'}
+            {greeting?.body || 'Procurement AI is running your sourcing pipeline and outreach in the background.'}
           </p>
         </div>
 
@@ -434,7 +434,7 @@ function DashboardPageContent() {
                 <div className="dash-proj-empty-inner">
                   <div className="dash-proj-empty-icon">+</div>
                   <div className="dash-proj-empty-t">Start a new project</div>
-                  <div className="dash-proj-empty-s">Tell Tamkin what you need made and it handles the rest.</div>
+                  <div className="dash-proj-empty-s">Tell Procurement AI what you need made and it handles the rest.</div>
                 </div>
               </m.button>
             </m.div>

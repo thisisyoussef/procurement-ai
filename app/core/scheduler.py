@@ -365,7 +365,7 @@ class OutreachScheduler:
                     body_html=build_rfq_html(draft.body),
                     cc=[owner_email] if owner_email else [],
                     reply_to=settings.from_email,
-                    headers={"X-Tamkin-Project-ID": project_id},
+                    headers={"X-Procurement-Project-ID": project_id},
                 )
 
                 if result.get("sent"):
@@ -549,7 +549,7 @@ class OutreachScheduler:
                         body_html=build_rfq_html(fu.body),
                         cc=[owner_email] if owner_email else [],
                         reply_to=settings.from_email,
-                        headers={"X-Tamkin-Project-ID": project_id},
+                        headers={"X-Procurement-Project-ID": project_id},
                     )
 
                     if send_result.get("sent"):

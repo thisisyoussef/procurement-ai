@@ -1,4 +1,4 @@
-# Tamkin Backend — Comprehensive Documentation
+# Procurement AI Backend — Comprehensive Documentation
 
 > **Audience**: AI agents, developers, and automated tools navigating this codebase.
 > **Last updated**: 2026-02-13
@@ -35,7 +35,7 @@ SECTION 19 — IMPORT DEPENDENCY GRAPH
 
 ### What This System Does
 
-Tamkin is an AI-powered procurement system for small businesses. A user describes what they need in natural language, and the system:
+Procurement AI is an AI-powered procurement system for small businesses. A user describes what they need in natural language, and the system:
 
 1. Parses requirements into structured specs
 2. Discovers suppliers across multiple global sources
@@ -272,7 +272,7 @@ Uses `pydantic-settings` to load configuration from environment variables and `.
 |-------|------|---------|---------|
 | `app_env` | str | "development" | Environment (development/production) |
 | `app_secret_key` | str | "change-me..." | JWT signing secret |
-| `app_title` | str | "Tamkin" | Application title |
+| `app_title` | str | "Procurement AI" | Application title |
 | `app_version` | str | "0.1.0" | API version |
 | `frontend_url` | str | "http://localhost:3000" | Frontend URL for CORS |
 | `project_store_backend` | str | "database" | "database" or "inmemory" |

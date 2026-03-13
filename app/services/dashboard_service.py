@@ -446,7 +446,7 @@ async def get_dashboard_summary_for_user(
         headline=f"Good {daytime}, {first}",
         body=(
             f"You have {active_projects} active project{'s' if active_projects != 1 else ''}. "
-            "Tamkin is handling supplier discovery, comparisons, and outreach updates in the background."
+            "Procurement AI is handling supplier discovery, comparisons, and outreach updates in the background."
         ),
     )
 
