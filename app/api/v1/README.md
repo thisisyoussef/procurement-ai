@@ -24,3 +24,4 @@
   (example: `?status=parsing&status=discovering`) and returns only matching statuses.
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
+- `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.

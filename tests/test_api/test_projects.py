@@ -57,6 +57,23 @@ def test_create_project():
     assert isinstance(created.get("updated_at"), str)
 
 
+def test_create_project_strips_surrounding_whitespace():
+    _projects.clear()
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "title": "   Trimmed Title   ",
+            "product_description": "   Need 500 custom canvas tote bags for my brand   ",
+        },
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    project_id = response.json()["project_id"]
+    created = _projects[project_id]
+    assert created["title"] == "Trimmed Title"
+    assert created["product_description"] == "Need 500 custom canvas tote bags for my brand"
+
+
 def test_create_project_requires_auth():
     response = client.post(
         "/api/v1/projects",
@@ -79,6 +96,30 @@ def test_create_project_validation():
         headers=_auth_headers(),
     )
     assert response.status_code == 422  # Validation error
+
+
+def test_create_project_rejects_whitespace_only_title():
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "title": "   ",
+            "product_description": "I need 500 custom canvas tote bags for my brand",
+        },
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 422
+
+
+def test_create_project_rejects_whitespace_only_description():
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "title": "Test",
+            "product_description": "           ",
+        },
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 422
 
 
 def test_get_nonexistent_project():
