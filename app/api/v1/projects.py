@@ -891,6 +891,7 @@ async def get_project_status(
         clarifying_questions=project.get("clarifying_questions"),
         decision_preference=project.get("decision_preference"),
         buyer_context=project.get("buyer_context"),
+        retrospective=project.get("retrospective"),
         active_checkpoint=project.get("active_checkpoint"),
         proactive_alerts=project.get("proactive_alerts", []),
     )

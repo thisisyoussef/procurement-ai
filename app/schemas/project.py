@@ -65,6 +65,7 @@ class PipelineStatusResponse(BaseModel):
     clarifying_questions: list[dict] | None = None
     decision_preference: str | None = None
     buyer_context: dict[str, Any] | None = None
+    retrospective: dict[str, Any] | None = None
     active_checkpoint: CheckpointEvent | None = None
     proactive_alerts: list[dict] = Field(default_factory=list)
 

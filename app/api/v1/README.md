@@ -21,3 +21,4 @@
   - Then by most recent `updated_at`
   - Then by `created_at` when needed as fallback
 - Project list items include optional `created_at` and `updated_at` timestamps.
+- `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).

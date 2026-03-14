@@ -409,3 +409,120 @@ def test_set_decision_preference_endpoint_auth_ownership_and_validation():
         headers=_auth_headers(),
     )
     assert invalid_response.status_code == 422
+
+
+def test_get_status_returns_null_retrospective_when_not_recorded():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000120"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "No Retrospective Yet",
+        "product_description": "Need forged steel flange supplier",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["retrospective"] is None
+
+
+def test_submit_retrospective_is_visible_in_status():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000121"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Retrospective Persistence",
+        "product_description": "Need precision molded plastic housings",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    payload = {
+        "supplier_chosen": "Acme Plastics",
+        "overall_satisfaction": 5,
+        "communication_rating": 4,
+        "pricing_accuracy": "as_expected",
+        "what_went_well": "Fast DFM turnaround",
+        "what_went_wrong": "Minor packaging issue",
+    }
+    submit_response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json=payload,
+        headers=_auth_headers(),
+    )
+    assert submit_response.status_code == 200
+    assert submit_response.json()["status"] == "recorded"
+
+    status_response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert status_response.status_code == 200
+    retrospective = status_response.json()["retrospective"]
+    assert retrospective is not None
+    assert retrospective["supplier_chosen"] == "Acme Plastics"
+    assert retrospective["overall_satisfaction"] == 5
+    assert retrospective["communication_rating"] == 4
+    assert retrospective["pricing_accuracy"] == "as_expected"
+
+
+def test_status_retrospective_hidden_from_other_users():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000122"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Retrospective Ownership",
+        "product_description": "Need cable harness supplier",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": {"supplier_chosen": "Owner-only Supplier"},
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    forbidden = client.get(
+        f"/api/v1/projects/{project_id}/status",
+        headers=_auth_headers("00000000-0000-0000-0000-000000000099"),
+    )
+    assert forbidden.status_code == 403
