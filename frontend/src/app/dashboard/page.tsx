@@ -12,7 +12,6 @@ import { m } from '@/lib/motion'
 import { staggerContainer, cardEntrance, fadeUp, slideInLeft } from '@/lib/motion/variants'
 import {
   AuthUser,
-  authFetch,
   clearAuthSession,
   fetchCurrentUser,
   getStoredAccessToken,
@@ -178,8 +177,6 @@ function DashboardPageContent() {
     router.push('/product?new=1')
   }
 
-  const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
-
   const handleSearchSubmit = async () => {
     const trimmed = searchInput.trim()
     if (!trimmed || searchSubmitting) return
@@ -189,35 +186,20 @@ function DashboardPageContent() {
     trackTraceEvent('dashboard_search_submit', { description_length: trimmed.length }, { path: '/dashboard' })
 
     try {
-      const res = await authFetch(`${API_BASE}/api/v1/projects`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: trimmed.slice(0, 80),
-          product_description: trimmed,
-        }),
+      const data = await dashboardClient.startProject({
+        title: trimmed.slice(0, 80),
+        description: trimmed,
+        source: 'dashboard_search',
       })
-
-      if (res.status === 401) {
+      trackTraceEvent('dashboard_search_started', { project_id: data.project_id }, { path: '/dashboard' })
+      router.push(data.redirect_path || `/product?projectId=${data.project_id}`)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      if (detail === 'Not authenticated' || detail.startsWith('HTTP 401')) {
         clearAuthSession()
         setAuthUser(null)
         return
       }
-
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`
-        try {
-          const payload = (await res.json()) as { detail?: string }
-          detail = payload.detail || detail
-        } catch { /* keep */ }
-        throw new Error(detail)
-      }
-
-      const data = (await res.json()) as { project_id: string }
-      trackTraceEvent('dashboard_search_started', { project_id: data.project_id }, { path: '/dashboard' })
-      router.push(`/product?projectId=${data.project_id}`)
-    } catch (err: any) {
-      const detail = err?.message || 'Could not start project. Try again.'
       setSearchError(detail)
       setSearchSubmitting(false)
     }
