@@ -189,6 +189,98 @@ def test_list_projects_uses_created_at_fallback_when_updated_at_missing():
     assert [project["id"] for project in payload] == ["project-newer-created", "project-older-created"]
 
 
+def test_list_projects_filters_by_single_status():
+    _projects.clear()
+
+    _projects["active-parsing"] = {
+        "id": "active-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active Parsing",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "created_at": "2026-03-10T12:00:00+00:00",
+        "updated_at": "2026-03-10T12:00:00+00:00",
+    }
+    _projects["active-discovering"] = {
+        "id": "active-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active Discovering",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-11T12:00:00+00:00",
+    }
+    _projects["complete"] = {
+        "id": "complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects?status=parsing", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["active-parsing"]
+
+
+def test_list_projects_filters_by_multiple_statuses():
+    _projects.clear()
+
+    _projects["discovering"] = {
+        "id": "discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Discovering",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-10T12:00:00+00:00",
+        "updated_at": "2026-03-10T12:00:00+00:00",
+    }
+    _projects["complete"] = {
+        "id": "complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-11T12:00:00+00:00",
+    }
+    _projects["failed"] = {
+        "id": "failed",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Failed",
+        "status": "failed",
+        "current_stage": "failed",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+    }
+
+    response = client.get(
+        "/api/v1/projects?status=complete&status=failed",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["failed", "complete"]
+
+
+def test_list_projects_rejects_invalid_status_filter():
+    _projects.clear()
+    _projects["parsing"] = {
+        "id": "parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Parsing",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?status=not-real", headers=_auth_headers())
+    assert response.status_code == 422
+    assert "Invalid status filter value(s): not-real" in response.json()["detail"]
+
+
 def test_cancel_project():
     """Test canceling an in-progress project."""
     create_response = client.post(

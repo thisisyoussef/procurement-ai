@@ -12,7 +12,7 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.agents.orchestrator import (
@@ -85,6 +85,7 @@ ACTIVE_PIPELINE_STATUSES = {
     "recommending",
     "outreaching",
 }
+LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled"}
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
 DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
@@ -1378,6 +1379,13 @@ async def submit_retro(
 @router.get("")
 async def list_projects(
     current_user: AuthUser = Depends(get_current_auth_user),
+    status: list[str] | None = Query(
+        default=None,
+        description=(
+            "Optional project status filter. Repeat the parameter to include multiple values, "
+            "for example ?status=parsing&status=discovering."
+        ),
+    ),
 ):
     """List current user's projects with active work first, then recent activity."""
     store = get_project_store()
@@ -1405,7 +1413,26 @@ async def list_projects(
         created = _timestamp_sort_value(project, "created_at")
         return (is_active, updated, created)
 
+    normalized_statuses: set[str] | None = None
+    if status:
+        normalized_statuses = {value.strip().lower() for value in status if value.strip()}
+        invalid_statuses = sorted(normalized_statuses - LISTABLE_PROJECT_STATUSES)
+        if invalid_statuses:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Invalid status filter value(s): "
+                    + ", ".join(invalid_statuses)
+                    + ". Allowed values: "
+                    + ", ".join(sorted(LISTABLE_PROJECT_STATUSES))
+                ),
+            )
+
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
+    if normalized_statuses:
+        user_projects = [
+            project for project in user_projects if str(project.get("status") or "").lower() in normalized_statuses
+        ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
     return [
