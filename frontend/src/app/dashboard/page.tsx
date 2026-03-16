@@ -28,6 +28,60 @@ import { trackTraceEvent } from '@/lib/telemetry'
 import './dashboard.css'
 
 type TabKey = 'home' | 'projects' | 'contacts'
+type ProjectStatusFilter =
+  | 'parsing'
+  | 'clarifying'
+  | 'discovering'
+  | 'verifying'
+  | 'comparing'
+  | 'recommending'
+  | 'outreaching'
+  | 'complete'
+  | 'failed'
+  | 'canceled'
+
+type StatusPreset = 'all' | 'active' | 'complete' | 'failed'
+
+const ACTIVE_FILTER_STATUSES: ProjectStatusFilter[] = [
+  'parsing',
+  'clarifying',
+  'discovering',
+  'verifying',
+  'comparing',
+  'recommending',
+  'outreaching',
+]
+
+const ALL_STATUS_FILTERS = new Set<ProjectStatusFilter>([
+  ...ACTIVE_FILTER_STATUSES,
+  'complete',
+  'failed',
+  'canceled',
+])
+
+const STATUS_PRESETS: Array<{ key: StatusPreset; label: string; statuses: ProjectStatusFilter[] }> = [
+  { key: 'all', label: 'All', statuses: [] },
+  { key: 'active', label: 'Active', statuses: ACTIVE_FILTER_STATUSES },
+  { key: 'complete', label: 'Complete', statuses: ['complete'] },
+  { key: 'failed', label: 'Failed', statuses: ['failed'] },
+]
+
+function normalizeStatusFilters(values: string[]): ProjectStatusFilter[] {
+  const normalized: ProjectStatusFilter[] = []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const candidate = value.trim().toLowerCase() as ProjectStatusFilter
+    if (!ALL_STATUS_FILTERS.has(candidate) || seen.has(candidate)) continue
+    seen.add(candidate)
+    normalized.push(candidate)
+  }
+  return normalized
+}
+
+function isSameStatusSet(left: ProjectStatusFilter[], right: ProjectStatusFilter[]): boolean {
+  if (left.length !== right.length) return false
+  return left.every((value) => right.includes(value))
+}
 
 function statusClass(project: DashboardProjectCard): string {
   if (project.status === 'complete') return 'complete'
@@ -71,6 +125,7 @@ function DashboardPageContent() {
   const [contactsError, setContactsError] = useState<string | null>(null)
 
   const [tab, setTab] = useState<TabKey>('home')
+  const [selectedStatuses, setSelectedStatuses] = useState<ProjectStatusFilter[]>([])
 
   const [searchInput, setSearchInput] = useState('')
   const [searchSubmitting, setSearchSubmitting] = useState(false)
@@ -112,11 +167,15 @@ function DashboardPageContent() {
     setTab('home')
   }, [searchParams])
 
+  useEffect(() => {
+    setSelectedStatuses(normalizeStatusFilters(searchParams.getAll('status')))
+  }, [searchParams])
+
   const loadSummary = async () => {
     setSummaryLoading(true)
     setSummaryError(null)
     try {
-      const data = await dashboardClient.getSummary()
+      const data = await dashboardClient.getSummary(selectedStatuses)
       setSummary(data)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -147,7 +206,7 @@ function DashboardPageContent() {
       void loadSummary()
     }, 25000)
     return () => clearInterval(interval)
-  }, [authUser])
+  }, [authUser, selectedStatuses])
 
   useEffect(() => {
     if (!authUser || tab !== 'contacts') return
@@ -171,6 +230,19 @@ function DashboardPageContent() {
     router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
     trackTraceEvent('dashboard_tab_change', { tab: nextTab }, { path: '/dashboard' })
   }
+
+  const applyStatusPreset = (preset: StatusPreset) => {
+    const nextStatuses = STATUS_PRESETS.find((item) => item.key === preset)?.statuses ?? []
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('status')
+    for (const status of nextStatuses) params.append('status', status)
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
+    trackTraceEvent('dashboard_status_filter_change', { preset, statuses: nextStatuses }, { path: '/dashboard' })
+  }
+
+  const activeStatusPreset: StatusPreset =
+    STATUS_PRESETS.find((preset) => isSameStatusSet(selectedStatuses, preset.statuses))?.key ?? 'all'
 
   const goToNewProjectView = () => {
     trackTraceEvent('dashboard_new_project_view_open', {}, { path: '/dashboard' })
@@ -355,6 +427,18 @@ function DashboardPageContent() {
         {tab !== 'contacts' && (
           <div className="dash-projects">
             <div className="dash-section-label">Your projects</div>
+            <div className="dash-proj-filter-bar" role="group" aria-label="Filter projects by status">
+              {STATUS_PRESETS.map((preset) => (
+                <button
+                  type="button"
+                  key={preset.key}
+                  className={`dash-proj-filter ${activeStatusPreset === preset.key ? 'on' : ''}`}
+                  onClick={() => applyStatusPreset(preset.key)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
             <m.div
               className="dash-proj-grid"
               variants={staggerContainer}
@@ -420,6 +504,9 @@ function DashboardPageContent() {
                 </div>
               </m.button>
             </m.div>
+            {summary && summary.projects.length === 0 && (
+              <div className="dash-empty">No projects match this status filter yet.</div>
+            )}
           </div>
         )}
 

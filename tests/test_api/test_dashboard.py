@@ -84,3 +84,94 @@ def test_dashboard_start_project_rejects_short_description():
 
     assert response.status_code == 422
     assert get_legacy_project_dict() == {}
+
+
+def test_dashboard_summary_filters_projects_by_single_status():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-1"] = {
+        "id": "proj-dash-1",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Parsing project",
+        "product_description": "Need forged aluminum enclosures.",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-2"] = {
+        "id": "proj-dash-2",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Completed project",
+        "product_description": "Need stainless precision fittings.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=parsing", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-1"]
+    assert payload["projects"][0]["status"] == "parsing"
+
+
+def test_dashboard_summary_filters_projects_by_multiple_statuses():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-3"] = {
+        "id": "proj-dash-3",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Failed project",
+        "product_description": "Need molded caps.",
+        "status": "failed",
+        "current_stage": "failed",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-4"] = {
+        "id": "proj-dash-4",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Discovery project",
+        "product_description": "Need custom cartons.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-5"] = {
+        "id": "proj-dash-5",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete project",
+        "product_description": "Need custom sleeves.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?status=complete&status=failed",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    statuses = sorted(project["status"] for project in payload["projects"])
+    assert statuses == ["complete", "failed"]
+
+
+def test_dashboard_summary_rejects_invalid_status_filter():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-6"] = {
+        "id": "proj-dash-6",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Any project",
+        "product_description": "Need die-cut inserts.",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=not-real", headers=_auth_headers())
+    assert response.status_code == 422
+    assert "Invalid status filter value(s): not-real" in response.json()["detail"]

@@ -396,13 +396,21 @@ async def get_dashboard_summary_for_user(
     user_id: str,
     full_name: str | None,
     email: str | None,
+    project_statuses: set[str] | None = None,
 ) -> DashboardSummaryResponse:
     store = get_project_store()
     projects = await store.list_projects()
     user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
+    filtered_projects = user_projects
+    if project_statuses:
+        filtered_projects = [
+            project
+            for project in user_projects
+            if str(project.get("status") or "").strip().lower() in project_statuses
+        ]
 
-    project_cards = [_project_card(project) for project in user_projects]
-    attention = _attention_items(user_projects)
+    project_cards = [_project_card(project) for project in filtered_projects]
+    attention = _attention_items(filtered_projects)
     activity = await _db_activity_for_user(user_id=user_id, limit=20, cursor=None)
 
     if not activity:

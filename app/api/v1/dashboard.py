@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from app.api.v1.projects import _run_pipeline_task
+from app.api.v1.projects import LISTABLE_PROJECT_STATUSES, _run_pipeline_task
 from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.dashboard import (
     DashboardActivityResponse,
@@ -30,12 +30,37 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/summary", response_model=DashboardSummaryResponse)
-async def dashboard_summary(current_user: AuthUser = Depends(get_current_auth_user)):
+async def dashboard_summary(
+    status: list[str] | None = Query(
+        default=None,
+        description=(
+            "Optional project status filter for dashboard project cards. "
+            "Repeat parameter to include multiple statuses."
+        ),
+    ),
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    normalized_statuses: set[str] | None = None
+    if status:
+        normalized_statuses = {value.strip().lower() for value in status if value.strip()}
+        invalid_statuses = sorted(normalized_statuses - LISTABLE_PROJECT_STATUSES)
+        if invalid_statuses:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Invalid status filter value(s): "
+                    + ", ".join(invalid_statuses)
+                    + ". Allowed values: "
+                    + ", ".join(sorted(LISTABLE_PROJECT_STATUSES))
+                ),
+            )
+
     try:
         return await get_dashboard_summary_for_user(
             user_id=current_user.user_id,
             full_name=current_user.full_name,
             email=current_user.email,
+            project_statuses=normalized_statuses,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc

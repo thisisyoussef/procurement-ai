@@ -319,6 +319,36 @@
   margin-bottom: 56px;
 }
 
+.dash-proj-filter-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.dash-proj-filter {
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--text3);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+}
+
+.dash-proj-filter:hover {
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text2);
+}
+
+.dash-proj-filter.on {
+  border-color: rgba(0, 201, 167, 0.45);
+  background: rgba(0, 201, 167, 0.08);
+  color: #0d6f5f;
+}
+
 .dash-proj-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

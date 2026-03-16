@@ -24,8 +24,15 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
 }
 
 export const dashboardClient = {
-  async getSummary(): Promise<DashboardSummaryResponse> {
-    const res = await authFetch(`${API_BASE}/api/v1/dashboard/summary`)
+  async getSummary(statuses: string[] = []): Promise<DashboardSummaryResponse> {
+    const params = new URLSearchParams()
+    for (const status of statuses) {
+      if (status.trim()) params.append('status', status.trim().toLowerCase())
+    }
+    const path = params.toString()
+      ? `${API_BASE}/api/v1/dashboard/summary?${params.toString()}`
+      : `${API_BASE}/api/v1/dashboard/summary`
+    const res = await authFetch(path)
     return parseJsonOrThrow<DashboardSummaryResponse>(res)
   },
 
