@@ -192,6 +192,8 @@ def test_list_projects():
     payload = response.json()
     assert isinstance(payload, list)
     assert [project["id"] for project in payload] == ["active-new", "active-old", "complete-new"]
+    assert [project["status"] for project in payload] == ["parsing", "discovering", "complete"]
+    assert [project["current_stage"] for project in payload] == ["parsing", "discovering", "complete"]
     assert "created_at" in payload[0]
     assert "updated_at" in payload[0]
 
@@ -377,7 +379,7 @@ def test_list_projects_filter_normalizes_stored_status_case_and_whitespace():
         "user_id": "00000000-0000-0000-0000-000000000001",
         "title": "Legacy Parsing",
         "status": " Parsing ",
-        "current_stage": "parsing",
+        "current_stage": " Parsing ",
         "created_at": "2026-03-13T12:00:00+00:00",
         "updated_at": "2026-03-13T12:00:00+00:00",
     }
@@ -395,6 +397,28 @@ def test_list_projects_filter_normalizes_stored_status_case_and_whitespace():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload] == ["legacy-parsing"]
+    assert payload[0]["status"] == "parsing"
+    assert payload[0]["current_stage"] == "parsing"
+
+
+def test_list_projects_returns_canonical_current_stage_when_missing():
+    _projects.clear()
+    _projects["legacy-no-stage"] = {
+        "id": "legacy-no-stage",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Missing Stage",
+        "status": " Discovering ",
+        "current_stage": "   ",
+        "created_at": "2026-03-14T12:00:00+00:00",
+        "updated_at": "2026-03-14T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["legacy-no-stage"]
+    assert payload[0]["status"] == "discovering"
+    assert payload[0]["current_stage"] == "discovering"
 
 
 def test_list_projects_active_alias_treats_normalized_status_as_active_for_sorting():

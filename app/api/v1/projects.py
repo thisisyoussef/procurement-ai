@@ -141,6 +141,14 @@ def _normalized_project_status(project: dict) -> str:
     return str(project.get("status") or "").strip().lower()
 
 
+def _normalized_stage_name(project: dict) -> str:
+    """Return a canonical stage name for list responses."""
+    normalized_stage = str(project.get("current_stage") or "").strip().lower()
+    if normalized_stage:
+        return normalized_stage
+    return _normalized_project_status(project)
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -1460,8 +1468,8 @@ async def list_projects(
         {
             "id": p.get("id"),
             "title": p.get("title"),
-            "status": p.get("status"),
-            "current_stage": p.get("current_stage"),
+            "status": _normalized_project_status(p),
+            "current_stage": _normalized_stage_name(p),
             "created_at": p.get("created_at"),
             "updated_at": p.get("updated_at"),
         }

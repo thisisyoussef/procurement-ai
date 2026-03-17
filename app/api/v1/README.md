@@ -20,6 +20,7 @@
   - Active pipeline runs first (`parsing`, `clarifying`, `discovering`, `verifying`, `steering`, `comparing`, `recommending`, `outreaching`)
   - Then by most recent `updated_at`
   - Then by `created_at` when needed as fallback
+- `GET /api/v1/projects` now returns canonical lowercase, trimmed `status` and `current_stage` values in each list item (legacy stored formatting is normalized in the response).
 - `GET /api/v1/projects` accepts optional repeated `status` query parameters
   (example: `?status=parsing&status=discovering`) and returns only matching statuses.
 - `GET /api/v1/projects` normalizes stored project status values (trim + lowercase) when
