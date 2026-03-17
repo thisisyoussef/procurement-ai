@@ -59,6 +59,7 @@ _ACTIVE_STATUSES = {
     "clarifying",
     "discovering",
     "verifying",
+    "steering",
     "comparing",
     "recommending",
     "outreaching",
@@ -166,6 +167,10 @@ def _best_price_label(project: dict[str, Any]) -> str | None:
 def _project_visual_variant(project_id: str) -> int:
     digest = hashlib.md5(project_id.encode("utf-8")).hexdigest()  # noqa: S324
     return int(digest[:2], 16) % 3 + 1
+
+
+def _is_active_status(status: Any) -> bool:
+    return str(status or "").strip().lower() in _ACTIVE_STATUSES
 
 
 def _project_status_note(project: dict[str, Any]) -> str:
@@ -427,7 +432,7 @@ async def get_dashboard_summary_for_user(
         if event.project_id and not event.project_name:
             event.project_name = project_name_by_id.get(event.project_id)
 
-    active_projects = sum(1 for p in user_projects if str(p.get("status")) in _ACTIVE_STATUSES)
+    active_projects = sum(1 for p in user_projects if _is_active_status(p.get("status")))
     first = _first_name(full_name, email)
     daytime = _time_label_now()
 

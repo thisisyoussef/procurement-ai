@@ -251,3 +251,87 @@ def test_dashboard_summary_rejects_invalid_status_filter():
     assert response.status_code == 422
     assert "Invalid status filter value(s): not-real" in response.json()["detail"]
     assert "active" in response.json()["detail"]
+
+
+def test_dashboard_summary_greeting_counts_steering_as_active():
+    projects = get_legacy_project_dict()
+    projects["proj-active-steering"] = {
+        "id": "proj-active-steering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Needs checkpoint answer",
+        "product_description": "Need cast aluminum housings.",
+        "status": "steering",
+        "current_stage": "steering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-complete"] = {
+        "id": "proj-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Done",
+        "product_description": "Need shipping labels.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["greeting"]["active_projects"] == 1
+
+
+def test_dashboard_summary_greeting_active_count_normalizes_status_whitespace_and_case():
+    projects = get_legacy_project_dict()
+    projects["proj-active-parsing-normalized"] = {
+        "id": "proj-active-parsing-normalized",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Parsing with legacy formatting",
+        "product_description": "Need embossed cartons.",
+        "status": " Parsing ",
+        "current_stage": "parsing",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["greeting"]["active_projects"] == 1
+
+
+def test_dashboard_summary_greeting_excludes_terminal_statuses_from_active_count():
+    projects = get_legacy_project_dict()
+    projects["proj-failed"] = {
+        "id": "proj-failed",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run failed",
+        "product_description": "Need precision fasteners.",
+        "status": "failed",
+        "current_stage": "failed",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-canceled"] = {
+        "id": "proj-canceled",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run canceled",
+        "product_description": "Need custom inserts.",
+        "status": "canceled",
+        "current_stage": "canceled",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-complete"] = {
+        "id": "proj-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run complete",
+        "product_description": "Need nylon spacers.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["greeting"]["active_projects"] == 0
