@@ -5,8 +5,13 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
+from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
-from app.services.project_store import get_legacy_project_dict, reset_project_store_for_tests
+from app.services.project_store import (
+    StoreUnavailableError,
+    get_legacy_project_dict,
+    reset_project_store_for_tests,
+)
 
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
@@ -84,6 +89,46 @@ def test_dashboard_start_project_rejects_short_description():
 
     assert response.status_code == 422
     assert get_legacy_project_dict() == {}
+
+
+def test_dashboard_start_project_internal_error_returns_safe_message():
+    with patch("app.api.v1.dashboard.get_project_store") as get_store:
+        store = AsyncMock()
+        store.create_project.side_effect = RuntimeError("sensitive failure details")
+        get_store.return_value = store
+
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "description": "Need 500 custom insulated bottles with logo printing.",
+                "source": "dashboard_search",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == PROJECT_START_FAILURE_DETAIL
+    assert "sensitive failure details" not in payload["detail"]
+
+
+def test_dashboard_start_project_store_unavailable_preserves_503_mapping():
+    with patch("app.api.v1.dashboard.get_project_store") as get_store:
+        store = AsyncMock()
+        store.create_project.side_effect = StoreUnavailableError("memory backend offline")
+        get_store.return_value = store
+
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "description": "Need 500 custom insulated bottles with logo printing.",
+                "source": "dashboard_search",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    assert "Project store unavailable: memory backend offline" == response.json()["detail"]
 
 
 def test_dashboard_summary_filters_projects_by_single_status():

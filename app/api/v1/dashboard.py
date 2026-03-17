@@ -25,6 +25,7 @@ from app.services.project_events import record_project_event
 from app.services.project_store import StoreUnavailableError, get_project_store
 
 logger = logging.getLogger(__name__)
+PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -153,7 +154,7 @@ async def start_project_from_dashboard(
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to create dashboard project")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=PROJECT_START_FAILURE_DETAIL) from exc
 
     try:
         await store.create_event(

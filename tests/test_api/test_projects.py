@@ -11,7 +11,7 @@ from app.core.auth import AuthUser, create_access_token
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.main import app
-from app.api.v1.projects import _projects
+from app.api.v1.projects import PROJECT_START_FAILURE_DETAIL, _projects
 
 client = TestClient(app)
 
@@ -120,6 +120,24 @@ def test_create_project_rejects_whitespace_only_description():
         headers=_auth_headers(),
     )
     assert response.status_code == 422
+
+
+def test_create_project_internal_error_returns_safe_message():
+    with patch("app.api.v1.projects._create_project", new_callable=AsyncMock) as create_project:
+        create_project.side_effect = RuntimeError("sensitive failure details")
+        response = client.post(
+            "/api/v1/projects",
+            json={
+                "title": "Test Project",
+                "product_description": "I need 500 custom canvas tote bags for my brand",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == PROJECT_START_FAILURE_DETAIL
+    assert "sensitive failure details" not in payload["detail"]
 
 
 def test_get_nonexistent_project():

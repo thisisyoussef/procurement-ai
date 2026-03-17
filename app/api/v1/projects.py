@@ -86,6 +86,7 @@ ACTIVE_PIPELINE_STATUSES = {
     "outreaching",
 }
 LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled"}
+PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
 DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
@@ -260,7 +261,7 @@ async def create_project(
         raise
     except Exception as e:
         logger.exception("Failed to create project")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}\n{traceback.format_exc()}") from e
+        raise HTTPException(status_code=500, detail=PROJECT_START_FAILURE_DETAIL) from e
 
 
 def _sync_state_to_project(project: dict, state: GraphState) -> None:
