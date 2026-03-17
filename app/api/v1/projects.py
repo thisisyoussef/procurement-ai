@@ -137,6 +137,10 @@ def normalize_project_status_filters(status_values: list[str] | None) -> set[str
     return expanded
 
 
+def _normalized_project_status(project: dict) -> str:
+    return str(project.get("status") or "").strip().lower()
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -1439,7 +1443,7 @@ async def list_projects(
             return 0.0
 
     def _sort_key(project: dict) -> tuple[int, float, float]:
-        status = str(project.get("status") or "")
+        status = _normalized_project_status(project)
         is_active = 1 if status in ACTIVE_PIPELINE_STATUSES else 0
         updated = _timestamp_sort_value(project, "updated_at")
         created = _timestamp_sort_value(project, "created_at")
@@ -1449,9 +1453,7 @@ async def list_projects(
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
-        user_projects = [
-            project for project in user_projects if str(project.get("status") or "").lower() in normalized_statuses
-        ]
+        user_projects = [project for project in user_projects if _normalized_project_status(project) in normalized_statuses]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
     return [

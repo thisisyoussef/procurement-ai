@@ -22,6 +22,8 @@
   - Then by `created_at` when needed as fallback
 - `GET /api/v1/projects` accepts optional repeated `status` query parameters
   (example: `?status=parsing&status=discovering`) and returns only matching statuses.
+- `GET /api/v1/projects` normalizes stored project status values (trim + lowercase) when
+  filtering and ordering active work, so legacy values such as ` Parsing ` still behave as active.
 - `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` also accept `status=active` as
   an alias for all in-progress pipeline statuses (`parsing` through `outreaching`, including `steering`).
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes

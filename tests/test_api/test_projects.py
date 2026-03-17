@@ -370,6 +370,65 @@ def test_list_projects_rejects_invalid_status_filter():
     assert "active" in response.json()["detail"]
 
 
+def test_list_projects_filter_normalizes_stored_status_case_and_whitespace():
+    _projects.clear()
+    _projects["legacy-parsing"] = {
+        "id": "legacy-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Parsing",
+        "status": " Parsing ",
+        "current_stage": "parsing",
+        "created_at": "2026-03-13T12:00:00+00:00",
+        "updated_at": "2026-03-13T12:00:00+00:00",
+    }
+    _projects["complete"] = {
+        "id": "complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects?status=parsing", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["legacy-parsing"]
+
+
+def test_list_projects_active_alias_treats_normalized_status_as_active_for_sorting():
+    _projects.clear()
+    _projects["active-parsing-legacy"] = {
+        "id": "active-parsing-legacy",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Active",
+        "status": " Parsing ",
+        "current_stage": "parsing",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-11T12:00:00+00:00",
+    }
+    _projects["complete-newer"] = {
+        "id": "complete-newer",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete Newer",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T13:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects?status=active", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["active-parsing-legacy"]
+
+    response_all = client.get("/api/v1/projects", headers=_auth_headers())
+    assert response_all.status_code == 200
+    payload_all = response_all.json()
+    assert [project["id"] for project in payload_all] == ["active-parsing-legacy", "complete-newer"]
+
+
 def test_cancel_project():
     """Test canceling an in-progress project."""
     create_response = client.post(
