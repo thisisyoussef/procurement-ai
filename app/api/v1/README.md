@@ -22,6 +22,8 @@
   - Then by `created_at` when needed as fallback
 - `GET /api/v1/projects` accepts optional repeated `status` query parameters
   (example: `?status=parsing&status=discovering`) and returns only matching statuses.
+- `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` also accept `status=active` as
+  an alias for all in-progress pipeline statuses (`parsing` through `outreaching`, including `steering`).
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
 - `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.

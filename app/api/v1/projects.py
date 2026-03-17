@@ -106,6 +106,37 @@ _STAGE_PHASE = {
 }
 
 
+def normalize_project_status_filters(status_values: list[str] | None) -> set[str] | None:
+    """Normalize list query filters and expand supported aliases."""
+    if not status_values:
+        return None
+
+    normalized = {value.strip().lower() for value in status_values if value and value.strip()}
+    if not normalized:
+        return None
+
+    expanded: set[str] = set()
+    for value in normalized:
+        if value == "active":
+            expanded.update(ACTIVE_PIPELINE_STATUSES)
+            continue
+        expanded.add(value)
+
+    invalid_statuses = sorted(expanded - LISTABLE_PROJECT_STATUSES)
+    if invalid_statuses:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Invalid status filter value(s): "
+                + ", ".join(invalid_statuses)
+                + ". Allowed values: "
+                + ", ".join(sorted(LISTABLE_PROJECT_STATUSES | {"active"}))
+            ),
+        )
+
+    return expanded
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -1414,20 +1445,7 @@ async def list_projects(
         created = _timestamp_sort_value(project, "created_at")
         return (is_active, updated, created)
 
-    normalized_statuses: set[str] | None = None
-    if status:
-        normalized_statuses = {value.strip().lower() for value in status if value.strip()}
-        invalid_statuses = sorted(normalized_statuses - LISTABLE_PROJECT_STATUSES)
-        if invalid_statuses:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Invalid status filter value(s): "
-                    + ", ".join(invalid_statuses)
-                    + ". Allowed values: "
-                    + ", ".join(sorted(LISTABLE_PROJECT_STATUSES))
-                ),
-            )
+    normalized_statuses = normalize_project_status_filters(status)
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:

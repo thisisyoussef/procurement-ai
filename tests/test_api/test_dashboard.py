@@ -204,6 +204,36 @@ def test_dashboard_summary_filters_projects_by_multiple_statuses():
     assert statuses == ["complete", "failed"]
 
 
+def test_dashboard_summary_filters_projects_by_active_alias():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-steering"] = {
+        "id": "proj-dash-steering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Needs steering",
+        "product_description": "Need stainless tube bends.",
+        "status": "steering",
+        "current_stage": "steering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-complete"] = {
+        "id": "proj-dash-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Done",
+        "product_description": "Need labels.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=active", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-steering"]
+    assert payload["projects"][0]["status"] == "steering"
+
+
 def test_dashboard_summary_rejects_invalid_status_filter():
     projects = get_legacy_project_dict()
     projects["proj-dash-6"] = {
@@ -220,3 +250,4 @@ def test_dashboard_summary_rejects_invalid_status_filter():
     response = client.get("/api/v1/dashboard/summary?status=not-real", headers=_auth_headers())
     assert response.status_code == 422
     assert "Invalid status filter value(s): not-real" in response.json()["detail"]
+    assert "active" in response.json()["detail"]

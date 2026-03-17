@@ -325,6 +325,35 @@ def test_list_projects_filters_by_multiple_statuses():
     assert [project["id"] for project in payload] == ["failed", "complete"]
 
 
+def test_list_projects_filters_by_active_alias():
+    _projects.clear()
+
+    _projects["steering-project"] = {
+        "id": "steering-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Steering Needed",
+        "status": "steering",
+        "current_stage": "steering",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+    }
+    _projects["complete-project"] = {
+        "id": "complete-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Completed",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-11T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects?status=active", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["steering-project"]
+    assert payload[0]["status"] == "steering"
+
+
 def test_list_projects_rejects_invalid_status_filter():
     _projects.clear()
     _projects["parsing"] = {
@@ -338,6 +367,7 @@ def test_list_projects_rejects_invalid_status_filter():
     response = client.get("/api/v1/projects?status=not-real", headers=_auth_headers())
     assert response.status_code == 422
     assert "Invalid status filter value(s): not-real" in response.json()["detail"]
+    assert "active" in response.json()["detail"]
 
 
 def test_cancel_project():

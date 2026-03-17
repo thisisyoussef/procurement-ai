@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from app.api.v1.projects import LISTABLE_PROJECT_STATUSES, _run_pipeline_task
+from app.api.v1.projects import _run_pipeline_task, normalize_project_status_filters
 from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.dashboard import (
     DashboardActivityResponse,
@@ -41,20 +41,7 @@ async def dashboard_summary(
     ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
-    normalized_statuses: set[str] | None = None
-    if status:
-        normalized_statuses = {value.strip().lower() for value in status if value.strip()}
-        invalid_statuses = sorted(normalized_statuses - LISTABLE_PROJECT_STATUSES)
-        if invalid_statuses:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Invalid status filter value(s): "
-                    + ", ".join(invalid_statuses)
-                    + ". Allowed values: "
-                    + ", ".join(sorted(LISTABLE_PROJECT_STATUSES))
-                ),
-            )
+    normalized_statuses = normalize_project_status_filters(status)
 
     try:
         return await get_dashboard_summary_for_user(
