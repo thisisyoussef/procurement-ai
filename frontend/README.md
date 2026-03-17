@@ -14,6 +14,7 @@ Next.js application for Procurement AI landing and product workspace.
 ## Behavior-Preserving Cleanup Rules
 - Keep existing route paths (`/`, `/product`) unchanged.
 - Keep API contract usage aligned with backend payloads.
+- Keep dashboard Active filtering aligned with backend active statuses, including `steering`.
 - Run production build after any structural cleanup.
 
 ## Tracing

@@ -161,6 +161,36 @@ def test_dashboard_summary_filters_projects_by_single_status():
     assert payload["projects"][0]["status"] == "parsing"
 
 
+def test_dashboard_summary_filters_projects_by_steering_status():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-steering"] = {
+        "id": "proj-dash-steering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Steering project",
+        "product_description": "Need precision coil springs.",
+        "status": "steering",
+        "current_stage": "steering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-complete"] = {
+        "id": "proj-dash-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete project",
+        "product_description": "Need finished labels.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=steering", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-steering"]
+    assert payload["projects"][0]["status"] == "steering"
+
+
 def test_dashboard_summary_filters_projects_by_multiple_statuses():
     projects = get_legacy_project_dict()
     projects["proj-dash-3"] = {

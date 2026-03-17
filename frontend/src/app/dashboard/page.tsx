@@ -31,6 +31,7 @@ type TabKey = 'home' | 'projects' | 'contacts'
 type ProjectStatusFilter =
   | 'parsing'
   | 'clarifying'
+  | 'steering'
   | 'discovering'
   | 'verifying'
   | 'comparing'
@@ -45,6 +46,7 @@ type StatusPreset = 'all' | 'active' | 'complete' | 'failed'
 const ACTIVE_FILTER_STATUSES: ProjectStatusFilter[] = [
   'parsing',
   'clarifying',
+  'steering',
   'discovering',
   'verifying',
   'comparing',
