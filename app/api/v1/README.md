@@ -27,6 +27,8 @@
   filtering and ordering active work, so legacy values such as ` Parsing ` still behave as active.
 - `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` also accept `status=active` as
   an alias for all in-progress pipeline statuses (`parsing` through `outreaching`, including `steering`).
+- `GET /api/v1/projects` accepts optional `q` for case-insensitive project title keyword filtering
+  (example: `?q=coffee`), applied after ownership and optional status filtering.
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes
   status formatting (trim + lowercase) before active count aggregation.
 - `GET /api/v1/dashboard/summary` project cards now normalize legacy status/current stage

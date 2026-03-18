@@ -453,6 +453,61 @@ def test_list_projects_active_alias_treats_normalized_status_as_active_for_sorti
     assert [project["id"] for project in payload_all] == ["active-parsing-legacy", "complete-newer"]
 
 
+def test_list_projects_filters_by_title_keyword():
+    _projects.clear()
+    _projects["capsules"] = {
+        "id": "capsules",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Biodegradable Coffee Capsules",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["labels"] = {
+        "id": "labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Luxury Candle Labels",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=coffee", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["capsules"]
+
+
+def test_list_projects_title_keyword_filter_is_case_insensitive():
+    _projects.clear()
+    _projects["motor-shafts"] = {
+        "id": "motor-shafts",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision Motor Shafts",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=SHAFTS", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["motor-shafts"]
+
+
+def test_list_projects_title_keyword_ignores_whitespace_only_query():
+    _projects.clear()
+    _projects["default-visible"] = {
+        "id": "default-visible",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Default Visible Project",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.get("/api/v1/projects?q=   ", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["default-visible"]
+
+
 def test_cancel_project():
     """Test canceling an in-progress project."""
     create_response = client.post(

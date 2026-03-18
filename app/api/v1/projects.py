@@ -1430,6 +1430,10 @@ async def list_projects(
             "for example ?status=parsing&status=discovering."
         ),
     ),
+    q: str | None = Query(
+        default=None,
+        description="Optional case-insensitive project title keyword filter.",
+    ),
 ):
     """List current user's projects with active work first, then recent activity."""
     store = get_project_store()
@@ -1458,10 +1462,17 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
+    query_text = (q or "").strip().lower()
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_project_status(project) in normalized_statuses]
+    if query_text:
+        user_projects = [
+            project
+            for project in user_projects
+            if query_text in str(project.get("title") or "").strip().lower()
+        ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
     return [
