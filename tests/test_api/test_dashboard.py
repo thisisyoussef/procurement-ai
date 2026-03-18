@@ -234,6 +234,99 @@ def test_dashboard_summary_filters_projects_by_multiple_statuses():
     assert statuses == ["complete", "failed"]
 
 
+def test_dashboard_summary_filters_projects_by_title_keyword_case_insensitive():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-bottle"] = {
+        "id": "proj-dash-bottle",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels supplier shortlist",
+        "product_description": "Need premium bottle labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-carton"] = {
+        "id": "proj-dash-carton",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Carton inserts",
+        "product_description": "Need carton inserts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=BOTTLE", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-bottle"]
+
+
+def test_dashboard_summary_ignores_whitespace_only_title_query():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-bottle"] = {
+        "id": "proj-dash-bottle",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels supplier shortlist",
+        "product_description": "Need premium bottle labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-carton"] = {
+        "id": "proj-dash-carton",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Carton inserts",
+        "product_description": "Need carton inserts.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=%20%20%20", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert sorted(project["id"] for project in payload["projects"]) == [
+        "proj-dash-bottle",
+        "proj-dash-carton",
+    ]
+
+
+def test_dashboard_summary_combines_status_and_title_query_filters():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-bottle-discovering"] = {
+        "id": "proj-dash-bottle-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels supplier shortlist",
+        "product_description": "Need premium bottle labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-bottle-complete"] = {
+        "id": "proj-dash-bottle-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels completed run",
+        "product_description": "Need premium bottle labels.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?status=discovering&q=bottle",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-bottle-discovering"]
+
+
 def test_dashboard_summary_filters_projects_by_active_alias():
     projects = get_legacy_project_dict()
     projects["proj-dash-steering"] = {

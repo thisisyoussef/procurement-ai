@@ -90,6 +90,10 @@ function isSameStatusSet(left: ProjectStatusFilter[], right: ProjectStatusFilter
   return left.every((value) => right.includes(value))
 }
 
+function normalizeProjectQuery(value: string | null): string {
+  return (value || '').trim()
+}
+
 function statusClass(project: DashboardProjectCard): string {
   if (project.status === 'complete') return 'complete'
   if (project.status === 'clarifying') return 'waiting'
@@ -133,6 +137,7 @@ function DashboardPageContent() {
 
   const [tab, setTab] = useState<TabKey>('home')
   const [selectedStatuses, setSelectedStatuses] = useState<ProjectStatusFilter[]>([])
+  const [projectQuery, setProjectQuery] = useState('')
 
   const [searchInput, setSearchInput] = useState('')
   const [searchSubmitting, setSearchSubmitting] = useState(false)
@@ -178,11 +183,15 @@ function DashboardPageContent() {
     setSelectedStatuses(normalizeStatusFilters(searchParams.getAll('status')))
   }, [searchParams])
 
+  useEffect(() => {
+    setProjectQuery(normalizeProjectQuery(searchParams.get('q')))
+  }, [searchParams])
+
   const loadSummary = async () => {
     setSummaryLoading(true)
     setSummaryError(null)
     try {
-      const data = await dashboardClient.getSummary(selectedStatuses)
+      const data = await dashboardClient.getSummary(selectedStatuses, projectQuery)
       setSummary(data)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -213,7 +222,7 @@ function DashboardPageContent() {
       void loadSummary()
     }, 25000)
     return () => clearInterval(interval)
-  }, [authUser, selectedStatuses])
+  }, [authUser, selectedStatuses, projectQuery])
 
   useEffect(() => {
     if (!authUser || tab !== 'contacts') return
@@ -246,6 +255,16 @@ function DashboardPageContent() {
     const query = params.toString()
     router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
     trackTraceEvent('dashboard_status_filter_change', { preset, statuses: nextStatuses }, { path: '/dashboard' })
+  }
+
+  const applyProjectQuery = (nextQuery: string) => {
+    const normalizedQuery = normalizeProjectQuery(nextQuery)
+    const params = new URLSearchParams(searchParams.toString())
+    if (normalizedQuery) params.set('q', normalizedQuery)
+    else params.delete('q')
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
+    trackTraceEvent('dashboard_project_filter_change', { query_length: normalizedQuery.length }, { path: '/dashboard' })
   }
 
   const activeStatusPreset: StatusPreset =
@@ -446,6 +465,30 @@ function DashboardPageContent() {
                 </button>
               ))}
             </div>
+            <div className="dash-search-bar" style={{ marginTop: 12 }}>
+              <input
+                className="dash-search-input"
+                placeholder="Filter projects by title"
+                value={projectQuery}
+                onChange={(e) => setProjectQuery(e.target.value)}
+                onBlur={() => applyProjectQuery(projectQuery)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') applyProjectQuery(projectQuery)
+                  if (e.key === 'Escape') {
+                    setProjectQuery('')
+                    applyProjectQuery('')
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="dash-search-btn"
+                onClick={() => applyProjectQuery(projectQuery)}
+                disabled={normalizeProjectQuery(projectQuery) === normalizeProjectQuery(searchParams.get('q'))}
+              >
+                Apply
+              </button>
+            </div>
             <m.div
               className="dash-proj-grid"
               variants={staggerContainer}
@@ -512,7 +555,11 @@ function DashboardPageContent() {
               </m.button>
             </m.div>
             {summary && summary.projects.length === 0 && (
-              <div className="dash-empty">No projects match this status filter yet.</div>
+              <div className="dash-empty">
+                {projectQuery
+                  ? 'No projects match this status and title filter yet.'
+                  : 'No projects match this status filter yet.'}
+              </div>
             )}
           </div>
         )}

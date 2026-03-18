@@ -39,9 +39,14 @@ async def dashboard_summary(
             "Repeat parameter to include multiple statuses."
         ),
     ),
+    q: str | None = Query(
+        default=None,
+        description="Optional case-insensitive project title keyword filter for dashboard cards.",
+    ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
     normalized_statuses = normalize_project_status_filters(status)
+    query_text = (q or "").strip().lower() or None
 
     try:
         return await get_dashboard_summary_for_user(
@@ -49,6 +54,7 @@ async def dashboard_summary(
             full_name=current_user.full_name,
             email=current_user.email,
             project_statuses=normalized_statuses,
+            project_query=query_text,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc

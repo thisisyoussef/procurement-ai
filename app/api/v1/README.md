@@ -35,6 +35,8 @@
   values before rendering (`" Complete "` -> `complete`) so badge and phase UI stay consistent.
 - `GET /api/v1/dashboard/summary` project cards are ordered for actionability:
   active projects first, then by most recent `updated_at`, then `created_at` fallback.
+- `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
+  project-title keyword filtering (example: `?q=coffee`), combinable with optional `status` filters.
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
 - `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.

@@ -24,11 +24,13 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
 }
 
 export const dashboardClient = {
-  async getSummary(statuses: string[] = []): Promise<DashboardSummaryResponse> {
+  async getSummary(statuses: string[] = [], query?: string): Promise<DashboardSummaryResponse> {
     const params = new URLSearchParams()
     for (const status of statuses) {
       if (status.trim()) params.append('status', status.trim().toLowerCase())
     }
+    const normalizedQuery = (query || '').trim()
+    if (normalizedQuery) params.set('q', normalizedQuery)
     const path = params.toString()
       ? `${API_BASE}/api/v1/dashboard/summary?${params.toString()}`
       : `${API_BASE}/api/v1/dashboard/summary`
