@@ -365,3 +365,107 @@ def test_dashboard_summary_greeting_excludes_terminal_statuses_from_active_count
     response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
     assert response.status_code == 200
     assert response.json()["greeting"]["active_projects"] == 0
+
+
+def test_dashboard_summary_returns_canonical_status_and_phase_for_legacy_values():
+    projects = get_legacy_project_dict()
+    projects["proj-legacy-complete"] = {
+        "id": "proj-legacy-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy complete formatting",
+        "product_description": "Need precision washers.",
+        "status": " Complete ",
+        "current_stage": " Complete ",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-legacy-complete"]
+    assert payload["projects"][0]["status"] == "complete"
+    assert payload["projects"][0]["phase_label"] == "Order placed"
+
+
+def test_dashboard_summary_sorts_projects_active_first_then_recently_updated():
+    projects = get_legacy_project_dict()
+    projects["proj-complete-newest"] = {
+        "id": "proj-complete-newest",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Newest complete",
+        "product_description": "Need corrugated trays.",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-15T12:00:00+00:00",
+        "updated_at": "2026-03-15T12:00:00+00:00",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-active-old"] = {
+        "id": "proj-active-old",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Older active",
+        "product_description": "Need laser-cut inserts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-active-new"] = {
+        "id": "proj-active-new",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Newer active",
+        "product_description": "Need anodized housings.",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "created_at": "2026-03-14T12:00:00+00:00",
+        "updated_at": "2026-03-14T12:00:00+00:00",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == [
+        "proj-active-new",
+        "proj-active-old",
+        "proj-complete-newest",
+    ]
+
+
+def test_dashboard_summary_sorts_by_created_at_when_updated_at_missing():
+    projects = get_legacy_project_dict()
+    projects["proj-active-created-older"] = {
+        "id": "proj-active-created-older",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Older created",
+        "product_description": "Need stamped clips.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-10T12:00:00+00:00",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-active-created-newer"] = {
+        "id": "proj-active-created-newer",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Newer created",
+        "product_description": "Need formed steel tabs.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-13T12:00:00+00:00",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == [
+        "proj-active-created-newer",
+        "proj-active-created-older",
+    ]

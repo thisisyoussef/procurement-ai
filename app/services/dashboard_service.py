@@ -31,6 +31,7 @@ _dashboard_schema_ready = False
 _PHASE_LABELS = {
     "parsing": "Brief",
     "clarifying": "Brief",
+    "steering": "Brief",
     "discovering": "Search",
     "verifying": "Search",
     "comparing": "Compare",
@@ -44,6 +45,7 @@ _PHASE_LABELS = {
 _STAGE_PROGRESS = {
     "parsing": 1,
     "clarifying": 1,
+    "steering": 1,
     "discovering": 2,
     "verifying": 2,
     "comparing": 3,
@@ -173,9 +175,49 @@ def _is_active_status(status: Any) -> bool:
     return str(status or "").strip().lower() in _ACTIVE_STATUSES
 
 
+def _normalized_status(project: dict[str, Any]) -> str:
+    return str(project.get("status") or "").strip().lower()
+
+
+def _normalized_stage(project: dict[str, Any]) -> str:
+    stage = str(project.get("current_stage") or "").strip().lower()
+    if stage:
+        return stage
+    return _normalized_status(project)
+
+
+def _parse_sort_timestamp(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sort_key(project: dict[str, Any]) -> tuple[int, float, float, str]:
+        status = _normalized_status(project)
+        updated_at = _parse_sort_timestamp(project.get("updated_at"))
+        created_at = _parse_sort_timestamp(project.get("created_at"))
+        return (
+            0 if _is_active_status(status) else 1,
+            -updated_at,
+            -created_at,
+            str(project.get("id") or ""),
+        )
+
+    return sorted(projects, key=_sort_key)
+
+
 def _project_status_note(project: dict[str, Any]) -> str:
-    status = project.get("status") or "unknown"
-    stage = project.get("current_stage") or status
+    status = _normalized_status(project) or "unknown"
+    stage = _normalized_stage(project) or status
     outreach = project.get("outreach_state") or {}
 
     if status == "clarifying":
@@ -216,14 +258,14 @@ def _project_status_note(project: dict[str, Any]) -> str:
 
 
 def _project_progress_step(project: dict[str, Any]) -> int:
-    stage = project.get("current_stage") or project.get("status") or "parsing"
+    stage = _normalized_stage(project) or "parsing"
     base = _STAGE_PROGRESS.get(stage, 1)
 
     outreach = project.get("outreach_state") or {}
     quotes = outreach.get("parsed_quotes") or []
     if quotes:
         base = max(base, 5)
-    if project.get("status") == "complete" and quotes:
+    if _normalized_status(project) == "complete" and quotes:
         base = 6
     return max(1, min(base, 6))
 
@@ -235,7 +277,8 @@ def _project_card(project: dict[str, Any]) -> DashboardProjectCard:
 
     name = parsed.get("product_type") or project.get("title") or "Untitled project"
     description = _truncate(project.get("product_description") or "No description.")
-    stage = project.get("current_stage") or project.get("status") or "parsing"
+    stage = _normalized_stage(project) or "parsing"
+    status = _normalized_status(project) or "unknown"
 
     stats = DashboardProjectStats(
         quotes_count=max(
@@ -255,7 +298,7 @@ def _project_card(project: dict[str, Any]) -> DashboardProjectCard:
         name=name,
         description=description,
         phase_label=_PHASE_LABELS.get(stage, stage.replace("_", " ").title()),
-        status=str(project.get("status") or "unknown"),
+        status=status,
         progress_step=_project_progress_step(project),
         progress_total=6,
         stats=stats,
@@ -406,12 +449,13 @@ async def get_dashboard_summary_for_user(
     store = get_project_store()
     projects = await store.list_projects()
     user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
-    filtered_projects = user_projects
+    sorted_user_projects = _sorted_projects_for_dashboard(user_projects)
+    filtered_projects = sorted_user_projects
     if project_statuses:
         filtered_projects = [
             project
-            for project in user_projects
-            if str(project.get("status") or "").strip().lower() in project_statuses
+            for project in sorted_user_projects
+            if _normalized_status(project) in project_statuses
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]
@@ -432,7 +476,7 @@ async def get_dashboard_summary_for_user(
         if event.project_id and not event.project_name:
             event.project_name = project_name_by_id.get(event.project_id)
 
-    active_projects = sum(1 for p in user_projects if _is_active_status(p.get("status")))
+    active_projects = sum(1 for p in user_projects if _is_active_status(_normalized_status(p)))
     first = _first_name(full_name, email)
     daytime = _time_label_now()
 
