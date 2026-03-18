@@ -536,7 +536,26 @@ async def get_dashboard_activity_for_user(
     return events, next_cursor
 
 
-async def get_dashboard_contacts_for_user(*, user_id: str, limit: int = 50) -> DashboardContactsResponse:
+def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    searchable = [
+        str(contact.get("name") or ""),
+        str(contact.get("email") or ""),
+        str(contact.get("website") or ""),
+        str(contact.get("city") or ""),
+        str(contact.get("country") or ""),
+    ]
+    return any(needle in value.lower() for value in searchable)
+
+
+async def get_dashboard_contacts_for_user(
+    *,
+    user_id: str,
+    limit: int = 50,
+    contact_query: str | None = None,
+) -> DashboardContactsResponse:
     try:
         await _ensure_dashboard_schema()
         async with async_session_factory() as session:
@@ -548,5 +567,10 @@ async def get_dashboard_contacts_for_user(*, user_id: str, limit: int = 50) -> D
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard contacts query failed", exc_info=True)
         rows = []
+
+    normalized_query = (contact_query or "").strip()
+    if normalized_query:
+        rows = [row for row in rows if _contact_matches_query(row, normalized_query)]
+
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))

@@ -46,8 +46,10 @@ export const dashboardClient = {
     return parseJsonOrThrow<DashboardActivityResponse>(res)
   },
 
-  async getContacts(limit = 50): Promise<DashboardContactsResponse> {
+  async getContacts(limit = 50, query?: string): Promise<DashboardContactsResponse> {
     const params = new URLSearchParams({ limit: String(limit) })
+    const normalizedQuery = (query || '').trim()
+    if (normalizedQuery) params.set('q', normalizedQuery)
     const res = await authFetch(`${API_BASE}/api/v1/dashboard/contacts?${params.toString()}`)
     return parseJsonOrThrow<DashboardContactsResponse>(res)
   },

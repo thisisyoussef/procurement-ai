@@ -17,6 +17,7 @@ Next.js application for Procurement AI landing and product workspace.
 - Keep dashboard Active filtering aligned with backend active statuses, including `steering`.
 - Dashboard supports a `Closed` preset mapped to terminal statuses (`complete`, `failed`, `canceled`) via `status=closed`.
 - Dashboard project cards support title keyword filtering via `q` query param; preserve URL state with existing tab/status filters.
+- Dashboard contacts support keyword filtering via `contacts_q` UI state and `q` on `/api/v1/dashboard/contacts`.
 - Run production build after any structural cleanup.
 
 ## Tracing

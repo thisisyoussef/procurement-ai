@@ -138,6 +138,7 @@ function DashboardPageContent() {
   const [tab, setTab] = useState<TabKey>('home')
   const [selectedStatuses, setSelectedStatuses] = useState<ProjectStatusFilter[]>([])
   const [projectQuery, setProjectQuery] = useState('')
+  const [contactsQuery, setContactsQuery] = useState('')
 
   const [searchInput, setSearchInput] = useState('')
   const [searchSubmitting, setSearchSubmitting] = useState(false)
@@ -187,6 +188,10 @@ function DashboardPageContent() {
     setProjectQuery(normalizeProjectQuery(searchParams.get('q')))
   }, [searchParams])
 
+  useEffect(() => {
+    setContactsQuery(normalizeProjectQuery(searchParams.get('contacts_q')))
+  }, [searchParams])
+
   const loadSummary = async () => {
     setSummaryLoading(true)
     setSummaryError(null)
@@ -205,7 +210,7 @@ function DashboardPageContent() {
     setContactsLoading(true)
     setContactsError(null)
     try {
-      const data = await dashboardClient.getContacts(100)
+      const data = await dashboardClient.getContacts(100, contactsQuery)
       setContacts(data)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -227,7 +232,7 @@ function DashboardPageContent() {
   useEffect(() => {
     if (!authUser || tab !== 'contacts') return
     void loadContacts()
-  }, [authUser, tab])
+  }, [authUser, tab, contactsQuery])
 
   const greeting = summary?.greeting
 
@@ -265,6 +270,16 @@ function DashboardPageContent() {
     const query = params.toString()
     router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
     trackTraceEvent('dashboard_project_filter_change', { query_length: normalizedQuery.length }, { path: '/dashboard' })
+  }
+
+  const applyContactsQuery = (nextQuery: string) => {
+    const normalizedQuery = normalizeProjectQuery(nextQuery)
+    const params = new URLSearchParams(searchParams.toString())
+    if (normalizedQuery) params.set('contacts_q', normalizedQuery)
+    else params.delete('contacts_q')
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
+    trackTraceEvent('dashboard_contacts_filter_change', { query_length: normalizedQuery.length }, { path: '/dashboard' })
   }
 
   const activeStatusPreset: StatusPreset =
@@ -597,6 +612,33 @@ function DashboardPageContent() {
         {tab === 'contacts' && (
           <div>
             <div className="dash-section-label">Supplier contacts</div>
+            <div className="dash-search-bar" style={{ marginTop: 12, marginBottom: 12 }}>
+              <input
+                className="dash-search-input"
+                placeholder="Filter contacts by supplier, email, site, or location"
+                value={contactsQuery}
+                onChange={(e) => setContactsQuery(e.target.value)}
+                onBlur={() => applyContactsQuery(contactsQuery)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') applyContactsQuery(contactsQuery)
+                  if (e.key === 'Escape') {
+                    setContactsQuery('')
+                    applyContactsQuery('')
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="dash-search-btn"
+                onClick={() => applyContactsQuery(contactsQuery)}
+                disabled={
+                  normalizeProjectQuery(contactsQuery) ===
+                  normalizeProjectQuery(searchParams.get('contacts_q'))
+                }
+              >
+                Apply
+              </button>
+            </div>
             {contactsError && <div className="dash-error">Contacts error: {contactsError}</div>}
             {contactsLoading && !contacts && <div className="dash-empty">Loading contacts...</div>}
             {contacts && (

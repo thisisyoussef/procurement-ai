@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
+from app.schemas.dashboard import DashboardContactsResponse
+from app.services.dashboard_service import _contact_matches_query
 from app.services.project_store import (
     StoreUnavailableError,
     get_legacy_project_dict,
@@ -613,3 +615,55 @@ def test_dashboard_summary_sorts_by_created_at_when_updated_at_missing():
         "proj-active-created-newer",
         "proj-active-created-older",
     ]
+
+
+def test_dashboard_contacts_passes_trimmed_query_to_service():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get("/api/v1/dashboard/contacts?q=%20acme%20", headers=_auth_headers())
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        contact_query="acme",
+    )
+
+
+def test_dashboard_contacts_ignores_whitespace_query():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get("/api/v1/dashboard/contacts?q=%20%20%20", headers=_auth_headers())
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        contact_query=None,
+    )
+
+
+def test_dashboard_contacts_rejects_overlong_query():
+    query = "a" * 121
+    response = client.get(f"/api/v1/dashboard/contacts?q={query}", headers=_auth_headers())
+
+    assert response.status_code == 422
+
+
+def test_contact_matches_query_matches_name_email_and_location():
+    contact = {
+        "name": "Acme Precision Metals",
+        "email": "sales@acme.example",
+        "website": "https://acme.example",
+        "city": "Detroit",
+        "country": "USA",
+    }
+
+    assert _contact_matches_query(contact, "precision")
+    assert _contact_matches_query(contact, "sales@acme")
+    assert _contact_matches_query(contact, "detroit")
+    assert not _contact_matches_query(contact, "toronto")

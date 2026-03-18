@@ -80,12 +80,19 @@ async def dashboard_activity(
 @router.get("/contacts", response_model=DashboardContactsResponse)
 async def dashboard_contacts(
     limit: int = Query(default=50, ge=1, le=200),
+    q: str | None = Query(
+        default=None,
+        max_length=120,
+        description="Optional case-insensitive supplier keyword filter for contacts.",
+    ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
+    query_text = (q or "").strip() or None
     try:
         return await get_dashboard_contacts_for_user(
             user_id=current_user.user_id,
             limit=limit,
+            contact_query=query_text,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
