@@ -29,6 +29,8 @@ import './dashboard.css'
 
 type TabKey = 'home' | 'projects' | 'contacts'
 type ProjectStatusFilter =
+  | 'active'
+  | 'closed'
   | 'parsing'
   | 'clarifying'
   | 'steering'
@@ -41,7 +43,7 @@ type ProjectStatusFilter =
   | 'failed'
   | 'canceled'
 
-type StatusPreset = 'all' | 'active' | 'complete' | 'failed'
+type StatusPreset = 'all' | 'active' | 'closed' | 'complete' | 'failed'
 
 const ACTIVE_FILTER_STATUSES: ProjectStatusFilter[] = [
   'parsing',
@@ -55,6 +57,8 @@ const ACTIVE_FILTER_STATUSES: ProjectStatusFilter[] = [
 ]
 
 const ALL_STATUS_FILTERS = new Set<ProjectStatusFilter>([
+  'active',
+  'closed',
   ...ACTIVE_FILTER_STATUSES,
   'complete',
   'failed',
@@ -63,7 +67,8 @@ const ALL_STATUS_FILTERS = new Set<ProjectStatusFilter>([
 
 const STATUS_PRESETS: Array<{ key: StatusPreset; label: string; statuses: ProjectStatusFilter[] }> = [
   { key: 'all', label: 'All', statuses: [] },
-  { key: 'active', label: 'Active', statuses: ACTIVE_FILTER_STATUSES },
+  { key: 'active', label: 'Active', statuses: ['active'] },
+  { key: 'closed', label: 'Closed', statuses: ['closed'] },
   { key: 'complete', label: 'Complete', statuses: ['complete'] },
   { key: 'failed', label: 'Failed', statuses: ['failed'] },
 ]

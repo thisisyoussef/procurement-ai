@@ -15,6 +15,7 @@ Next.js application for Procurement AI landing and product workspace.
 - Keep existing route paths (`/`, `/product`) unchanged.
 - Keep API contract usage aligned with backend payloads.
 - Keep dashboard Active filtering aligned with backend active statuses, including `steering`.
+- Dashboard supports a `Closed` preset mapped to terminal statuses (`complete`, `failed`, `canceled`) via `status=closed`.
 - Run production build after any structural cleanup.
 
 ## Tracing

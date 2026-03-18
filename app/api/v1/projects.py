@@ -86,6 +86,7 @@ ACTIVE_PIPELINE_STATUSES = {
     "outreaching",
 }
 LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled"}
+TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
@@ -120,6 +121,9 @@ def normalize_project_status_filters(status_values: list[str] | None) -> set[str
         if value == "active":
             expanded.update(ACTIVE_PIPELINE_STATUSES)
             continue
+        if value == "closed":
+            expanded.update(TERMINAL_PROJECT_STATUSES)
+            continue
         expanded.add(value)
 
     invalid_statuses = sorted(expanded - LISTABLE_PROJECT_STATUSES)
@@ -130,7 +134,7 @@ def normalize_project_status_filters(status_values: list[str] | None) -> set[str
                 "Invalid status filter value(s): "
                 + ", ".join(invalid_statuses)
                 + ". Allowed values: "
-                + ", ".join(sorted(LISTABLE_PROJECT_STATUSES | {"active"}))
+                + ", ".join(sorted(LISTABLE_PROJECT_STATUSES | {"active", "closed"}))
             ),
         )
 

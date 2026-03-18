@@ -264,6 +264,56 @@ def test_dashboard_summary_filters_projects_by_active_alias():
     assert payload["projects"][0]["status"] == "steering"
 
 
+def test_dashboard_summary_filters_projects_by_closed_alias():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-canceled"] = {
+        "id": "proj-dash-canceled",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Canceled project",
+        "product_description": "Need coated springs.",
+        "status": "canceled",
+        "current_stage": "canceled",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-failed"] = {
+        "id": "proj-dash-failed",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Failed project",
+        "product_description": "Need wire harness clips.",
+        "status": "failed",
+        "current_stage": "failed",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-complete"] = {
+        "id": "proj-dash-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete project",
+        "product_description": "Need stamped nameplates.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-active"] = {
+        "id": "proj-dash-active",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active project",
+        "product_description": "Need cast housings.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=closed", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    statuses = sorted(project["status"] for project in payload["projects"])
+    assert statuses == ["canceled", "complete", "failed"]
+
+
 def test_dashboard_summary_rejects_invalid_status_filter():
     projects = get_legacy_project_dict()
     projects["proj-dash-6"] = {
@@ -281,6 +331,7 @@ def test_dashboard_summary_rejects_invalid_status_filter():
     assert response.status_code == 422
     assert "Invalid status filter value(s): not-real" in response.json()["detail"]
     assert "active" in response.json()["detail"]
+    assert "closed" in response.json()["detail"]
 
 
 def test_dashboard_summary_greeting_counts_steering_as_active():

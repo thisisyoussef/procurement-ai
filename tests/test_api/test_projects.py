@@ -356,6 +356,57 @@ def test_list_projects_filters_by_active_alias():
     assert payload[0]["status"] == "steering"
 
 
+def test_list_projects_filters_by_closed_alias():
+    _projects.clear()
+
+    _projects["canceled-project"] = {
+        "id": "canceled-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Canceled",
+        "status": "canceled",
+        "current_stage": "canceled",
+        "created_at": "2026-03-10T12:00:00+00:00",
+        "updated_at": "2026-03-10T12:00:00+00:00",
+    }
+    _projects["failed-project"] = {
+        "id": "failed-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Failed",
+        "status": "failed",
+        "current_stage": "failed",
+        "created_at": "2026-03-11T12:00:00+00:00",
+        "updated_at": "2026-03-11T12:00:00+00:00",
+    }
+    _projects["complete-project"] = {
+        "id": "complete-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-12T12:00:00+00:00",
+        "updated_at": "2026-03-12T12:00:00+00:00",
+    }
+    _projects["active-project"] = {
+        "id": "active-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-13T12:00:00+00:00",
+        "updated_at": "2026-03-13T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects?status=closed", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == [
+        "complete-project",
+        "failed-project",
+        "canceled-project",
+    ]
+    assert sorted(project["status"] for project in payload) == ["canceled", "complete", "failed"]
+
+
 def test_list_projects_rejects_invalid_status_filter():
     _projects.clear()
     _projects["parsing"] = {
@@ -370,6 +421,7 @@ def test_list_projects_rejects_invalid_status_filter():
     assert response.status_code == 422
     assert "Invalid status filter value(s): not-real" in response.json()["detail"]
     assert "active" in response.json()["detail"]
+    assert "closed" in response.json()["detail"]
 
 
 def test_list_projects_filter_normalizes_stored_status_case_and_whitespace():
