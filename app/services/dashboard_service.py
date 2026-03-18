@@ -445,6 +445,7 @@ async def get_dashboard_summary_for_user(
     full_name: str | None,
     email: str | None,
     project_statuses: set[str] | None = None,
+    project_query: str | None = None,
 ) -> DashboardSummaryResponse:
     store = get_project_store()
     projects = await store.list_projects()
@@ -456,6 +457,12 @@ async def get_dashboard_summary_for_user(
             project
             for project in sorted_user_projects
             if _normalized_status(project) in project_statuses
+        ]
+    if project_query:
+        filtered_projects = [
+            project
+            for project in filtered_projects
+            if project_query in str(project.get("title") or "").strip().lower()
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]
