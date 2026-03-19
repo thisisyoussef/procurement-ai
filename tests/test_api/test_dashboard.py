@@ -265,6 +265,35 @@ def test_dashboard_summary_filters_projects_by_title_keyword_case_insensitive():
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-bottle"]
 
 
+def test_dashboard_summary_filters_projects_by_description_keyword_case_insensitive():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-fasteners"] = {
+        "id": "proj-dash-fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-labels"] = {
+        "id": "proj-dash-labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=FASTENERS", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {
@@ -335,6 +364,40 @@ def test_dashboard_summary_combines_status_and_title_query_filters():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-bottle-discovering"]
+
+
+def test_dashboard_summary_combines_status_and_description_query_filters():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-fasteners-discovering"] = {
+        "id": "proj-dash-fasteners-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-fasteners-complete"] = {
+        "id": "proj-dash-fasteners-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?status=discovering&q=fasteners",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == [
+        "proj-dash-fasteners-discovering"
+    ]
 
 
 def test_dashboard_summary_filters_projects_by_active_alias():

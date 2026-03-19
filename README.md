@@ -16,6 +16,9 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 3. Outreach stage drafts/sends supplier emails with approval controls.
 4. Project status and supplier interactions are persisted for memory reuse.
 
+## Search Behavior
+- `GET /api/v1/projects?q=...` and `GET /api/v1/dashboard/summary?q=...` match keywords against both project titles and product descriptions (case-insensitive).
+
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`
 - Frontend: `cd frontend && npm run dev`

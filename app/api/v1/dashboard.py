@@ -42,7 +42,10 @@ async def dashboard_summary(
     q: str | None = Query(
         default=None,
         max_length=120,
-        description="Optional case-insensitive project title keyword filter for dashboard cards.",
+        description=(
+            "Optional case-insensitive project title or description keyword filter "
+            "for dashboard cards."
+        ),
     ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):

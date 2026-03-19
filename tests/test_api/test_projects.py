@@ -1,7 +1,6 @@
 """Tests for the projects API endpoints."""
 
 import os
-import pytest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -542,6 +541,59 @@ def test_list_projects_title_keyword_filter_is_case_insensitive():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload] == ["motor-shafts"]
+
+
+def test_list_projects_keyword_matches_product_description():
+    _projects.clear()
+    _projects["fasteners"] = {
+        "id": "fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Metal Components",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+    _projects["labels"] = {
+        "id": "labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Packaging Labels",
+        "product_description": "Need premium matte labels.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=FASTENERS", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["fasteners"]
+
+
+def test_list_projects_combines_status_and_description_keyword_filters():
+    _projects.clear()
+    _projects["fasteners-discovering"] = {
+        "id": "fasteners-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["fasteners-complete"] = {
+        "id": "fasteners-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.get(
+        "/api/v1/projects?status=discovering&q=fasteners",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["fasteners-discovering"]
 
 
 def test_list_projects_title_keyword_ignores_whitespace_only_query():
