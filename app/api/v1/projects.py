@@ -1436,6 +1436,7 @@ async def list_projects(
     ),
     q: str | None = Query(
         default=None,
+        max_length=120,
         description="Optional case-insensitive project title keyword filter.",
     ),
 ):

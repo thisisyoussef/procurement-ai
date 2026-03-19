@@ -560,6 +560,14 @@ def test_list_projects_title_keyword_ignores_whitespace_only_query():
     assert [project["id"] for project in payload] == ["default-visible"]
 
 
+def test_list_projects_title_keyword_rejects_overlong_query():
+    query = "a" * 121
+
+    response = client.get(f"/api/v1/projects?q={query}", headers=_auth_headers())
+
+    assert response.status_code == 422
+
+
 def test_cancel_project():
     """Test canceling an in-progress project."""
     create_response = client.post(

@@ -297,6 +297,14 @@ def test_dashboard_summary_ignores_whitespace_only_title_query():
     ]
 
 
+def test_dashboard_summary_rejects_overlong_title_query():
+    query = "a" * 121
+
+    response = client.get(f"/api/v1/dashboard/summary?q={query}", headers=_auth_headers())
+
+    assert response.status_code == 422
+
+
 def test_dashboard_summary_combines_status_and_title_query_filters():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle-discovering"] = {
