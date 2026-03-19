@@ -88,6 +88,7 @@ ACTIVE_PIPELINE_STATUSES = {
 LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled"}
 TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
+PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
 DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
@@ -1279,7 +1280,7 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
         raise
     except Exception as e:  # noqa: BLE001
         logger.error("Answer processing failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=PROJECT_ANSWER_FAILURE_DETAIL) from e
 
 
 @router.post("/{project_id}/checkpoint")

@@ -10,7 +10,7 @@ from app.core.auth import AuthUser, create_access_token
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.main import app
-from app.api.v1.projects import PROJECT_START_FAILURE_DETAIL, _projects
+from app.api.v1.projects import PROJECT_ANSWER_FAILURE_DETAIL, PROJECT_START_FAILURE_DETAIL, _projects
 
 client = TestClient(app)
 
@@ -693,6 +693,99 @@ def test_cancel_project():
     cancel_data = cancel_response.json()
     assert cancel_data["project_id"] == project_id
     assert cancel_data["status"] in {"canceled", "failed", "complete"}
+
+
+def test_answer_clarifying_questions_resumes_pipeline():
+    _projects.clear()
+    project_id = "answer-success"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Answer Success",
+        "product_description": "Need custom die-cast housings.",
+        "status": "clarifying",
+        "current_stage": "clarifying",
+        "parsed_requirements": {"product_type": "Housing"},
+        "clarifying_questions": [{"field": "quantity", "question": "How many units?"}],
+        "checkpoint_responses": {},
+    }
+
+    llm_payload = (
+        '{"product_type":"Housing","material":"Aluminum","dimensions":null,"quantity":1200,'
+        '"customization":"Black powder coat","delivery_location":"Chicago, IL","deadline":null,'
+        '"certifications_needed":[],"budget_range":null,"missing_fields":[],"search_queries":[],'
+        '"regional_searches":[],"clarifying_questions":[],"sourcing_strategy":"regional",'
+        '"sourcing_preference":null}'
+    )
+    with patch("app.api.v1.projects.call_llm_structured", new=AsyncMock(return_value=llm_payload)):
+        with patch("app.api.v1.projects._resume_pipeline_task", new=AsyncMock()) as resume_pipeline:
+            response = client.post(
+                f"/api/v1/projects/{project_id}/answer",
+                json={"answers": {"quantity": "1200"}},
+                headers=_auth_headers(),
+            )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "resumed"
+    updated = _projects[project_id]
+    assert updated["status"] == "discovering"
+    assert updated["current_stage"] == "discovering"
+    assert updated["clarifying_questions"] is None
+    assert updated["user_answers"] == {"quantity": "1200"}
+    resume_pipeline.assert_awaited_once_with(project_id)
+
+
+def test_answer_clarifying_questions_returns_safe_error_message_on_unexpected_failure():
+    _projects.clear()
+    project_id = "answer-safe-error"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Answer Safe Error",
+        "product_description": "Need precision metal washers.",
+        "status": "clarifying",
+        "current_stage": "clarifying",
+        "parsed_requirements": {"product_type": "Washer"},
+        "clarifying_questions": [{"field": "material", "question": "What alloy?"}],
+        "checkpoint_responses": {},
+    }
+
+    with patch("app.api.v1.projects._save_project", new=AsyncMock(side_effect=RuntimeError("db password leaked"))):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/answer",
+            json={"answers": {"material": "316 stainless"}},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == PROJECT_ANSWER_FAILURE_DETAIL
+    assert "db password leaked" not in payload["detail"]
+
+
+def test_answer_clarifying_questions_requires_clarifying_status():
+    _projects.clear()
+    project_id = "answer-wrong-status"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Answer Wrong Status",
+        "product_description": "Need custom machined shafts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "parsed_requirements": {"product_type": "Shaft"},
+        "clarifying_questions": None,
+        "checkpoint_responses": {},
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/answer",
+        json={"answers": {"material": "4140 steel"}},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Project is not waiting for answers"
 
 
 def test_restart_project_from_discovering_resets_downstream_state():
