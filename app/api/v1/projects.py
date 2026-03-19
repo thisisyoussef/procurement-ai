@@ -112,7 +112,14 @@ def normalize_project_status_filters(status_values: list[str] | None) -> set[str
     if not status_values:
         return None
 
-    normalized = {value.strip().lower() for value in status_values if value and value.strip()}
+    normalized: set[str] = set()
+    for raw_value in status_values:
+        if not raw_value:
+            continue
+        for token in raw_value.split(","):
+            cleaned = token.strip().lower()
+            if cleaned:
+                normalized.add(cleaned)
     if not normalized:
         return None
 

@@ -18,6 +18,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 
 ## Search Behavior
 - `GET /api/v1/projects?q=...` and `GET /api/v1/dashboard/summary?q=...` match keywords against both project titles and product descriptions (case-insensitive).
+- Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`
