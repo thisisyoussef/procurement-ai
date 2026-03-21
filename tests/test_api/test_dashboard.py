@@ -82,6 +82,42 @@ def test_dashboard_start_project_uses_custom_title_and_auto_outreach():
     assert project["auto_outreach"] is True
 
 
+def test_dashboard_start_project_normalizes_source_whitespace_and_case():
+    with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "description": "Need 500 insulated bottles, matte black finish, and fast lead time.",
+                "source": "  DASHBOARD_SEARCH  ",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["redirect_path"] == (
+        f"/product?projectId={payload['project_id']}&entry=dashboard_search"
+    )
+
+
+def test_dashboard_start_project_defaults_unknown_source_to_dashboard_new():
+    with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "description": "Need 500 insulated bottles, matte black finish, and fast lead time.",
+                "source": "dashboard_sidebar",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["redirect_path"] == (
+        f"/product?projectId={payload['project_id']}&entry=dashboard_new"
+    )
+
+
 def test_dashboard_start_project_rejects_short_description():
     response = client.post(
         "/api/v1/dashboard/projects/start",

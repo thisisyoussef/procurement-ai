@@ -26,8 +26,17 @@ from app.services.project_store import StoreUnavailableError, get_project_store
 
 logger = logging.getLogger(__name__)
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
+_DASHBOARD_ALLOWED_SOURCES = {"dashboard_new", "dashboard_search"}
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+def _normalized_dashboard_source(source: str | None) -> str:
+    """Return canonical dashboard entry source or default when unknown."""
+    cleaned = str(source or "").strip().lower()
+    if cleaned in _DASHBOARD_ALLOWED_SOURCES:
+        return cleaned
+    return "dashboard_new"
 
 
 @router.get("/summary", response_model=DashboardSummaryResponse)
@@ -111,6 +120,7 @@ async def start_project_from_dashboard(
     store = get_project_store()
     project_id = str(uuid.uuid4())
     title = (request.title or request.description[:80]).strip() or "New sourcing mission"
+    source = _normalized_dashboard_source(request.source)
 
     project = {
         "id": project_id,
@@ -151,7 +161,7 @@ async def start_project_from_dashboard(
             description=f"Started sourcing workflow for {title}.",
             priority="info",
             phase="brief",
-            payload={"source": request.source},
+            payload={"source": source},
         )
         await store.save_project(project)
     except StoreUnavailableError as exc:
@@ -166,7 +176,7 @@ async def start_project_from_dashboard(
             session_id=None,
             path="/dashboard",
             project_id=project_id,
-            payload={"source": request.source},
+            payload={"source": source},
         )
     except Exception:  # noqa: BLE001
         logger.warning("Failed to persist dashboard_project_started analytics event", exc_info=True)
@@ -176,5 +186,5 @@ async def start_project_from_dashboard(
     return DashboardProjectStartResponse(
         project_id=project_id,
         status="started",
-        redirect_path=f"/product?projectId={project_id}&entry={request.source}",
+        redirect_path=f"/product?projectId={project_id}&entry={source}",
     )
