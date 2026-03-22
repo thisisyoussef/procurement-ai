@@ -21,6 +21,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
 - `POST /api/v1/projects/{id}/answer` now returns a safe `500` detail (`"Failed to process answers. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
+- `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`

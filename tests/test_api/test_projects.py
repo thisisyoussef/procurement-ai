@@ -1018,6 +1018,43 @@ def test_get_status_returns_null_retrospective_when_not_recorded():
     assert response.json()["retrospective"] is None
 
 
+def test_submit_retrospective_rejects_non_complete_project():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000123"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Retrospective Requires Completion",
+        "product_description": "Need CNC machining supplier",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json={"supplier_chosen": "Acme"},
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Retrospective can only be submitted for completed projects"
+    assert _projects[project_id]["retrospective"] is None
+
+
 def test_submit_retrospective_is_visible_in_status():
     _projects.clear()
     project_id = "00000000-0000-0000-0000-000000000121"
@@ -1068,6 +1105,42 @@ def test_submit_retrospective_is_visible_in_status():
     assert retrospective["overall_satisfaction"] == 5
     assert retrospective["communication_rating"] == 4
     assert retrospective["pricing_accuracy"] == "as_expected"
+
+
+def test_submit_retrospective_forbidden_for_non_owner():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000124"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Retrospective Owner Only",
+        "product_description": "Need electronics assembly supplier",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json={"supplier_chosen": "Unauthorized Supplier"},
+        headers=_auth_headers("00000000-0000-0000-0000-000000000099"),
+    )
+    assert response.status_code == 403
+    assert _projects[project_id]["retrospective"] is None
 
 
 def test_status_retrospective_hidden_from_other_users():
