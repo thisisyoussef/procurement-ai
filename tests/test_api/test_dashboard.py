@@ -804,10 +804,11 @@ def test_dashboard_contacts_rejects_overlong_query():
     assert response.status_code == 422
 
 
-def test_contact_matches_query_matches_name_email_and_location():
+def test_contact_matches_query_matches_name_email_phone_and_location():
     contact = {
         "name": "Acme Precision Metals",
         "email": "sales@acme.example",
+        "phone": "+1 (312) 555-0142",
         "website": "https://acme.example",
         "city": "Detroit",
         "country": "USA",
@@ -815,5 +816,7 @@ def test_contact_matches_query_matches_name_email_and_location():
 
     assert _contact_matches_query(contact, "precision")
     assert _contact_matches_query(contact, "sales@acme")
+    assert _contact_matches_query(contact, "555-0142")
     assert _contact_matches_query(contact, "detroit")
     assert not _contact_matches_query(contact, "toronto")
+    assert not _contact_matches_query(contact, "555-9999")

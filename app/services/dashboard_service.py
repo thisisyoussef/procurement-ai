@@ -544,6 +544,7 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
     searchable = [
         str(contact.get("name") or ""),
         str(contact.get("email") or ""),
+        str(contact.get("phone") or ""),
         str(contact.get("website") or ""),
         str(contact.get("city") or ""),
         str(contact.get("country") or ""),

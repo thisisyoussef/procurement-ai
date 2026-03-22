@@ -39,6 +39,9 @@
 - `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
   project-title keyword filtering (example: `?q=coffee`), combinable with optional `status` filters.
   The `q` value is limited to 120 characters.
+- `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
+  keyword filtering across name, email, phone, website, city, and country. The `q` value is
+  limited to 120 characters.
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.
