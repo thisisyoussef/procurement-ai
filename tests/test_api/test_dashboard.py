@@ -1,7 +1,8 @@
 """Tests for dashboard API project start flow."""
 
+import asyncio
 import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,7 @@ from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
+from app.services.dashboard_service import get_dashboard_contacts_for_user
 from app.services.project_store import (
     StoreUnavailableError,
     get_legacy_project_dict,
@@ -802,6 +804,75 @@ def test_dashboard_contacts_rejects_overlong_query():
     response = client.get(f"/api/v1/dashboard/contacts?q={query}", headers=_auth_headers())
 
     assert response.status_code == 422
+
+
+def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
+    rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Acme Precision Metals",
+            "website": "https://acme.example",
+            "email": "sales@acme.example",
+            "phone": "+1 (312) 555-0142",
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 12,
+            "project_count": 3,
+            "last_interaction_at": 1710000000.0,
+            "last_project_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        }
+    ]
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=rows),
+    ) as list_contacts:
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=1,
+                contact_query="  acme  ",
+            )
+        )
+
+    assert response.count == 1
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=1,
+        contact_query="acme",
+    )
+
+
+def test_dashboard_contacts_service_passes_none_query_to_repository():
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ) as list_contacts:
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=5,
+                contact_query="   ",
+            )
+        )
+
+    assert response.count == 0
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=5,
+        contact_query=None,
+    )
 
 
 def test_contact_matches_query_matches_name_email_phone_and_location():

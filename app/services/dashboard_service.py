@@ -558,6 +558,9 @@ async def get_dashboard_contacts_for_user(
     limit: int = 50,
     contact_query: str | None = None,
 ) -> DashboardContactsResponse:
+    normalized_query = (contact_query or "").strip()
+    query_filter = normalized_query or None
+
     try:
         await _ensure_dashboard_schema()
         async with async_session_factory() as session:
@@ -565,14 +568,11 @@ async def get_dashboard_contacts_for_user(
                 session=session,
                 user_id=user_id,
                 limit=limit,
+                contact_query=query_filter,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard contacts query failed", exc_info=True)
         rows = []
-
-    normalized_query = (contact_query or "").strip()
-    if normalized_query:
-        rows = [row for row in rows if _contact_matches_query(row, normalized_query)]
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
