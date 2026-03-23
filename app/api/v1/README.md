@@ -43,6 +43,10 @@
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
   limited to 120 characters. Query filtering is applied before response limiting so relevant
   matches are preserved.
+- `GET /api/v1/dashboard/activity` falls back to in-memory per-project timeline events
+  (newest first) when DB-backed dashboard activity rows are unavailable, and keeps
+  cursor pagination behavior (`cursor` returns older events only, `next_cursor` is the
+  last event timestamp returned).
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.

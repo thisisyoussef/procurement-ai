@@ -405,6 +405,32 @@ def _activity_from_timeline(project: dict[str, Any], project_name: str) -> list[
     return events
 
 
+async def _runtime_activity_for_user(
+    *,
+    user_id: str,
+    limit: int,
+    cursor: float | None,
+) -> list[DashboardActivityItem]:
+    try:
+        projects = await get_project_store().list_projects()
+    except Exception:  # noqa: BLE001
+        logger.warning("Dashboard runtime activity query failed", exc_info=True)
+        return []
+
+    user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
+    fallback_events: list[DashboardActivityItem] = []
+    for project in user_projects:
+        name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "Project"
+        fallback_events.extend(_activity_from_timeline(project, name))
+
+    fallback_events.sort(key=lambda item: (-item.at, item.id))
+
+    if cursor is not None:
+        fallback_events = [item for item in fallback_events if item.at < cursor]
+
+    return fallback_events[: max(1, limit)]
+
+
 async def _db_activity_for_user(user_id: str, limit: int, cursor: float | None) -> list[DashboardActivityItem]:
     try:
         await _ensure_dashboard_schema()
@@ -472,12 +498,7 @@ async def get_dashboard_summary_for_user(
 
     if not activity:
         # Fallback to in-project timeline events so UI still has a feed without DB events.
-        fallback_events: list[DashboardActivityItem] = []
-        for project in user_projects:
-            name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "Project"
-            fallback_events.extend(_activity_from_timeline(project, name))
-        fallback_events.sort(key=lambda item: item.at, reverse=True)
-        activity = fallback_events[:20]
+        activity = await _runtime_activity_for_user(user_id=user_id, limit=20, cursor=None)
 
     project_name_by_id = {card.id: card.name for card in project_cards}
     for event in activity:
@@ -531,6 +552,8 @@ async def get_dashboard_activity_for_user(
     cursor: float | None,
 ) -> tuple[list[DashboardActivityItem], str | None]:
     events = await _db_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
+    if not events:
+        events = await _runtime_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
     next_cursor = None
     if events:
         next_cursor = str(events[-1].at)

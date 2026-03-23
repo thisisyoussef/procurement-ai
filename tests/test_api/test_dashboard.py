@@ -10,6 +10,7 @@ from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
+from app.services.dashboard_service import get_dashboard_activity_for_user
 from app.services.dashboard_service import get_dashboard_contacts_for_user
 from app.services.project_store import (
     StoreUnavailableError,
@@ -891,3 +892,144 @@ def test_contact_matches_query_matches_name_email_phone_and_location():
     assert _contact_matches_query(contact, "detroit")
     assert not _contact_matches_query(contact, "toronto")
     assert not _contact_matches_query(contact, "555-9999")
+
+
+def test_dashboard_activity_service_falls_back_to_runtime_timeline_when_db_empty():
+    projects = [
+        {
+            "id": "proj-runtime-new",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "New runtime project",
+            "timeline_events": [
+                {
+                    "id": "evt-runtime-new",
+                    "timestamp": 300.0,
+                    "event_type": "project_created",
+                    "title": "Project started",
+                    "description": "Started sourcing.",
+                    "priority": "info",
+                }
+            ],
+        },
+        {
+            "id": "proj-runtime-old",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Old runtime project",
+            "timeline_events": [
+                {
+                    "id": "evt-runtime-old",
+                    "timestamp": 200.0,
+                    "event_type": "supplier_verified",
+                    "title": "Supplier verified",
+                    "description": "Verification done.",
+                    "priority": "info",
+                }
+            ],
+        },
+        {
+            "id": "proj-other-user",
+            "user_id": "00000000-0000-0000-0000-000000000099",
+            "title": "Other user project",
+            "timeline_events": [
+                {
+                    "id": "evt-other-user",
+                    "timestamp": 999.0,
+                    "event_type": "project_created",
+                    "title": "Other project started",
+                    "description": "Should not appear.",
+                    "priority": "info",
+                }
+            ],
+        },
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=projects)
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=[])), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, next_cursor = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=2,
+                cursor=None,
+            )
+        )
+
+    assert [event.id for event in events] == ["evt-runtime-new", "evt-runtime-old"]
+    assert [event.project_name for event in events] == ["New runtime project", "Old runtime project"]
+    assert next_cursor == "200.0"
+
+
+def test_dashboard_activity_service_runtime_fallback_honors_cursor():
+    projects = [
+        {
+            "id": "proj-runtime",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Runtime project",
+            "timeline_events": [
+                {
+                    "id": "evt-runtime-300",
+                    "timestamp": 300.0,
+                    "event_type": "project_created",
+                    "title": "Project started",
+                    "description": "Started sourcing.",
+                    "priority": "info",
+                },
+                {
+                    "id": "evt-runtime-250",
+                    "timestamp": 250.0,
+                    "event_type": "supplier_contacted",
+                    "title": "Supplier contacted",
+                    "description": "Email sent.",
+                    "priority": "info",
+                },
+                {
+                    "id": "evt-runtime-100",
+                    "timestamp": 100.0,
+                    "event_type": "supplier_responded",
+                    "title": "Supplier responded",
+                    "description": "Quote received.",
+                    "priority": "info",
+                },
+            ],
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=projects)
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=[])), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, next_cursor = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                cursor=250.0,
+            )
+        )
+
+    assert [event.id for event in events] == ["evt-runtime-100"]
+    assert next_cursor == "100.0"
+
+
+def test_dashboard_activity_service_runtime_fallback_returns_no_cursor_without_events():
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=[])
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=[])), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, next_cursor = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=5,
+                cursor=None,
+            )
+        )
+
+    assert events == []
+    assert next_cursor is None
