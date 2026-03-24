@@ -1050,6 +1050,137 @@ def test_dashboard_contacts_service_runtime_fallback_deduplicates_across_project
     assert supplier.last_project_id == "proj-runtime-new"
 
 
+def test_dashboard_contacts_service_merges_db_and_runtime_contacts():
+    db_rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Acme Precision Metals",
+            "website": None,
+            "email": "sales@acme.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 12,
+            "project_count": 3,
+            "last_interaction_at": 1710000000.0,
+            "last_project_id": "proj-db-1",
+        }
+    ]
+    runtime_projects = [
+        {
+            "id": "proj-runtime-1",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "Acme Precision Metals",
+                        "website": "https://acme.example",
+                        "email": "sales@acme.example",
+                    },
+                    {
+                        "supplier_id": "22222222-2222-2222-2222-222222222222",
+                        "name": "Bravo Molding",
+                        "email": "hello@bravo.example",
+                    },
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=db_rows),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                contact_query=None,
+            )
+        )
+
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals", "Bravo Molding"]
+    acme = response.suppliers[0]
+    assert acme.interaction_count == 12
+    assert acme.website == "https://acme.example"
+    assert acme.last_project_id == "proj-runtime-1"
+
+
+def test_dashboard_contacts_service_merges_with_query_filter_before_limit():
+    db_rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Acme Precision Metals",
+            "website": "https://acme.example",
+            "email": "sales@acme.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 12,
+            "project_count": 3,
+            "last_interaction_at": 1710000000.0,
+            "last_project_id": "proj-db-1",
+        }
+    ]
+    runtime_projects = [
+        {
+            "id": "proj-runtime-1",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "Acme Precision Metals",
+                        "email": "sales@acme.example",
+                    },
+                    {
+                        "supplier_id": "33333333-3333-3333-3333-333333333333",
+                        "name": "Acme Plastics",
+                        "email": "contact@acmeplastics.example",
+                    },
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=db_rows),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=1,
+                contact_query="acme",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
+
 def test_contact_matches_query_matches_name_email_phone_and_location():
     contact = {
         "name": "Acme Precision Metals",

@@ -685,6 +685,75 @@ async def _runtime_contacts_for_user(
     return rows[: max(1, min(limit, 200))]
 
 
+def _merge_contact_rows(
+    *,
+    primary_rows: list[dict[str, Any]],
+    supplemental_rows: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+
+    def _upsert(row: dict[str, Any]) -> None:
+        key, supplier_id = _runtime_contact_key_and_id(row)
+        existing = merged.get(key)
+        if not existing:
+            merged[key] = {
+                "supplier_id": row.get("supplier_id") or supplier_id,
+                "name": row.get("name"),
+                "website": row.get("website"),
+                "email": row.get("email"),
+                "phone": row.get("phone"),
+                "city": row.get("city"),
+                "country": row.get("country"),
+                "interaction_count": int(row.get("interaction_count") or 0),
+                "project_count": int(row.get("project_count") or 0),
+                "last_interaction_at": row.get("last_interaction_at"),
+                "last_project_id": row.get("last_project_id"),
+            }
+            return
+
+        existing["interaction_count"] = max(
+            int(existing.get("interaction_count") or 0),
+            int(row.get("interaction_count") or 0),
+        )
+        existing["project_count"] = max(
+            int(existing.get("project_count") or 0),
+            int(row.get("project_count") or 0),
+        )
+
+        row_last_interaction = float(row.get("last_interaction_at") or 0)
+        existing_last_interaction = float(existing.get("last_interaction_at") or 0)
+        if row_last_interaction >= existing_last_interaction:
+            existing["last_interaction_at"] = row.get("last_interaction_at")
+            existing["last_project_id"] = row.get("last_project_id") or existing.get("last_project_id")
+
+        if not existing.get("email") and row.get("email"):
+            existing["email"] = row.get("email")
+        if not existing.get("phone") and row.get("phone"):
+            existing["phone"] = row.get("phone")
+        if not existing.get("website") and row.get("website"):
+            existing["website"] = row.get("website")
+        if not existing.get("city") and row.get("city"):
+            existing["city"] = row.get("city")
+        if not existing.get("country") and row.get("country"):
+            existing["country"] = row.get("country")
+
+    for row in primary_rows:
+        _upsert(row)
+    for row in supplemental_rows:
+        _upsert(row)
+
+    rows = list(merged.values())
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("interaction_count") or 0),
+            -float(row.get("last_interaction_at") or 0),
+            str(row.get("name") or "").lower(),
+        )
+    )
+    return rows[: max(1, min(limit, 200))]
+
+
 async def get_dashboard_contacts_for_user(
     *,
     user_id: str,
@@ -711,12 +780,16 @@ async def get_dashboard_contacts_for_user(
             contact_query=query_filter,
         )
     else:
-        if not rows:
-            rows = await _runtime_contacts_for_user(
-                user_id=user_id,
-                limit=limit,
-                contact_query=query_filter,
-            )
+        runtime_rows = await _runtime_contacts_for_user(
+            user_id=user_id,
+            limit=200,
+            contact_query=query_filter,
+        )
+        rows = _merge_contact_rows(
+            primary_rows=rows,
+            supplemental_rows=runtime_rows,
+            limit=limit,
+        )
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
