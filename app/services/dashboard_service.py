@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -575,6 +576,115 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
     return any(needle in value.lower() for value in searchable)
 
 
+def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
+    supplier_id = str(contact.get("supplier_id") or "").strip()
+    if supplier_id:
+        return f"id:{supplier_id}", supplier_id
+
+    normalized_name = str(contact.get("name") or "").strip().lower()
+    normalized_email = str(contact.get("email") or "").strip().lower()
+    normalized_phone = str(contact.get("phone") or "").strip().lower()
+    normalized_website = str(contact.get("website") or "").strip().lower()
+    raw_key = "|".join([normalized_name, normalized_email, normalized_phone, normalized_website])
+    if not raw_key.strip("|"):
+        raw_key = "unknown"
+    stable_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"dashboard-runtime-contact:{raw_key}"))
+    return f"derived:{raw_key}", stable_id
+
+
+async def _runtime_contacts_for_user(
+    *,
+    user_id: str,
+    limit: int,
+    contact_query: str | None,
+) -> list[dict[str, Any]]:
+    try:
+        projects = await get_project_store().list_projects()
+    except Exception:  # noqa: BLE001
+        logger.warning("Dashboard runtime contacts query failed", exc_info=True)
+        return []
+
+    normalized_query = (contact_query or "").strip()
+    aggregated: dict[str, dict[str, Any]] = {}
+    seen_projects_by_supplier: dict[str, set[str]] = {}
+
+    for project in projects:
+        if str(project.get("user_id")) != str(user_id):
+            continue
+
+        project_id = str(project.get("id") or "")
+        project_ts = _parse_sort_timestamp(project.get("updated_at") or project.get("created_at"))
+        suppliers = ((project.get("discovery_results") or {}).get("suppliers") or [])
+        for supplier in suppliers:
+            if not isinstance(supplier, dict):
+                continue
+
+            contact = {
+                "supplier_id": supplier.get("supplier_id"),
+                "name": str(supplier.get("name") or "").strip(),
+                "website": supplier.get("website"),
+                "email": supplier.get("email"),
+                "phone": supplier.get("phone"),
+                "city": supplier.get("city"),
+                "country": supplier.get("country"),
+            }
+            if not contact["name"]:
+                continue
+            if normalized_query and not _contact_matches_query(contact, normalized_query):
+                continue
+
+            supplier_key, supplier_id = _runtime_contact_key_and_id(contact)
+            project_ids = seen_projects_by_supplier.setdefault(supplier_key, set())
+
+            existing = aggregated.get(supplier_key)
+            if not existing:
+                aggregated[supplier_key] = {
+                    "supplier_id": supplier_id,
+                    "name": contact["name"],
+                    "website": contact["website"],
+                    "email": contact["email"],
+                    "phone": contact["phone"],
+                    "city": contact["city"],
+                    "country": contact["country"],
+                    "interaction_count": 1,
+                    "project_count": 1 if project_id else 0,
+                    "last_interaction_at": project_ts or None,
+                    "last_project_id": project_id or None,
+                }
+                if project_id:
+                    project_ids.add(project_id)
+                continue
+
+            existing["interaction_count"] += 1
+            if project_id and project_id not in project_ids:
+                project_ids.add(project_id)
+                existing["project_count"] += 1
+            if project_ts >= float(existing.get("last_interaction_at") or 0):
+                existing["last_interaction_at"] = project_ts or None
+                existing["last_project_id"] = project_id or existing.get("last_project_id")
+
+            if not existing.get("email") and contact.get("email"):
+                existing["email"] = contact["email"]
+            if not existing.get("phone") and contact.get("phone"):
+                existing["phone"] = contact["phone"]
+            if not existing.get("website") and contact.get("website"):
+                existing["website"] = contact["website"]
+            if not existing.get("city") and contact.get("city"):
+                existing["city"] = contact["city"]
+            if not existing.get("country") and contact.get("country"):
+                existing["country"] = contact["country"]
+
+    rows = list(aggregated.values())
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("interaction_count") or 0),
+            -float(row.get("last_interaction_at") or 0),
+            str(row.get("name") or "").lower(),
+        )
+    )
+    return rows[: max(1, min(limit, 200))]
+
+
 async def get_dashboard_contacts_for_user(
     *,
     user_id: str,
@@ -595,7 +705,18 @@ async def get_dashboard_contacts_for_user(
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard contacts query failed", exc_info=True)
-        rows = []
+        rows = await _runtime_contacts_for_user(
+            user_id=user_id,
+            limit=limit,
+            contact_query=query_filter,
+        )
+    else:
+        if not rows:
+            rows = await _runtime_contacts_for_user(
+                user_id=user_id,
+                limit=limit,
+                contact_query=query_filter,
+            )
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))

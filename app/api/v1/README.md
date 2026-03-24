@@ -43,6 +43,9 @@
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
   limited to 120 characters. Query filtering is applied before response limiting so relevant
   matches are preserved.
+- `GET /api/v1/dashboard/contacts` falls back to runtime project discovery contacts when DB-backed
+  contacts are unavailable or return no rows, while preserving user ownership and optional `q`
+  filtering behavior.
 - `GET /api/v1/dashboard/activity` falls back to in-memory per-project timeline events
   (newest first) when DB-backed dashboard activity rows are unavailable, and keeps
   cursor pagination behavior (`cursor` returns older events only, `next_cursor` is the
