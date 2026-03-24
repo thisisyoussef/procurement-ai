@@ -19,6 +19,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 ## Search Behavior
 - `GET /api/v1/projects?q=...` and `GET /api/v1/dashboard/summary?q=...` match keywords against both project titles and product descriptions (case-insensitive).
 - `GET /api/v1/dashboard/contacts?q=...` matches supplier keyword fragments against contact name, email, phone, website, city, and country (case-insensitive), with query filtering applied before result limiting so relevant matches are not dropped.
+- `GET /api/v1/dashboard/contacts` falls back to runtime project discovery contacts when DB-backed contacts are unavailable or return no rows, while preserving user scoping and `q` filtering behavior.
 - `GET /api/v1/dashboard/activity` now falls back to per-project runtime timeline events (newest first) when DB-backed dashboard events are unavailable, while preserving `cursor` pagination semantics.
 - Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
 - `POST /api/v1/projects/{id}/answer` now returns a safe `500` detail (`"Failed to process answers. Please try again."`) for unexpected failures, without exposing internal exception strings.

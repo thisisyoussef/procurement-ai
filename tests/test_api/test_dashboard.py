@@ -876,6 +876,180 @@ def test_dashboard_contacts_service_passes_none_query_to_repository():
     )
 
 
+def test_dashboard_contacts_service_falls_back_to_runtime_contacts_when_db_unavailable():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-1",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "Acme Precision Metals",
+                        "website": "https://acme.example",
+                        "email": "sales@acme.example",
+                        "phone": "+1 (312) 555-0142",
+                        "city": "Detroit",
+                        "country": "USA",
+                    }
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(side_effect=RuntimeError("db unavailable")),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                contact_query=None,
+            )
+        )
+
+    assert response.count == 1
+    assert response.suppliers[0].name == "Acme Precision Metals"
+    assert response.suppliers[0].email == "sales@acme.example"
+    assert response.suppliers[0].last_project_id == "proj-runtime-1"
+
+
+def test_dashboard_contacts_service_runtime_fallback_filters_before_limit():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-2",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T11:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "22222222-2222-2222-2222-222222222222",
+                        "name": "Bravo Molding",
+                        "email": "hello@bravo.example",
+                    },
+                    {
+                        "supplier_id": "33333333-3333-3333-3333-333333333333",
+                        "name": "Acme Plastics",
+                        "email": "contact@acmeplastics.example",
+                    },
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=1,
+                contact_query="acme",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Plastics"]
+
+
+def test_dashboard_contacts_service_runtime_fallback_deduplicates_across_projects():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-old",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-19T09:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                        "name": "Acme Precision Metals",
+                        "email": "sales@acme.example",
+                    }
+                ]
+            },
+        },
+        {
+            "id": "proj-runtime-new",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-21T09:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                        "name": "Acme Precision Metals",
+                        "email": "sales@acme.example",
+                    }
+                ]
+            },
+        },
+        {
+            "id": "proj-other-user",
+            "user_id": "00000000-0000-0000-0000-000000000099",
+            "updated_at": "2026-03-22T09:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                        "name": "Other User Supplier",
+                    }
+                ]
+            },
+        },
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                contact_query="acme",
+            )
+        )
+
+    assert response.count == 1
+    supplier = response.suppliers[0]
+    assert supplier.name == "Acme Precision Metals"
+    assert supplier.project_count == 2
+    assert supplier.interaction_count == 2
+    assert supplier.last_project_id == "proj-runtime-new"
+
+
 def test_contact_matches_query_matches_name_email_phone_and_location():
     contact = {
         "name": "Acme Precision Metals",
