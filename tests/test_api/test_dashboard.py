@@ -6,7 +6,7 @@ from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
+from app.api.v1.dashboard import CONTACT_QUERY_TOO_SHORT_DETAIL, PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
@@ -805,6 +805,28 @@ def test_dashboard_contacts_rejects_overlong_query():
     response = client.get(f"/api/v1/dashboard/contacts?q={query}", headers=_auth_headers())
 
     assert response.status_code == 422
+
+
+def test_dashboard_contacts_rejects_too_short_non_whitespace_query():
+    response = client.get("/api/v1/dashboard/contacts?q=a", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == CONTACT_QUERY_TOO_SHORT_DETAIL
+
+
+def test_dashboard_contacts_accepts_two_character_query():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get("/api/v1/dashboard/contacts?q=ab", headers=_auth_headers())
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        contact_query="ab",
+    )
 
 
 def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
