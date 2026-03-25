@@ -10,8 +10,9 @@ import logging
 import time
 import traceback
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.agents.orchestrator import (
@@ -84,6 +85,11 @@ ACTIVE_PIPELINE_STATUSES = {
     "recommending",
     "outreaching",
 }
+LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled"}
+TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
+PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
+PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
+PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL = "Retrospective has already been submitted for this project."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
 DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
@@ -101,6 +107,59 @@ _STAGE_PHASE = {
     "failed": "brief",
     "canceled": "brief",
 }
+
+
+def normalize_project_status_filters(status_values: list[str] | None) -> set[str] | None:
+    """Normalize list query filters and expand supported aliases."""
+    if not status_values:
+        return None
+
+    normalized: set[str] = set()
+    for raw_value in status_values:
+        if not raw_value:
+            continue
+        for token in raw_value.split(","):
+            cleaned = token.strip().lower()
+            if cleaned:
+                normalized.add(cleaned)
+    if not normalized:
+        return None
+
+    expanded: set[str] = set()
+    for value in normalized:
+        if value == "active":
+            expanded.update(ACTIVE_PIPELINE_STATUSES)
+            continue
+        if value == "closed":
+            expanded.update(TERMINAL_PROJECT_STATUSES)
+            continue
+        expanded.add(value)
+
+    invalid_statuses = sorted(expanded - LISTABLE_PROJECT_STATUSES)
+    if invalid_statuses:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Invalid status filter value(s): "
+                + ", ".join(invalid_statuses)
+                + ". Allowed values: "
+                + ", ".join(sorted(LISTABLE_PROJECT_STATUSES | {"active", "closed"}))
+            ),
+        )
+
+    return expanded
+
+
+def _normalized_project_status(project: dict) -> str:
+    return str(project.get("status") or "").strip().lower()
+
+
+def _normalized_stage_name(project: dict) -> str:
+    """Return a canonical stage name for list responses."""
+    normalized_stage = str(project.get("current_stage") or "").strip().lower()
+    if normalized_stage:
+        return normalized_stage
+    return _normalized_project_status(project)
 
 
 def _stage_title(stage_name: str) -> str:
@@ -147,6 +206,8 @@ def _enforce_project_ownership(project: dict, current_user: AuthUser) -> None:
 
 
 async def _save_project(project: dict) -> None:
+    project.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    project["updated_at"] = datetime.now(timezone.utc).isoformat()
     store = get_project_store()
     try:
         await store.save_project(project)
@@ -155,6 +216,9 @@ async def _save_project(project: dict) -> None:
 
 
 async def _create_project(project: dict) -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    project.setdefault("created_at", now_iso)
+    project.setdefault("updated_at", now_iso)
     store = get_project_store()
     try:
         await store.create_project(project)
@@ -253,7 +317,7 @@ async def create_project(
         raise
     except Exception as e:
         logger.exception("Failed to create project")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}\n{traceback.format_exc()}") from e
+        raise HTTPException(status_code=500, detail=PROJECT_START_FAILURE_DETAIL) from e
 
 
 def _sync_state_to_project(project: dict, state: GraphState) -> None:
@@ -885,6 +949,7 @@ async def get_project_status(
         clarifying_questions=project.get("clarifying_questions"),
         decision_preference=project.get("decision_preference"),
         buyer_context=project.get("buyer_context"),
+        retrospective=project.get("retrospective"),
         active_checkpoint=project.get("active_checkpoint"),
         proactive_alerts=project.get("proactive_alerts", []),
     )
@@ -1216,7 +1281,7 @@ Return ONLY the updated JSON object (same schema as the input requirements)."""
         raise
     except Exception as e:  # noqa: BLE001
         logger.error("Answer processing failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=PROJECT_ANSWER_FAILURE_DETAIL) from e
 
 
 @router.post("/{project_id}/checkpoint")
@@ -1341,6 +1406,16 @@ async def submit_retro(
     """Persist post-project retrospective feedback and update user profile learning."""
     project = await _get_project_or_404(project_id)
     _enforce_project_ownership(project, current_user)
+    if _normalized_project_status(project) != "complete":
+        raise HTTPException(
+            status_code=400,
+            detail="Retrospective can only be submitted for completed projects",
+        )
+    if project.get("retrospective"):
+        raise HTTPException(
+            status_code=409,
+            detail=PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
+        )
 
     project["retrospective"] = request.model_dump(mode="json")
 
@@ -1371,21 +1446,68 @@ async def submit_retro(
 @router.get("")
 async def list_projects(
     current_user: AuthUser = Depends(get_current_auth_user),
+    status: list[str] | None = Query(
+        default=None,
+        description=(
+            "Optional project status filter. Repeat the parameter to include multiple values, "
+            "for example ?status=parsing&status=discovering."
+        ),
+    ),
+    q: str | None = Query(
+        default=None,
+        max_length=120,
+        description="Optional case-insensitive project title or description keyword filter.",
+    ),
 ):
-    """List all projects (for demo purposes)."""
+    """List current user's projects with active work first, then recent activity."""
     store = get_project_store()
     try:
         projects = await store.list_projects()
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
 
+    def _timestamp_sort_value(project: dict, field: str) -> float:
+        value = project.get(field)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if not value:
+            return 0.0
+        try:
+            normalized = str(value).replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized).timestamp()
+        except ValueError:
+            return 0.0
+
+    def _sort_key(project: dict) -> tuple[int, float, float]:
+        status = _normalized_project_status(project)
+        is_active = 1 if status in ACTIVE_PIPELINE_STATUSES else 0
+        updated = _timestamp_sort_value(project, "updated_at")
+        created = _timestamp_sort_value(project, "created_at")
+        return (is_active, updated, created)
+
+    normalized_statuses = normalize_project_status_filters(status)
+    query_text = (q or "").strip().lower()
+
+    user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
+    if normalized_statuses:
+        user_projects = [project for project in user_projects if _normalized_project_status(project) in normalized_statuses]
+    if query_text:
+        user_projects = [
+            project
+            for project in user_projects
+            if query_text in str(project.get("title") or "").strip().lower()
+            or query_text in str(project.get("product_description") or "").strip().lower()
+        ]
+    ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
+
     return [
         {
             "id": p.get("id"),
             "title": p.get("title"),
-            "status": p.get("status"),
-            "current_stage": p.get("current_stage"),
+            "status": _normalized_project_status(p),
+            "current_stage": _normalized_stage_name(p),
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at"),
         }
-        for p in projects
-        if str(p.get("user_id")) == str(current_user.user_id)
+        for p in ordered_projects
     ]

@@ -12,7 +12,6 @@ import { m } from '@/lib/motion'
 import { staggerContainer, cardEntrance, fadeUp, slideInLeft } from '@/lib/motion/variants'
 import {
   AuthUser,
-  authFetch,
   clearAuthSession,
   fetchCurrentUser,
   getStoredAccessToken,
@@ -29,6 +28,71 @@ import { trackTraceEvent } from '@/lib/telemetry'
 import './dashboard.css'
 
 type TabKey = 'home' | 'projects' | 'contacts'
+type ProjectStatusFilter =
+  | 'active'
+  | 'closed'
+  | 'parsing'
+  | 'clarifying'
+  | 'steering'
+  | 'discovering'
+  | 'verifying'
+  | 'comparing'
+  | 'recommending'
+  | 'outreaching'
+  | 'complete'
+  | 'failed'
+  | 'canceled'
+
+type StatusPreset = 'all' | 'active' | 'closed' | 'complete' | 'failed'
+
+const ACTIVE_FILTER_STATUSES: ProjectStatusFilter[] = [
+  'parsing',
+  'clarifying',
+  'steering',
+  'discovering',
+  'verifying',
+  'comparing',
+  'recommending',
+  'outreaching',
+]
+
+const ALL_STATUS_FILTERS = new Set<ProjectStatusFilter>([
+  'active',
+  'closed',
+  ...ACTIVE_FILTER_STATUSES,
+  'complete',
+  'failed',
+  'canceled',
+])
+
+const STATUS_PRESETS: Array<{ key: StatusPreset; label: string; statuses: ProjectStatusFilter[] }> = [
+  { key: 'all', label: 'All', statuses: [] },
+  { key: 'active', label: 'Active', statuses: ['active'] },
+  { key: 'closed', label: 'Closed', statuses: ['closed'] },
+  { key: 'complete', label: 'Complete', statuses: ['complete'] },
+  { key: 'failed', label: 'Failed', statuses: ['failed'] },
+]
+
+function normalizeStatusFilters(values: string[]): ProjectStatusFilter[] {
+  const normalized: ProjectStatusFilter[] = []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const candidate = value.trim().toLowerCase() as ProjectStatusFilter
+    if (!ALL_STATUS_FILTERS.has(candidate) || seen.has(candidate)) continue
+    seen.add(candidate)
+    normalized.push(candidate)
+  }
+  return normalized
+}
+
+function isSameStatusSet(left: ProjectStatusFilter[], right: ProjectStatusFilter[]): boolean {
+  if (left.length !== right.length) return false
+  return left.every((value) => right.includes(value))
+}
+
+function normalizeProjectQuery(value: string | null): string {
+  return (value || '').trim()
+}
 
 function statusClass(project: DashboardProjectCard): string {
   if (project.status === 'complete') return 'complete'
@@ -72,6 +136,9 @@ function DashboardPageContent() {
   const [contactsError, setContactsError] = useState<string | null>(null)
 
   const [tab, setTab] = useState<TabKey>('home')
+  const [selectedStatuses, setSelectedStatuses] = useState<ProjectStatusFilter[]>([])
+  const [projectQuery, setProjectQuery] = useState('')
+  const [contactsQuery, setContactsQuery] = useState('')
 
   const [searchInput, setSearchInput] = useState('')
   const [searchSubmitting, setSearchSubmitting] = useState(false)
@@ -113,11 +180,23 @@ function DashboardPageContent() {
     setTab('home')
   }, [searchParams])
 
+  useEffect(() => {
+    setSelectedStatuses(normalizeStatusFilters(searchParams.getAll('status')))
+  }, [searchParams])
+
+  useEffect(() => {
+    setProjectQuery(normalizeProjectQuery(searchParams.get('q')))
+  }, [searchParams])
+
+  useEffect(() => {
+    setContactsQuery(normalizeProjectQuery(searchParams.get('contacts_q')))
+  }, [searchParams])
+
   const loadSummary = async () => {
     setSummaryLoading(true)
     setSummaryError(null)
     try {
-      const data = await dashboardClient.getSummary()
+      const data = await dashboardClient.getSummary(selectedStatuses, projectQuery)
       setSummary(data)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -131,7 +210,7 @@ function DashboardPageContent() {
     setContactsLoading(true)
     setContactsError(null)
     try {
-      const data = await dashboardClient.getContacts(100)
+      const data = await dashboardClient.getContacts(100, contactsQuery)
       setContacts(data)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -148,12 +227,12 @@ function DashboardPageContent() {
       void loadSummary()
     }, 25000)
     return () => clearInterval(interval)
-  }, [authUser])
+  }, [authUser, selectedStatuses, projectQuery])
 
   useEffect(() => {
     if (!authUser || tab !== 'contacts') return
     void loadContacts()
-  }, [authUser, tab])
+  }, [authUser, tab, contactsQuery])
 
   const greeting = summary?.greeting
 
@@ -173,12 +252,43 @@ function DashboardPageContent() {
     trackTraceEvent('dashboard_tab_change', { tab: nextTab }, { path: '/dashboard' })
   }
 
+  const applyStatusPreset = (preset: StatusPreset) => {
+    const nextStatuses = STATUS_PRESETS.find((item) => item.key === preset)?.statuses ?? []
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('status')
+    for (const status of nextStatuses) params.append('status', status)
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
+    trackTraceEvent('dashboard_status_filter_change', { preset, statuses: nextStatuses }, { path: '/dashboard' })
+  }
+
+  const applyProjectQuery = (nextQuery: string) => {
+    const normalizedQuery = normalizeProjectQuery(nextQuery)
+    const params = new URLSearchParams(searchParams.toString())
+    if (normalizedQuery) params.set('q', normalizedQuery)
+    else params.delete('q')
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
+    trackTraceEvent('dashboard_project_filter_change', { query_length: normalizedQuery.length }, { path: '/dashboard' })
+  }
+
+  const applyContactsQuery = (nextQuery: string) => {
+    const normalizedQuery = normalizeProjectQuery(nextQuery)
+    const params = new URLSearchParams(searchParams.toString())
+    if (normalizedQuery) params.set('contacts_q', normalizedQuery)
+    else params.delete('contacts_q')
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : '/dashboard', { scroll: false })
+    trackTraceEvent('dashboard_contacts_filter_change', { query_length: normalizedQuery.length }, { path: '/dashboard' })
+  }
+
+  const activeStatusPreset: StatusPreset =
+    STATUS_PRESETS.find((preset) => isSameStatusSet(selectedStatuses, preset.statuses))?.key ?? 'all'
+
   const goToNewProjectView = () => {
     trackTraceEvent('dashboard_new_project_view_open', {}, { path: '/dashboard' })
     router.push('/product?new=1')
   }
-
-  const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '')
 
   const handleSearchSubmit = async () => {
     const trimmed = searchInput.trim()
@@ -189,35 +299,20 @@ function DashboardPageContent() {
     trackTraceEvent('dashboard_search_submit', { description_length: trimmed.length }, { path: '/dashboard' })
 
     try {
-      const res = await authFetch(`${API_BASE}/api/v1/projects`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: trimmed.slice(0, 80),
-          product_description: trimmed,
-        }),
+      const data = await dashboardClient.startProject({
+        title: trimmed.slice(0, 80),
+        description: trimmed,
+        source: 'dashboard_search',
       })
-
-      if (res.status === 401) {
+      trackTraceEvent('dashboard_search_started', { project_id: data.project_id }, { path: '/dashboard' })
+      router.push(data.redirect_path || `/product?projectId=${data.project_id}`)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      if (detail === 'Not authenticated' || detail.startsWith('HTTP 401')) {
         clearAuthSession()
         setAuthUser(null)
         return
       }
-
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`
-        try {
-          const payload = (await res.json()) as { detail?: string }
-          detail = payload.detail || detail
-        } catch { /* keep */ }
-        throw new Error(detail)
-      }
-
-      const data = (await res.json()) as { project_id: string }
-      trackTraceEvent('dashboard_search_started', { project_id: data.project_id }, { path: '/dashboard' })
-      router.push(`/product?projectId=${data.project_id}`)
-    } catch (err: any) {
-      const detail = err?.message || 'Could not start project. Try again.'
       setSearchError(detail)
       setSearchSubmitting(false)
     }
@@ -373,6 +468,42 @@ function DashboardPageContent() {
         {tab !== 'contacts' && (
           <div className="dash-projects">
             <div className="dash-section-label">Your projects</div>
+            <div className="dash-proj-filter-bar" role="group" aria-label="Filter projects by status">
+              {STATUS_PRESETS.map((preset) => (
+                <button
+                  type="button"
+                  key={preset.key}
+                  className={`dash-proj-filter ${activeStatusPreset === preset.key ? 'on' : ''}`}
+                  onClick={() => applyStatusPreset(preset.key)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="dash-search-bar" style={{ marginTop: 12 }}>
+              <input
+                className="dash-search-input"
+                placeholder="Filter projects by title"
+                value={projectQuery}
+                onChange={(e) => setProjectQuery(e.target.value)}
+                onBlur={() => applyProjectQuery(projectQuery)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') applyProjectQuery(projectQuery)
+                  if (e.key === 'Escape') {
+                    setProjectQuery('')
+                    applyProjectQuery('')
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="dash-search-btn"
+                onClick={() => applyProjectQuery(projectQuery)}
+                disabled={normalizeProjectQuery(projectQuery) === normalizeProjectQuery(searchParams.get('q'))}
+              >
+                Apply
+              </button>
+            </div>
             <m.div
               className="dash-proj-grid"
               variants={staggerContainer}
@@ -438,6 +569,13 @@ function DashboardPageContent() {
                 </div>
               </m.button>
             </m.div>
+            {summary && summary.projects.length === 0 && (
+              <div className="dash-empty">
+                {projectQuery
+                  ? 'No projects match this status and title filter yet.'
+                  : 'No projects match this status filter yet.'}
+              </div>
+            )}
           </div>
         )}
 
@@ -474,6 +612,33 @@ function DashboardPageContent() {
         {tab === 'contacts' && (
           <div>
             <div className="dash-section-label">Supplier contacts</div>
+            <div className="dash-search-bar" style={{ marginTop: 12, marginBottom: 12 }}>
+              <input
+                className="dash-search-input"
+                placeholder="Filter contacts by supplier, email, site, or location"
+                value={contactsQuery}
+                onChange={(e) => setContactsQuery(e.target.value)}
+                onBlur={() => applyContactsQuery(contactsQuery)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') applyContactsQuery(contactsQuery)
+                  if (e.key === 'Escape') {
+                    setContactsQuery('')
+                    applyContactsQuery('')
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="dash-search-btn"
+                onClick={() => applyContactsQuery(contactsQuery)}
+                disabled={
+                  normalizeProjectQuery(contactsQuery) ===
+                  normalizeProjectQuery(searchParams.get('contacts_q'))
+                }
+              >
+                Apply
+              </button>
+            </div>
             {contactsError && <div className="dash-error">Contacts error: {contactsError}</div>}
             {contactsLoading && !contacts && <div className="dash-empty">Loading contacts...</div>}
             {contacts && (

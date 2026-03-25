@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +32,7 @@ _dashboard_schema_ready = False
 _PHASE_LABELS = {
     "parsing": "Brief",
     "clarifying": "Brief",
+    "steering": "Brief",
     "discovering": "Search",
     "verifying": "Search",
     "comparing": "Compare",
@@ -44,6 +46,7 @@ _PHASE_LABELS = {
 _STAGE_PROGRESS = {
     "parsing": 1,
     "clarifying": 1,
+    "steering": 1,
     "discovering": 2,
     "verifying": 2,
     "comparing": 3,
@@ -59,6 +62,7 @@ _ACTIVE_STATUSES = {
     "clarifying",
     "discovering",
     "verifying",
+    "steering",
     "comparing",
     "recommending",
     "outreaching",
@@ -168,9 +172,53 @@ def _project_visual_variant(project_id: str) -> int:
     return int(digest[:2], 16) % 3 + 1
 
 
+def _is_active_status(status: Any) -> bool:
+    return str(status or "").strip().lower() in _ACTIVE_STATUSES
+
+
+def _normalized_status(project: dict[str, Any]) -> str:
+    return str(project.get("status") or "").strip().lower()
+
+
+def _normalized_stage(project: dict[str, Any]) -> str:
+    stage = str(project.get("current_stage") or "").strip().lower()
+    if stage:
+        return stage
+    return _normalized_status(project)
+
+
+def _parse_sort_timestamp(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sort_key(project: dict[str, Any]) -> tuple[int, float, float, str]:
+        status = _normalized_status(project)
+        updated_at = _parse_sort_timestamp(project.get("updated_at"))
+        created_at = _parse_sort_timestamp(project.get("created_at"))
+        return (
+            0 if _is_active_status(status) else 1,
+            -updated_at,
+            -created_at,
+            str(project.get("id") or ""),
+        )
+
+    return sorted(projects, key=_sort_key)
+
+
 def _project_status_note(project: dict[str, Any]) -> str:
-    status = project.get("status") or "unknown"
-    stage = project.get("current_stage") or status
+    status = _normalized_status(project) or "unknown"
+    stage = _normalized_stage(project) or status
     outreach = project.get("outreach_state") or {}
 
     if status == "clarifying":
@@ -211,14 +259,14 @@ def _project_status_note(project: dict[str, Any]) -> str:
 
 
 def _project_progress_step(project: dict[str, Any]) -> int:
-    stage = project.get("current_stage") or project.get("status") or "parsing"
+    stage = _normalized_stage(project) or "parsing"
     base = _STAGE_PROGRESS.get(stage, 1)
 
     outreach = project.get("outreach_state") or {}
     quotes = outreach.get("parsed_quotes") or []
     if quotes:
         base = max(base, 5)
-    if project.get("status") == "complete" and quotes:
+    if _normalized_status(project) == "complete" and quotes:
         base = 6
     return max(1, min(base, 6))
 
@@ -230,7 +278,8 @@ def _project_card(project: dict[str, Any]) -> DashboardProjectCard:
 
     name = parsed.get("product_type") or project.get("title") or "Untitled project"
     description = _truncate(project.get("product_description") or "No description.")
-    stage = project.get("current_stage") or project.get("status") or "parsing"
+    stage = _normalized_stage(project) or "parsing"
+    status = _normalized_status(project) or "unknown"
 
     stats = DashboardProjectStats(
         quotes_count=max(
@@ -250,7 +299,7 @@ def _project_card(project: dict[str, Any]) -> DashboardProjectCard:
         name=name,
         description=description,
         phase_label=_PHASE_LABELS.get(stage, stage.replace("_", " ").title()),
-        status=str(project.get("status") or "unknown"),
+        status=status,
         progress_step=_project_progress_step(project),
         progress_total=6,
         stats=stats,
@@ -357,6 +406,32 @@ def _activity_from_timeline(project: dict[str, Any], project_name: str) -> list[
     return events
 
 
+async def _runtime_activity_for_user(
+    *,
+    user_id: str,
+    limit: int,
+    cursor: float | None,
+) -> list[DashboardActivityItem]:
+    try:
+        projects = await get_project_store().list_projects()
+    except Exception:  # noqa: BLE001
+        logger.warning("Dashboard runtime activity query failed", exc_info=True)
+        return []
+
+    user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
+    fallback_events: list[DashboardActivityItem] = []
+    for project in user_projects:
+        name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "Project"
+        fallback_events.extend(_activity_from_timeline(project, name))
+
+    fallback_events.sort(key=lambda item: (-item.at, item.id))
+
+    if cursor is not None:
+        fallback_events = [item for item in fallback_events if item.at < cursor]
+
+    return fallback_events[: max(1, limit)]
+
+
 async def _db_activity_for_user(user_id: str, limit: int, cursor: float | None) -> list[DashboardActivityItem]:
     try:
         await _ensure_dashboard_schema()
@@ -396,30 +471,42 @@ async def get_dashboard_summary_for_user(
     user_id: str,
     full_name: str | None,
     email: str | None,
+    project_statuses: set[str] | None = None,
+    project_query: str | None = None,
 ) -> DashboardSummaryResponse:
     store = get_project_store()
     projects = await store.list_projects()
     user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
+    sorted_user_projects = _sorted_projects_for_dashboard(user_projects)
+    filtered_projects = sorted_user_projects
+    if project_statuses:
+        filtered_projects = [
+            project
+            for project in sorted_user_projects
+            if _normalized_status(project) in project_statuses
+        ]
+    if project_query:
+        filtered_projects = [
+            project
+            for project in filtered_projects
+            if project_query in str(project.get("title") or "").strip().lower()
+            or project_query in str(project.get("product_description") or "").strip().lower()
+        ]
 
-    project_cards = [_project_card(project) for project in user_projects]
-    attention = _attention_items(user_projects)
+    project_cards = [_project_card(project) for project in filtered_projects]
+    attention = _attention_items(filtered_projects)
     activity = await _db_activity_for_user(user_id=user_id, limit=20, cursor=None)
 
     if not activity:
         # Fallback to in-project timeline events so UI still has a feed without DB events.
-        fallback_events: list[DashboardActivityItem] = []
-        for project in user_projects:
-            name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "Project"
-            fallback_events.extend(_activity_from_timeline(project, name))
-        fallback_events.sort(key=lambda item: item.at, reverse=True)
-        activity = fallback_events[:20]
+        activity = await _runtime_activity_for_user(user_id=user_id, limit=20, cursor=None)
 
     project_name_by_id = {card.id: card.name for card in project_cards}
     for event in activity:
         if event.project_id and not event.project_name:
             event.project_name = project_name_by_id.get(event.project_id)
 
-    active_projects = sum(1 for p in user_projects if str(p.get("status")) in _ACTIVE_STATUSES)
+    active_projects = sum(1 for p in user_projects if _is_active_status(_normalized_status(p)))
     first = _first_name(full_name, email)
     daytime = _time_label_now()
 
@@ -466,13 +553,224 @@ async def get_dashboard_activity_for_user(
     cursor: float | None,
 ) -> tuple[list[DashboardActivityItem], str | None]:
     events = await _db_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
+    if not events:
+        events = await _runtime_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
     next_cursor = None
     if events:
         next_cursor = str(events[-1].at)
     return events, next_cursor
 
 
-async def get_dashboard_contacts_for_user(*, user_id: str, limit: int = 50) -> DashboardContactsResponse:
+def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    searchable = [
+        str(contact.get("name") or ""),
+        str(contact.get("email") or ""),
+        str(contact.get("phone") or ""),
+        str(contact.get("website") or ""),
+        str(contact.get("city") or ""),
+        str(contact.get("country") or ""),
+    ]
+    if any(needle in value.lower() for value in searchable):
+        return True
+
+    phone_needle = re.sub(r"\D", "", needle)
+    if not phone_needle:
+        return False
+
+    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
+    return bool(phone_value) and phone_needle in phone_value
+
+
+def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
+    supplier_id = str(contact.get("supplier_id") or "").strip()
+    if supplier_id:
+        return f"id:{supplier_id}", supplier_id
+
+    normalized_name = str(contact.get("name") or "").strip().lower()
+    normalized_email = str(contact.get("email") or "").strip().lower()
+    normalized_phone = str(contact.get("phone") or "").strip().lower()
+    normalized_website = str(contact.get("website") or "").strip().lower()
+    raw_key = "|".join([normalized_name, normalized_email, normalized_phone, normalized_website])
+    if not raw_key.strip("|"):
+        raw_key = "unknown"
+    stable_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"dashboard-runtime-contact:{raw_key}"))
+    return f"derived:{raw_key}", stable_id
+
+
+async def _runtime_contacts_for_user(
+    *,
+    user_id: str,
+    limit: int,
+    contact_query: str | None,
+) -> list[dict[str, Any]]:
+    try:
+        projects = await get_project_store().list_projects()
+    except Exception:  # noqa: BLE001
+        logger.warning("Dashboard runtime contacts query failed", exc_info=True)
+        return []
+
+    normalized_query = (contact_query or "").strip()
+    aggregated: dict[str, dict[str, Any]] = {}
+    seen_projects_by_supplier: dict[str, set[str]] = {}
+
+    for project in projects:
+        if str(project.get("user_id")) != str(user_id):
+            continue
+
+        project_id = str(project.get("id") or "")
+        project_ts = _parse_sort_timestamp(project.get("updated_at") or project.get("created_at"))
+        suppliers = ((project.get("discovery_results") or {}).get("suppliers") or [])
+        for supplier in suppliers:
+            if not isinstance(supplier, dict):
+                continue
+
+            contact = {
+                "supplier_id": supplier.get("supplier_id"),
+                "name": str(supplier.get("name") or "").strip(),
+                "website": supplier.get("website"),
+                "email": supplier.get("email"),
+                "phone": supplier.get("phone"),
+                "city": supplier.get("city"),
+                "country": supplier.get("country"),
+            }
+            if not contact["name"]:
+                continue
+            if normalized_query and not _contact_matches_query(contact, normalized_query):
+                continue
+
+            supplier_key, supplier_id = _runtime_contact_key_and_id(contact)
+            project_ids = seen_projects_by_supplier.setdefault(supplier_key, set())
+
+            existing = aggregated.get(supplier_key)
+            if not existing:
+                aggregated[supplier_key] = {
+                    "supplier_id": supplier_id,
+                    "name": contact["name"],
+                    "website": contact["website"],
+                    "email": contact["email"],
+                    "phone": contact["phone"],
+                    "city": contact["city"],
+                    "country": contact["country"],
+                    "interaction_count": 1,
+                    "project_count": 1 if project_id else 0,
+                    "last_interaction_at": project_ts or None,
+                    "last_project_id": project_id or None,
+                }
+                if project_id:
+                    project_ids.add(project_id)
+                continue
+
+            existing["interaction_count"] += 1
+            if project_id and project_id not in project_ids:
+                project_ids.add(project_id)
+                existing["project_count"] += 1
+            if project_ts >= float(existing.get("last_interaction_at") or 0):
+                existing["last_interaction_at"] = project_ts or None
+                existing["last_project_id"] = project_id or existing.get("last_project_id")
+
+            if not existing.get("email") and contact.get("email"):
+                existing["email"] = contact["email"]
+            if not existing.get("phone") and contact.get("phone"):
+                existing["phone"] = contact["phone"]
+            if not existing.get("website") and contact.get("website"):
+                existing["website"] = contact["website"]
+            if not existing.get("city") and contact.get("city"):
+                existing["city"] = contact["city"]
+            if not existing.get("country") and contact.get("country"):
+                existing["country"] = contact["country"]
+
+    rows = list(aggregated.values())
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("interaction_count") or 0),
+            -float(row.get("last_interaction_at") or 0),
+            str(row.get("name") or "").lower(),
+        )
+    )
+    return rows[: max(1, min(limit, 200))]
+
+
+def _merge_contact_rows(
+    *,
+    primary_rows: list[dict[str, Any]],
+    supplemental_rows: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+
+    def _upsert(row: dict[str, Any]) -> None:
+        key, supplier_id = _runtime_contact_key_and_id(row)
+        existing = merged.get(key)
+        if not existing:
+            merged[key] = {
+                "supplier_id": row.get("supplier_id") or supplier_id,
+                "name": row.get("name"),
+                "website": row.get("website"),
+                "email": row.get("email"),
+                "phone": row.get("phone"),
+                "city": row.get("city"),
+                "country": row.get("country"),
+                "interaction_count": int(row.get("interaction_count") or 0),
+                "project_count": int(row.get("project_count") or 0),
+                "last_interaction_at": row.get("last_interaction_at"),
+                "last_project_id": row.get("last_project_id"),
+            }
+            return
+
+        existing["interaction_count"] = max(
+            int(existing.get("interaction_count") or 0),
+            int(row.get("interaction_count") or 0),
+        )
+        existing["project_count"] = max(
+            int(existing.get("project_count") or 0),
+            int(row.get("project_count") or 0),
+        )
+
+        row_last_interaction = float(row.get("last_interaction_at") or 0)
+        existing_last_interaction = float(existing.get("last_interaction_at") or 0)
+        if row_last_interaction >= existing_last_interaction:
+            existing["last_interaction_at"] = row.get("last_interaction_at")
+            existing["last_project_id"] = row.get("last_project_id") or existing.get("last_project_id")
+
+        if not existing.get("email") and row.get("email"):
+            existing["email"] = row.get("email")
+        if not existing.get("phone") and row.get("phone"):
+            existing["phone"] = row.get("phone")
+        if not existing.get("website") and row.get("website"):
+            existing["website"] = row.get("website")
+        if not existing.get("city") and row.get("city"):
+            existing["city"] = row.get("city")
+        if not existing.get("country") and row.get("country"):
+            existing["country"] = row.get("country")
+
+    for row in primary_rows:
+        _upsert(row)
+    for row in supplemental_rows:
+        _upsert(row)
+
+    rows = list(merged.values())
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("interaction_count") or 0),
+            -float(row.get("last_interaction_at") or 0),
+            str(row.get("name") or "").lower(),
+        )
+    )
+    return rows[: max(1, min(limit, 200))]
+
+
+async def get_dashboard_contacts_for_user(
+    *,
+    user_id: str,
+    limit: int = 50,
+    contact_query: str | None = None,
+) -> DashboardContactsResponse:
+    normalized_query = (contact_query or "").strip()
+    query_filter = normalized_query or None
+
     try:
         await _ensure_dashboard_schema()
         async with async_session_factory() as session:
@@ -480,9 +778,26 @@ async def get_dashboard_contacts_for_user(*, user_id: str, limit: int = 50) -> D
                 session=session,
                 user_id=user_id,
                 limit=limit,
+                contact_query=query_filter,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard contacts query failed", exc_info=True)
-        rows = []
+        rows = await _runtime_contacts_for_user(
+            user_id=user_id,
+            limit=limit,
+            contact_query=query_filter,
+        )
+    else:
+        runtime_rows = await _runtime_contacts_for_user(
+            user_id=user_id,
+            limit=200,
+            contact_query=query_filter,
+        )
+        rows = _merge_contact_rows(
+            primary_rows=rows,
+            supplemental_rows=runtime_rows,
+            limit=limit,
+        )
+
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))

@@ -24,8 +24,17 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
 }
 
 export const dashboardClient = {
-  async getSummary(): Promise<DashboardSummaryResponse> {
-    const res = await authFetch(`${API_BASE}/api/v1/dashboard/summary`)
+  async getSummary(statuses: string[] = [], query?: string): Promise<DashboardSummaryResponse> {
+    const params = new URLSearchParams()
+    for (const status of statuses) {
+      if (status.trim()) params.append('status', status.trim().toLowerCase())
+    }
+    const normalizedQuery = (query || '').trim()
+    if (normalizedQuery) params.set('q', normalizedQuery)
+    const path = params.toString()
+      ? `${API_BASE}/api/v1/dashboard/summary?${params.toString()}`
+      : `${API_BASE}/api/v1/dashboard/summary`
+    const res = await authFetch(path)
     return parseJsonOrThrow<DashboardSummaryResponse>(res)
   },
 
@@ -37,8 +46,10 @@ export const dashboardClient = {
     return parseJsonOrThrow<DashboardActivityResponse>(res)
   },
 
-  async getContacts(limit = 50): Promise<DashboardContactsResponse> {
+  async getContacts(limit = 50, query?: string): Promise<DashboardContactsResponse> {
     const params = new URLSearchParams({ limit: String(limit) })
+    const normalizedQuery = (query || '').trim()
+    if (normalizedQuery) params.set('q', normalizedQuery)
     const res = await authFetch(`${API_BASE}/api/v1/dashboard/contacts?${params.toString()}`)
     return parseJsonOrThrow<DashboardContactsResponse>(res)
   },

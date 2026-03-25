@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 
 import { authFetch } from '@/lib/auth'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
@@ -14,6 +14,10 @@ export default function OrderPhase() {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const canSubmitRetrospective = status?.current_stage === 'complete'
+
+  useEffect(() => {
+    setSubmitted(Boolean(status?.retrospective))
+  }, [status?.retrospective])
 
   async function handleRetrospective(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

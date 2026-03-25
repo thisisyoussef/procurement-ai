@@ -10,6 +10,7 @@ from app.core.auth import AuthUser, create_access_token
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
+from app.api.v1.outreach import OUTREACH_START_FAILURE_DETAIL
 from app.main import app
 
 client = TestClient(app)
@@ -221,6 +222,42 @@ def test_outreach_start_normalizes_supplier_indices():
         assert send.status_code == 200
         assert send.json()["sent"] is True
         assert mock_send.await_args.kwargs["to"] == "sales@beta.example"
+
+
+def test_outreach_start_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-start-safe-error"
+    _seed_project(project_id)
+
+    with patch(
+        "app.api.v1.outreach.draft_outreach_emails",
+        new=AsyncMock(side_effect=RuntimeError("smtp password leaked in trace")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/start",
+            json={"supplier_indices": [0]},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_START_FAILURE_DETAIL
+    assert "smtp password leaked" not in payload["detail"]
+
+
+def test_outreach_start_preserves_validation_error_for_invalid_supplier_indices():
+    _projects.clear()
+    project_id = "proj-outreach-start-invalid-indices"
+    _seed_project(project_id)
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/outreach/start",
+        json={"supplier_indices": [99]},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No valid supplier indices provided"
 
 
 def test_quick_approval_sends_outreach():

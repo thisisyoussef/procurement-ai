@@ -117,6 +117,7 @@ export interface PipelineStatus {
   clarifying_questions?: ClarifyingQuestion[] | null
   decision_preference?: DecisionLane | null
   buyer_context?: Record<string, unknown> | null
+  retrospective?: Record<string, unknown> | null
   active_checkpoint?: CheckpointEvent | null
   checkpoint_responses?: Record<string, CheckpointResponse>
   user_sourcing_profile?: Record<string, unknown> | null

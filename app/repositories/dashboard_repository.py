@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import ProjectEvent
@@ -111,6 +111,7 @@ async def list_supplier_contacts_for_user(
     *,
     user_id: str | uuid.UUID,
     limit: int = 50,
+    contact_query: str | None = None,
 ) -> list[dict[str, Any]]:
     user_uuid = _normalize_uuid(user_id)
     if user_uuid is None:
@@ -162,6 +163,24 @@ async def list_supplier_contacts_for_user(
             & (latest_interaction.c.rn == 1),
         )
         .where(RuntimeProject.user_id == user_uuid)
+    )
+
+    normalized_query = (contact_query or "").strip().lower()
+    if normalized_query:
+        like_pattern = f"%{normalized_query}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
+                func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
+                func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
+                func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
+                func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
+                func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+            )
+        )
+
+    stmt = (
+        stmt
         .group_by(Supplier.id, latest_interaction.c.last_project_id)
         .order_by(interaction_count.desc(), last_interaction.desc())
         .limit(max(1, min(limit, 200)))

@@ -1,10 +1,10 @@
 """Sourcing project API request/response schemas."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.agent_state import (
     ChatMessage,
@@ -19,8 +19,11 @@ from app.schemas.agent_state import (
 
 
 class ProjectCreateRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    product_description: str = Field(min_length=10, max_length=5000)
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    product_description: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=10, max_length=5000),
+    ]
     auto_outreach: bool = Field(
         default=False,
         description="If True, automatically draft and send outreach emails after recommendations",
@@ -65,6 +68,7 @@ class PipelineStatusResponse(BaseModel):
     clarifying_questions: list[dict] | None = None
     decision_preference: str | None = None
     buyer_context: dict[str, Any] | None = None
+    retrospective: dict[str, Any] | None = None
     active_checkpoint: CheckpointEvent | None = None
     proactive_alerts: list[dict] = Field(default_factory=list)
 

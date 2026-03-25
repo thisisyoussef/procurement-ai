@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from app.api.v1.projects import _run_pipeline_task
+from app.api.v1.projects import _run_pipeline_task, normalize_project_status_filters
 from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.dashboard import (
     DashboardActivityResponse,
@@ -25,17 +25,49 @@ from app.services.project_events import record_project_event
 from app.services.project_store import StoreUnavailableError, get_project_store
 
 logger = logging.getLogger(__name__)
+PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
+_DASHBOARD_ALLOWED_SOURCES = {"dashboard_new", "dashboard_search"}
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
+def _normalized_dashboard_source(source: str | None) -> str:
+    """Return canonical dashboard entry source or default when unknown."""
+    cleaned = str(source or "").strip().lower()
+    if cleaned in _DASHBOARD_ALLOWED_SOURCES:
+        return cleaned
+    return "dashboard_new"
+
+
 @router.get("/summary", response_model=DashboardSummaryResponse)
-async def dashboard_summary(current_user: AuthUser = Depends(get_current_auth_user)):
+async def dashboard_summary(
+    status: list[str] | None = Query(
+        default=None,
+        description=(
+            "Optional project status filter for dashboard project cards. "
+            "Repeat parameter to include multiple statuses."
+        ),
+    ),
+    q: str | None = Query(
+        default=None,
+        max_length=120,
+        description=(
+            "Optional case-insensitive project title or description keyword filter "
+            "for dashboard cards."
+        ),
+    ),
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    normalized_statuses = normalize_project_status_filters(status)
+    query_text = (q or "").strip().lower() or None
+
     try:
         return await get_dashboard_summary_for_user(
             user_id=current_user.user_id,
             full_name=current_user.full_name,
             email=current_user.email,
+            project_statuses=normalized_statuses,
+            project_query=query_text,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
@@ -61,12 +93,19 @@ async def dashboard_activity(
 @router.get("/contacts", response_model=DashboardContactsResponse)
 async def dashboard_contacts(
     limit: int = Query(default=50, ge=1, le=200),
+    q: str | None = Query(
+        default=None,
+        max_length=120,
+        description="Optional case-insensitive supplier keyword filter for contacts.",
+    ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
+    query_text = (q or "").strip() or None
     try:
         return await get_dashboard_contacts_for_user(
             user_id=current_user.user_id,
             limit=limit,
+            contact_query=query_text,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
@@ -81,6 +120,7 @@ async def start_project_from_dashboard(
     store = get_project_store()
     project_id = str(uuid.uuid4())
     title = (request.title or request.description[:80]).strip() or "New sourcing mission"
+    source = _normalized_dashboard_source(request.source)
 
     project = {
         "id": project_id,
@@ -121,14 +161,14 @@ async def start_project_from_dashboard(
             description=f"Started sourcing workflow for {title}.",
             priority="info",
             phase="brief",
-            payload={"source": request.source},
+            payload={"source": source},
         )
         await store.save_project(project)
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to create dashboard project")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=PROJECT_START_FAILURE_DETAIL) from exc
 
     try:
         await store.create_event(
@@ -136,7 +176,7 @@ async def start_project_from_dashboard(
             session_id=None,
             path="/dashboard",
             project_id=project_id,
-            payload={"source": request.source},
+            payload={"source": source},
         )
     except Exception:  # noqa: BLE001
         logger.warning("Failed to persist dashboard_project_started analytics event", exc_info=True)
@@ -146,5 +186,5 @@ async def start_project_from_dashboard(
     return DashboardProjectStartResponse(
         project_id=project_id,
         status="started",
-        redirect_path=f"/product?projectId={project_id}&entry={request.source}",
+        redirect_path=f"/product?projectId={project_id}&entry={source}",
     )
