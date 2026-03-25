@@ -68,6 +68,8 @@ _ACTIVE_STATUSES = {
     "outreaching",
 }
 
+_PHONE_QUERY_CHARS = set("0123456789 +().-")
+
 
 async def _ensure_dashboard_schema() -> None:
     global _dashboard_schema_ready
@@ -573,7 +575,17 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
         str(contact.get("city") or ""),
         str(contact.get("country") or ""),
     ]
-    return any(needle in value.lower() for value in searchable)
+    if any(needle in value.lower() for value in searchable):
+        return True
+
+    # Allow phone lookups with digit-only input against formatted phone values.
+    if all(char in _PHONE_QUERY_CHARS for char in needle):
+        phone_digits = "".join(char for char in str(contact.get("phone") or "") if char.isdigit())
+        needle_digits = "".join(char for char in needle if char.isdigit())
+        if needle_digits and needle_digits in phone_digits:
+            return True
+
+    return False
 
 
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:

@@ -975,6 +975,55 @@ def test_dashboard_contacts_service_runtime_fallback_filters_before_limit():
     assert [supplier.name for supplier in response.suppliers] == ["Acme Plastics"]
 
 
+def test_dashboard_contacts_service_runtime_fallback_matches_phone_digits_query():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-phone",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T11:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "44444444-4444-4444-4444-444444444444",
+                        "name": "Acme Components",
+                        "phone": "+1 (312) 555-0142",
+                    },
+                    {
+                        "supplier_id": "55555555-5555-5555-5555-555555555555",
+                        "name": "Bravo Plastics",
+                        "phone": "+1 (773) 555-9988",
+                    },
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=5,
+                contact_query="3125550142",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Components"]
+
+
 def test_dashboard_contacts_service_runtime_fallback_deduplicates_across_projects():
     runtime_projects = [
         {
@@ -1194,6 +1243,7 @@ def test_contact_matches_query_matches_name_email_phone_and_location():
     assert _contact_matches_query(contact, "precision")
     assert _contact_matches_query(contact, "sales@acme")
     assert _contact_matches_query(contact, "555-0142")
+    assert _contact_matches_query(contact, "3125550142")
     assert _contact_matches_query(contact, "detroit")
     assert not _contact_matches_query(contact, "toronto")
     assert not _contact_matches_query(contact, "555-9999")
