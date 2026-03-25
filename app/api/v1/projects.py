@@ -61,6 +61,7 @@ from app.services.project_store import (
     get_legacy_project_dict,
     get_project_store,
 )
+from app.services.project_query import project_matches_query
 from app.services.project_events import record_project_event
 from app.services.supplier_memory import (
     persist_discovered_suppliers,
@@ -1495,8 +1496,7 @@ async def list_projects(
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if project_matches_query(project, query_text)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 

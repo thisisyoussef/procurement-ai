@@ -653,6 +653,57 @@ def test_list_projects_combines_status_and_description_keyword_filters():
     assert [project["id"] for project in payload] == ["fasteners-discovering"]
 
 
+def test_list_projects_keyword_matches_multiple_terms_any_order():
+    _projects.clear()
+    _projects["fasteners"] = {
+        "id": "fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Metal Components",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=fasteners%20steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["fasteners"]
+
+
+def test_list_projects_keyword_can_match_across_title_and_description():
+    _projects.clear()
+    _projects["run-a"] = {
+        "id": "run-a",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A Fasteners",
+        "product_description": "Need zinc-coated steel for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=run%20steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["run-a"]
+
+
+def test_list_projects_keyword_requires_all_terms():
+    _projects.clear()
+    _projects["labels"] = {
+        "id": "labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Packaging Labels",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=labels%20steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == []
+
+
 def test_list_projects_title_keyword_ignores_whitespace_only_query():
     _projects.clear()
     _projects["default-visible"] = {

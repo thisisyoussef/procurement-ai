@@ -23,6 +23,7 @@ from app.schemas.dashboard import (
     DashboardSupplierContact,
 )
 from app.schemas.proactive import ProactiveAlert
+from app.services.project_query import project_matches_query
 from app.services.project_store import get_project_store
 
 logger = logging.getLogger(__name__)
@@ -489,8 +490,7 @@ async def get_dashboard_summary_for_user(
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if project_matches_query(project, project_query)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

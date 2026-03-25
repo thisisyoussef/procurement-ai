@@ -482,6 +482,54 @@ def test_dashboard_summary_combines_status_and_description_query_filters():
     ]
 
 
+def test_dashboard_summary_query_matches_multiple_terms_across_title_and_description():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-run-a"] = {
+        "id": "proj-dash-run-a",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A Fasteners",
+        "product_description": "Need zinc-coated steel for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-other"] = {
+        "id": "proj-dash-other",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B Labels",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=run%20steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-run-a"]
+
+
+def test_dashboard_summary_query_requires_all_terms():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-labels"] = {
+        "id": "proj-dash-labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B Labels",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=labels%20steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projects"] == []
+
+
 def test_dashboard_summary_filters_projects_by_active_alias():
     projects = get_legacy_project_dict()
     projects["proj-dash-steering"] = {
