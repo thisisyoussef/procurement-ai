@@ -24,6 +24,8 @@ from app.services.project_store import StoreUnavailableError, get_project_store
 from app.services.supplier_memory import record_supplier_interaction
 
 logger = logging.getLogger(__name__)
+PHONE_CALL_START_FAILURE_DETAIL = "Failed to start phone call. Please try again."
+PHONE_CALL_PARSE_FAILURE_DETAIL = "Failed to parse call transcript. Please try again."
 
 router = APIRouter(prefix="/projects/{project_id}/phone", tags=["phone"])
 
@@ -169,7 +171,7 @@ async def start_phone_call(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Phone call failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=PHONE_CALL_START_FAILURE_DETAIL) from e
 
 
 @router.get("/calls")
@@ -303,4 +305,4 @@ async def parse_phone_call(
 
     except Exception as e:
         logger.error("Call transcript parsing failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=PHONE_CALL_PARSE_FAILURE_DETAIL) from e
