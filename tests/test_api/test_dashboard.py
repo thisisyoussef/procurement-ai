@@ -376,6 +376,35 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_multi_keyword_matches_across_title_and_description_any_order():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-motor-assembly"] = {
+        "id": "proj-dash-motor-assembly",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-labels"] = {
+        "id": "proj-dash-labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Premium labels",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=assembly%20motor", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-motor-assembly"]
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {

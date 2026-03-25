@@ -61,6 +61,7 @@ from app.services.project_store import (
     get_legacy_project_dict,
     get_project_store,
 )
+from app.services.project_search import project_matches_query_terms, query_terms
 from app.services.project_events import record_project_event
 from app.services.supplier_memory import (
     persist_discovered_suppliers,
@@ -1486,17 +1487,16 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower()
+    terms = query_terms(q)
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_project_status(project) in normalized_statuses]
-    if query_text:
+    if terms:
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if project_matches_query_terms(project, terms)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
