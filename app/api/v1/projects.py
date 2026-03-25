@@ -89,6 +89,7 @@ LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "c
 TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
+PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL = "Retrospective has already been submitted for this project."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
 DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
@@ -1409,6 +1410,11 @@ async def submit_retro(
         raise HTTPException(
             status_code=400,
             detail="Retrospective can only be submitted for completed projects",
+        )
+    if project.get("retrospective"):
+        raise HTTPException(
+            status_code=409,
+            detail=PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
         )
 
     project["retrospective"] = request.model_dump(mode="json")

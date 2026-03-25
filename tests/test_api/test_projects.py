@@ -10,7 +10,12 @@ from app.core.auth import AuthUser, create_access_token
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.main import app
-from app.api.v1.projects import PROJECT_ANSWER_FAILURE_DETAIL, PROJECT_START_FAILURE_DETAIL, _projects
+from app.api.v1.projects import (
+    PROJECT_ANSWER_FAILURE_DETAIL,
+    PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
+    PROJECT_START_FAILURE_DETAIL,
+    _projects,
+)
 
 client = TestClient(app)
 
@@ -1105,6 +1110,57 @@ def test_submit_retrospective_is_visible_in_status():
     assert retrospective["overall_satisfaction"] == 5
     assert retrospective["communication_rating"] == 4
     assert retrospective["pricing_accuracy"] == "as_expected"
+
+
+def test_submit_retrospective_rejects_duplicate_submission():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000125"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Retrospective Single Submission",
+        "product_description": "Need cast aluminum enclosure supplier",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    first_payload = {"supplier_chosen": "First Supplier", "overall_satisfaction": 4}
+    first_response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json=first_payload,
+        headers=_auth_headers(),
+    )
+    assert first_response.status_code == 200
+    assert _projects[project_id]["retrospective"]["supplier_chosen"] == "First Supplier"
+
+    second_payload = {"supplier_chosen": "Second Supplier", "overall_satisfaction": 2}
+    second_response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json=second_payload,
+        headers=_auth_headers(),
+    )
+    assert second_response.status_code == 409
+    assert second_response.json()["detail"] == PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL
+    assert _projects[project_id]["retrospective"]["supplier_chosen"] == "First Supplier"
+
+    status_response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert status_response.status_code == 200
+    assert status_response.json()["retrospective"]["supplier_chosen"] == "First Supplier"
 
 
 def test_submit_retrospective_forbidden_for_non_owner():
