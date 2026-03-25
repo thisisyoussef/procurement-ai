@@ -127,7 +127,7 @@ async def start_project_from_dashboard(
         "user_id": str(current_user.user_id),
         "owner_email": (current_user.email or "").strip().lower() or None,
         "title": title,
-        "product_description": request.description.strip(),
+        "product_description": request.description,
         "auto_outreach": request.auto_outreach,
         "status": "parsing",
         "current_stage": "parsing",
@@ -181,7 +181,7 @@ async def start_project_from_dashboard(
     except Exception:  # noqa: BLE001
         logger.warning("Failed to persist dashboard_project_started analytics event", exc_info=True)
 
-    background_tasks.add_task(_run_pipeline_task, project_id, request.description.strip())
+    background_tasks.add_task(_run_pipeline_task, project_id, request.description)
 
     return DashboardProjectStartResponse(
         project_id=project_id,

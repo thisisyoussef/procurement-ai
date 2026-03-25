@@ -43,7 +43,7 @@ def test_dashboard_start_project_persists_request_and_redirect_path():
         response = client.post(
             "/api/v1/dashboard/projects/start",
             json={
-                "description": "Need 500 custom insulated bottles with logo printing.",
+                "description": "  Need 500 custom insulated bottles with logo printing.  ",
                 "source": "dashboard_search",
             },
             headers=_auth_headers(),
@@ -62,7 +62,10 @@ def test_dashboard_start_project_persists_request_and_redirect_path():
     assert project["product_description"] == "Need 500 custom insulated bottles with logo printing."
     assert project["auto_outreach"] is False
     assert project["status"] == "parsing"
-    run_pipeline.assert_awaited_once()
+    run_pipeline.assert_awaited_once_with(
+        payload["project_id"],
+        "Need 500 custom insulated bottles with logo printing.",
+    )
 
 
 def test_dashboard_start_project_uses_custom_title_and_auto_outreach():
@@ -125,6 +128,28 @@ def test_dashboard_start_project_rejects_short_description():
     response = client.post(
         "/api/v1/dashboard/projects/start",
         json={"description": "short"},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 422
+    assert get_legacy_project_dict() == {}
+
+
+def test_dashboard_start_project_rejects_whitespace_only_description():
+    response = client.post(
+        "/api/v1/dashboard/projects/start",
+        json={"description": "            "},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 422
+    assert get_legacy_project_dict() == {}
+
+
+def test_dashboard_start_project_rejects_padded_short_description():
+    response = client.post(
+        "/api/v1/dashboard/projects/start",
+        json={"description": "   short   "},
         headers=_auth_headers(),
     )
 

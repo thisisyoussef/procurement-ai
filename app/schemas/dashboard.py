@@ -1,8 +1,9 @@
 """Dashboard API request/response schemas."""
 
+from typing import Annotated
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.proactive import ProactiveAlert
 
@@ -72,7 +73,10 @@ class DashboardActivityResponse(BaseModel):
 
 class DashboardProjectStartRequest(BaseModel):
     title: str | None = Field(default=None, max_length=500)
-    description: str = Field(min_length=10, max_length=5000)
+    description: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=10, max_length=5000),
+    ]
     auto_outreach: bool = False
     source: str = Field(default="dashboard_new", max_length=120)
 
