@@ -162,6 +162,14 @@ def _normalized_stage_name(project: dict) -> str:
     return _normalized_project_status(project)
 
 
+def _normalized_status_name(project: dict) -> str:
+    """Return canonical status, falling back to canonical stage when status is absent."""
+    normalized_status = _normalized_project_status(project)
+    if normalized_status:
+        return normalized_status
+    return _normalized_stage_name(project)
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -911,8 +919,8 @@ async def get_project_status(
 
     return PipelineStatusResponse(
         project_id=uuid.UUID(project["id"]),
-        status=project["status"],
-        current_stage=project["current_stage"],
+        status=_normalized_status_name(project),
+        current_stage=_normalized_stage_name(project),
         error=project.get("error"),
         parsed_requirements=(
             ParsedRequirements(**project["parsed_requirements"])
