@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -165,11 +166,32 @@ async def list_supplier_contacts_for_user(
         .where(RuntimeProject.user_id == user_uuid)
     )
 
-    normalized_query = (contact_query or "").strip().lower()
-    if normalized_query:
-        like_pattern = f"%{normalized_query}%"
-        stmt = stmt.where(
-            or_(
+    normalized_tokens = [token for token in (contact_query or "").strip().lower().split() if token]
+    if normalized_tokens:
+        phone_digits = func.replace(
+            func.replace(
+                func.replace(
+                    func.replace(
+                        func.replace(
+                            func.replace(func.coalesce(Supplier.phone, ""), " ", ""),
+                            "-",
+                            "",
+                        ),
+                        "(",
+                        "",
+                    ),
+                    ")",
+                    "",
+                ),
+                "+",
+                "",
+            ),
+            ".",
+            "",
+        )
+        for token in normalized_tokens:
+            like_pattern = f"%{token}%"
+            token_match = or_(
                 func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
@@ -177,7 +199,10 @@ async def list_supplier_contacts_for_user(
                 func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
             )
-        )
+            token_digits = re.sub(r"\D", "", token)
+            if token_digits:
+                token_match = or_(token_match, phone_digits.like(f"%{token_digits}%"))
+            stmt = stmt.where(token_match)
 
     stmt = (
         stmt

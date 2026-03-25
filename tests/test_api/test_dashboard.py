@@ -1200,6 +1200,9 @@ def test_contact_matches_query_matches_name_email_phone_and_location():
     assert not _contact_matches_query(contact, "toronto")
     assert not _contact_matches_query(contact, "555-9999")
     assert not _contact_matches_query(contact, "9999999")
+    assert _contact_matches_query(contact, "acme detroit")
+    assert _contact_matches_query(contact, "312555 acme")
+    assert not _contact_matches_query(contact, "acme toronto")
 
 
 def test_dashboard_contacts_service_runtime_fallback_matches_phone_digits_query():
@@ -1249,6 +1252,61 @@ def test_dashboard_contacts_service_runtime_fallback_matches_phone_digits_query(
                 user_id="00000000-0000-0000-0000-000000000001",
                 limit=10,
                 contact_query="3125550142",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
+
+
+def test_dashboard_contacts_service_runtime_fallback_matches_multi_keyword_query():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-multi-keyword",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "Acme Precision Metals",
+                        "website": "https://acme.example",
+                        "email": "sales@acme.example",
+                        "phone": "+1 (312) 555-0142",
+                        "city": "Detroit",
+                        "country": "USA",
+                    },
+                    {
+                        "supplier_id": "22222222-2222-2222-2222-222222222222",
+                        "name": "Acme Plastics",
+                        "email": "hello@acmeplastics.example",
+                        "city": "Austin",
+                        "country": "USA",
+                    },
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                contact_query="acme detroit",
             )
         )
 
