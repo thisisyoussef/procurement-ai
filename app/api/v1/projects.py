@@ -1495,7 +1495,8 @@ async def list_projects(
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
+            if query_text in str(project.get("id") or "").strip().lower()
+            or query_text in str(project.get("title") or "").strip().lower()
             or query_text in str(project.get("product_description") or "").strip().lower()
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)

@@ -376,6 +376,35 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_filters_projects_by_project_id_keyword_case_insensitive():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-ABC-123"] = {
+        "id": "proj-dash-ABC-123",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels supplier shortlist",
+        "product_description": "Need premium bottle labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-XYZ-999"] = {
+        "id": "proj-dash-XYZ-999",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Carton inserts",
+        "product_description": "Need carton inserts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=abc-123", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-ABC-123"]
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {

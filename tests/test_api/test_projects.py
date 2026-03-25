@@ -625,6 +625,31 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_keyword_matches_project_id_case_insensitive():
+    _projects.clear()
+    _projects["proj-ABC-123"] = {
+        "id": "proj-ABC-123",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels",
+        "product_description": "Need premium matte labels.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+    _projects["proj-XYZ-999"] = {
+        "id": "proj-XYZ-999",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Carton inserts",
+        "product_description": "Need carton inserts.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=abc-123", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["proj-ABC-123"]
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {
