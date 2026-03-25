@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -168,6 +169,17 @@ async def list_supplier_contacts_for_user(
     normalized_query = (contact_query or "").strip().lower()
     if normalized_query:
         like_pattern = f"%{normalized_query}%"
+        phone_digits_pattern = None
+        phone_digits = re.sub(r"\D", "", normalized_query)
+        if phone_digits:
+            phone_digits_pattern = f"%{phone_digits}%"
+
+        phone_digits_expr = func.regexp_replace(
+            func.coalesce(Supplier.phone, ""),
+            r"\D",
+            "",
+            "g",
+        )
         stmt = stmt.where(
             or_(
                 func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
@@ -176,6 +188,7 @@ async def list_supplier_contacts_for_user(
                 func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+                phone_digits_expr.like(phone_digits_pattern) if phone_digits_pattern else False,
             )
         )
 
