@@ -800,6 +800,28 @@ def test_dashboard_contacts_ignores_whitespace_query():
     )
 
 
+def test_dashboard_contacts_rejects_single_character_query():
+    response = client.get("/api/v1/dashboard/contacts?q=a", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Query must be at least 2 characters."
+
+
+def test_dashboard_contacts_accepts_two_character_query():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get("/api/v1/dashboard/contacts?q=ab", headers=_auth_headers())
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        contact_query="ab",
+    )
+
+
 def test_dashboard_contacts_rejects_overlong_query():
     query = "a" * 121
     response = client.get(f"/api/v1/dashboard/contacts?q={query}", headers=_auth_headers())
