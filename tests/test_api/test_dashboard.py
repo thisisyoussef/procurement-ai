@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
+from app.schemas.dashboard import DashboardActivityItem
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
 from app.services.dashboard_service import get_dashboard_activity_for_user
 from app.services.dashboard_service import get_dashboard_contacts_for_user
+from app.services.dashboard_service import get_dashboard_summary_for_user
 from app.services.project_store import (
     StoreUnavailableError,
     get_legacy_project_dict,
@@ -1395,3 +1397,97 @@ def test_dashboard_activity_service_runtime_fallback_returns_no_cursor_without_e
 
     assert events == []
     assert next_cursor is None
+
+
+def test_dashboard_summary_enriches_activity_project_name_outside_status_filter():
+    projects = get_legacy_project_dict()
+    projects["proj-parsing"] = {
+        "id": "proj-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Parsing project",
+        "product_description": "Need cast housings.",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "parsed_requirements": {},
+    }
+    projects["proj-complete"] = {
+        "id": "proj-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete project",
+        "product_description": "Need precision washers.",
+        "status": "complete",
+        "current_stage": "complete",
+        "parsed_requirements": {},
+    }
+
+    db_events = [
+        DashboardActivityItem(
+            id="evt-complete",
+            at=1710000000.0,
+            time_label="just now",
+            title="Completed",
+            description="Project completed.",
+            project_id="proj-complete",
+            project_name=None,
+            type="project_completed",
+            priority="info",
+            payload={},
+        )
+    ]
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=db_events)):
+        response = asyncio.run(
+            get_dashboard_summary_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                full_name="Test User",
+                email="test@example.com",
+                project_statuses={"parsing"},
+                project_query=None,
+            )
+        )
+
+    assert [project.id for project in response.projects] == ["proj-parsing"]
+    assert response.recent_activity[0].project_name == "Complete project"
+
+
+def test_dashboard_activity_service_enriches_db_events_with_project_name():
+    store = AsyncMock()
+    store.list_projects = AsyncMock(
+        return_value=[
+            {
+                "id": "proj-db-name",
+                "user_id": "00000000-0000-0000-0000-000000000001",
+                "title": "DB named project",
+                "parsed_requirements": {},
+            }
+        ]
+    )
+    db_events = [
+        DashboardActivityItem(
+            id="evt-db-name",
+            at=1710000000.0,
+            time_label="just now",
+            title="Supplier verified",
+            description="Verification done.",
+            project_id="proj-db-name",
+            project_name=None,
+            type="supplier_verified",
+            priority="info",
+            payload={},
+        )
+    ]
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=db_events)), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, next_cursor = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                cursor=None,
+            )
+        )
+
+    assert [event.project_name for event in events] == ["DB named project"]
+    assert next_cursor == "1710000000.0"

@@ -51,6 +51,9 @@
   (newest first) when DB-backed dashboard activity rows are unavailable, and keeps
   cursor pagination behavior (`cursor` returns older events only, `next_cursor` is the
   last event timestamp returned).
+- `GET /api/v1/dashboard/activity` and dashboard summary activity now enrich each event
+  with `project_name` whenever `project_id` is present, so activity rows remain readable
+  even when project cards are filtered.
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.

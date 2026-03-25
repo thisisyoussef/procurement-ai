@@ -308,6 +308,20 @@ def _project_card(project: dict[str, Any]) -> DashboardProjectCard:
     )
 
 
+def _project_name_by_id(projects: list[dict[str, Any]]) -> dict[str, str]:
+    name_by_id: dict[str, str] = {}
+    for project in projects:
+        project_id = str(project.get("id") or "").strip()
+        if not project_id:
+            continue
+        name_by_id[project_id] = (
+            (project.get("parsed_requirements") or {}).get("product_type")
+            or project.get("title")
+            or "Project"
+        )
+    return name_by_id
+
+
 def _attention_items(projects: list[dict[str, Any]]) -> list[DashboardAttentionItem]:
     items: list[DashboardAttentionItem] = []
 
@@ -501,7 +515,7 @@ async def get_dashboard_summary_for_user(
         # Fallback to in-project timeline events so UI still has a feed without DB events.
         activity = await _runtime_activity_for_user(user_id=user_id, limit=20, cursor=None)
 
-    project_name_by_id = {card.id: card.name for card in project_cards}
+    project_name_by_id = _project_name_by_id(user_projects)
     for event in activity:
         if event.project_id and not event.project_name:
             event.project_name = project_name_by_id.get(event.project_id)
@@ -555,6 +569,14 @@ async def get_dashboard_activity_for_user(
     events = await _db_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
     if not events:
         events = await _runtime_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
+
+    projects = await get_project_store().list_projects()
+    user_projects = [project for project in projects if str(project.get("user_id")) == str(user_id)]
+    project_name_by_id = _project_name_by_id(user_projects)
+    for event in events:
+        if event.project_id and not event.project_name:
+            event.project_name = project_name_by_id.get(event.project_id)
+
     next_cursor = None
     if events:
         next_cursor = str(events[-1].at)
