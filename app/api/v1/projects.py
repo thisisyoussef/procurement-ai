@@ -1456,7 +1456,7 @@ async def list_projects(
     q: str | None = Query(
         default=None,
         max_length=120,
-        description="Optional case-insensitive project title or description keyword filter.",
+        description="Optional case-insensitive project ID, title, or description keyword filter.",
     ),
 ):
     """List current user's projects with active work first, then recent activity."""
@@ -1497,6 +1497,7 @@ async def list_projects(
             for project in user_projects
             if query_text in str(project.get("title") or "").strip().lower()
             or query_text in str(project.get("product_description") or "").strip().lower()
+            or query_text in str(project.get("id") or "").strip().lower()
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 

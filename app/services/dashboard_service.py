@@ -491,6 +491,7 @@ async def get_dashboard_summary_for_user(
             for project in filtered_projects
             if project_query in str(project.get("title") or "").strip().lower()
             or project_query in str(project.get("product_description") or "").strip().lower()
+            or project_query in str(project.get("id") or "").strip().lower()
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

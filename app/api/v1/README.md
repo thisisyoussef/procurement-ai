@@ -27,8 +27,9 @@
   filtering and ordering active work, so legacy values such as ` Parsing ` still behave as active.
 - `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` also accept `status=active` as
   an alias for all in-progress pipeline statuses (`parsing` through `outreaching`, including `steering`).
-- `GET /api/v1/projects` accepts optional `q` for case-insensitive project title keyword filtering
-  (example: `?q=coffee`), applied after ownership and optional status filtering.
+- `GET /api/v1/projects` accepts optional `q` for case-insensitive project ID, title, or
+  description keyword filtering (example: `?q=coffee` or `?q=abc-123`), applied after ownership
+  and optional status filtering.
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes
   status formatting (trim + lowercase) before active count aggregation.
@@ -36,8 +37,9 @@
   values before rendering (`" Complete "` -> `complete`) so badge and phase UI stay consistent.
 - `GET /api/v1/dashboard/summary` project cards are ordered for actionability:
   active projects first, then by most recent `updated_at`, then `created_at` fallback.
-- `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
-  project-title keyword filtering (example: `?q=coffee`), combinable with optional `status` filters.
+- `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard project ID,
+  title, or description keyword filtering (example: `?q=coffee` or `?q=abc-123`), combinable with
+  optional `status` filters.
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
