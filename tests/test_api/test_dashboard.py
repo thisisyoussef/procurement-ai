@@ -5,9 +5,11 @@ import os
 from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import postgresql
 
 from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
+from app.repositories.dashboard_repository import list_supplier_contacts_for_user
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
 from app.services.dashboard_service import get_dashboard_activity_for_user
@@ -1254,6 +1256,99 @@ def test_dashboard_contacts_service_runtime_fallback_matches_phone_digits_query(
 
     assert response.count == 1
     assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
+
+
+def test_dashboard_contacts_service_supports_digit_query_for_db_rows():
+    db_rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Acme Precision Metals",
+            "website": "https://acme.example",
+            "email": "sales@acme.example",
+            "phone": "+1 (312) 555-0142",
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 5,
+            "project_count": 2,
+            "last_interaction_at": 1711111111.0,
+            "last_project_id": "proj-acme",
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=[])
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=db_rows),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                contact_query="3125550142",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
+
+
+def test_dashboard_repository_phone_digit_query_adds_normalized_phone_match():
+    class _Result:
+        def all(self):
+            return []
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_Result())
+
+    asyncio.run(
+        list_supplier_contacts_for_user(
+            session=session,
+            user_id="00000000-0000-0000-0000-000000000001",
+            contact_query="3125550142",
+            limit=25,
+        )
+    )
+
+    stmt = session.execute.await_args.args[0]
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    params = compiled.params
+
+    assert "regexp_replace" in sql
+    assert any(value == "%3125550142%" for value in params.values())
+
+
+def test_dashboard_repository_partial_digit_query_uses_phone_digit_match():
+    class _Result:
+        def all(self):
+            return []
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_Result())
+
+    asyncio.run(
+        list_supplier_contacts_for_user(
+            session=session,
+            user_id="00000000-0000-0000-0000-000000000001",
+            contact_query="5550142",
+            limit=25,
+        )
+    )
+
+    stmt = session.execute.await_args.args[0]
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    params = compiled.params
+
+    assert any(value == "%5550142%" for value in params.values())
 
 
 def test_dashboard_activity_service_falls_back_to_runtime_timeline_when_db_empty():

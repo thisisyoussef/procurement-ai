@@ -168,6 +168,13 @@ async def list_supplier_contacts_for_user(
     normalized_query = (contact_query or "").strip().lower()
     if normalized_query:
         like_pattern = f"%{normalized_query}%"
+        digit_query = "".join(ch for ch in normalized_query if ch.isdigit())
+        phone_digits_expr = func.regexp_replace(
+            func.coalesce(Supplier.phone, ""),
+            r"\D",
+            "",
+            "g",
+        )
         stmt = stmt.where(
             or_(
                 func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
@@ -176,6 +183,7 @@ async def list_supplier_contacts_for_user(
                 func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+                phone_digits_expr.like(f"%{digit_query}%") if digit_query else literal_column("false"),
             )
         )
 
