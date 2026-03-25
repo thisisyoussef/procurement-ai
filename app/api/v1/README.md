@@ -55,6 +55,7 @@
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.
 - `POST /api/v1/projects` and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `500` message (`Failed to start project. Please try again.`) for unexpected start failures, without exposing internal exception details.
+- `POST /api/v1/projects/{project_id}/outreach/start` now returns a safe, fixed `500` message (`Failed to start outreach. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/dashboard/projects/start` is the dashboard quick-start entrypoint:
   - Accepts dashboard source context and normalizes to supported values (`dashboard_search`, `dashboard_new`)
   - Unknown or malformed `source` values default to `dashboard_new`

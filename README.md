@@ -23,6 +23,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `GET /api/v1/dashboard/activity` now falls back to per-project runtime timeline events (newest first) when DB-backed dashboard events are unavailable, while preserving `cursor` pagination semantics.
 - Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
 - `POST /api/v1/projects/{id}/answer` now returns a safe `500` detail (`"Failed to process answers. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/start` now returns a safe `500` detail (`"Failed to start outreach. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 
