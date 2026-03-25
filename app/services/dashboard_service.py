@@ -573,7 +573,15 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
         str(contact.get("city") or ""),
         str(contact.get("country") or ""),
     ]
-    return any(needle in value.lower() for value in searchable)
+    if any(needle in value.lower() for value in searchable):
+        return True
+
+    phone_needle = re.sub(r"\D", "", needle)
+    if not phone_needle:
+        return False
+
+    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
+    return bool(phone_value) and phone_needle in phone_value
 
 
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:

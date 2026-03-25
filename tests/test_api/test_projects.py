@@ -944,6 +944,99 @@ def test_status_includes_decision_preference():
     assert response.json()["decision_preference"] == "best_speed_to_order"
 
 
+def test_get_status_normalizes_legacy_status_and_stage_values():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000113"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Status Formatting",
+        "product_description": "Need custom packaging",
+        "status": " Complete ",
+        "current_stage": " ReCommending ",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+        "decision_preference": None,
+    }
+
+    response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "complete"
+    assert payload["current_stage"] == "recommending"
+
+
+def test_get_status_uses_stage_when_status_missing():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000114"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Stage Fallback",
+        "product_description": "Need custom packaging",
+        "status": "   ",
+        "current_stage": " Verifying ",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+        "decision_preference": None,
+    }
+
+    response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "verifying"
+    assert payload["current_stage"] == "verifying"
+
+
+def test_get_status_uses_status_when_stage_missing():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000115"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Status Fallback",
+        "product_description": "Need custom packaging",
+        "status": " Discovering ",
+        "current_stage": "   ",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "user_answers": None,
+        "decision_preference": None,
+    }
+
+    response = client.get(f"/api/v1/projects/{project_id}/status", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "discovering"
+    assert payload["current_stage"] == "discovering"
+
+
 def test_set_decision_preference_endpoint_auth_ownership_and_validation():
     _projects.clear()
     project_id = "00000000-0000-0000-0000-000000000112"

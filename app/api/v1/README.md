@@ -41,8 +41,9 @@
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
-  limited to 120 characters. Query filtering is applied before response limiting so relevant
-  matches are preserved.
+  limited to 120 characters. Phone matching also supports digit-only queries against formatted
+  phone values (example: `3125550142` matches `+1 (312) 555-0142`). Query filtering is applied
+  before response limiting so relevant matches are preserved.
 - `GET /api/v1/dashboard/contacts` merges DB-backed contact rows with runtime project discovery
   contacts (deduplicated by supplier identity), so newly discovered suppliers remain visible even
   before interaction rows are persisted. If DB access fails, runtime contacts are used as fallback.
@@ -52,6 +53,7 @@
   last event timestamp returned).
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
+- `GET /api/v1/projects/{project_id}/status` now returns canonical lowercase, trimmed `status` and `current_stage`; if either field is blank in legacy records, it falls back to the other canonical value so clients always receive a consistent stage/status pair.
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.
 - `POST /api/v1/projects` and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `500` message (`Failed to start project. Please try again.`) for unexpected start failures, without exposing internal exception details.
