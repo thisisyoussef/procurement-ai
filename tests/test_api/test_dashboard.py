@@ -416,6 +416,13 @@ def test_dashboard_summary_rejects_overlong_title_query():
     assert response.status_code == 422
 
 
+def test_dashboard_summary_rejects_too_short_non_space_query():
+    response = client.get("/api/v1/dashboard/summary?q=%20a%20", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Query must include at least 2 non-space characters."
+
+
 def test_dashboard_summary_combines_status_and_title_query_filters():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle-discovering"] = {

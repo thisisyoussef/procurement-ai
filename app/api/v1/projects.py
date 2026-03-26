@@ -150,6 +150,20 @@ def normalize_project_status_filters(status_values: list[str] | None) -> set[str
     return expanded
 
 
+def normalize_project_query_text(query_value: str | None) -> str | None:
+    """Normalize optional project-search query and enforce minimum non-space length."""
+    normalized = (query_value or "").strip().lower()
+    if not normalized:
+        return None
+    non_space_length = len("".join(normalized.split()))
+    if non_space_length < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="Query must include at least 2 non-space characters.",
+        )
+    return normalized
+
+
 def _normalized_project_status(project: dict) -> str:
     return str(project.get("status") or "").strip().lower()
 
@@ -1494,12 +1508,12 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower()
+    query_text = normalize_project_query_text(q)
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
-    if query_text:
+    if query_text is not None:
         user_projects = [
             project
             for project in user_projects

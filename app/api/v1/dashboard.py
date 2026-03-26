@@ -7,7 +7,11 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from app.api.v1.projects import _run_pipeline_task, normalize_project_status_filters
+from app.api.v1.projects import (
+    _run_pipeline_task,
+    normalize_project_query_text,
+    normalize_project_status_filters,
+)
 from app.core.auth import AuthUser, get_current_auth_user
 from app.schemas.dashboard import (
     DashboardActivityResponse,
@@ -59,7 +63,7 @@ async def dashboard_summary(
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower() or None
+    query_text = normalize_project_query_text(q)
 
     try:
         return await get_dashboard_summary_for_user(

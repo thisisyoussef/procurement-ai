@@ -706,6 +706,36 @@ def test_list_projects_title_keyword_rejects_overlong_query():
     assert response.status_code == 422
 
 
+def test_list_projects_title_keyword_rejects_too_short_non_space_query():
+    response = client.get("/api/v1/projects?q=%20a%20", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Query must include at least 2 non-space characters."
+
+
+def test_list_projects_title_keyword_accepts_two_non_space_characters():
+    _projects.clear()
+    _projects["aa-project"] = {
+        "id": "aa-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "AA precision washers",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+    _projects["bb-project"] = {
+        "id": "bb-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "BB custom labels",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.get("/api/v1/projects?q=aa", headers=_auth_headers())
+
+    assert response.status_code == 200
+    assert [project["id"] for project in response.json()] == ["aa-project"]
+
+
 def test_cancel_project():
     """Test canceling an in-progress project."""
     create_response = client.post(
