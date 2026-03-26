@@ -59,6 +59,10 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 OUTREACH_START_FAILURE_DETAIL = "Failed to start outreach. Please try again."
 OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL = "Failed to parse supplier response. Please try again."
+OUTREACH_FOLLOW_UP_FAILURE_DETAIL = "Failed to generate follow-up emails. Please try again."
+OUTREACH_RECOMPARE_FAILURE_DETAIL = "Failed to refresh comparison with parsed quotes. Please try again."
+OUTREACH_AUTO_START_FAILURE_DETAIL = "Failed to start auto outreach. Please try again."
+OUTREACH_CHECK_INBOX_FAILURE_DETAIL = "Failed to check inbox for supplier responses. Please try again."
 
 
 async def _fetch_business_profile(user_id: str) -> dict[str, str | None] | None:
@@ -1316,9 +1320,11 @@ async def generate_follow_up_emails(
 
         return {"follow_ups": [fu.model_dump() for fu in result.follow_ups], "summary": result.summary}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Follow-up generation failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=OUTREACH_FOLLOW_UP_FAILURE_DETAIL) from e
 
 
 @router.post("/send-follow-up/{follow_up_index}")
@@ -1577,9 +1583,11 @@ async def recompare_with_quotes(
 
         return {"status": "success", "message": f"Re-compared with {len(outreach.parsed_quotes)} real quotes"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Recompare failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=OUTREACH_RECOMPARE_FAILURE_DETAIL) from e
 
 
 @router.post("/auto-send")
@@ -1881,7 +1889,7 @@ async def start_auto_outreach(
         raise
     except Exception as e:
         logger.error("Auto-outreach start failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=OUTREACH_AUTO_START_FAILURE_DETAIL) from e
 
 
 @router.get("/auto-status")
@@ -2114,9 +2122,11 @@ async def check_inbox(
             "communication_monitor": outreach.communication_monitor.model_dump(),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Inbox check failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=OUTREACH_CHECK_INBOX_FAILURE_DETAIL) from e
 
 
 # ══════════════════════════════════════════════════════════════════

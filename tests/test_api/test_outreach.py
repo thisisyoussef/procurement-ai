@@ -11,7 +11,11 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.api.v1.outreach import (
+    OUTREACH_AUTO_START_FAILURE_DETAIL,
+    OUTREACH_CHECK_INBOX_FAILURE_DETAIL,
+    OUTREACH_FOLLOW_UP_FAILURE_DETAIL,
     OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL,
+    OUTREACH_RECOMPARE_FAILURE_DETAIL,
     OUTREACH_START_FAILURE_DETAIL,
 )
 from app.main import app
@@ -632,3 +636,149 @@ def test_cancel_pending_outreach_only_cancels_unsent_drafts():
     updated = _projects[project_id]["outreach_state"]
     assert updated["draft_emails"][0]["status"] == "canceled"
     assert updated["draft_emails"][1]["status"] == "sent"
+
+
+def test_follow_up_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-followup-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.generate_follow_ups",
+        new=AsyncMock(side_effect=RuntimeError("smtp secret leaked from follow-up flow")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/follow-up",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_FOLLOW_UP_FAILURE_DETAIL
+    assert "smtp secret leaked" not in payload["detail"]
+
+
+def test_recompare_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-recompare-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "can_fulfill": True,
+                "quoted_price": "$4.20",
+                "moq": "1000",
+                "lead_time": "4 weeks",
+                "payment_terms": "Net 30",
+                "confidence_score": 88,
+                "fulfillment_note": "Can fulfill",
+            }
+        ],
+        "events": [],
+    }
+
+    with patch(
+        "app.agents.orchestrator.rerun_from_stage",
+        new=AsyncMock(side_effect=RuntimeError("comparison stack trace exposes db uri")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/recompare",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_RECOMPARE_FAILURE_DETAIL
+    assert "db uri" not in payload["detail"]
+
+
+def test_auto_start_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-auto-start-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+        "auto_config": {
+            "mode": "auto",
+            "auto_send_threshold": 80.0,
+            "max_concurrent_outreach": 2,
+            "follow_up_schedule": [3, 7, 14],
+        },
+    }
+    _projects[project_id]["verification_results"] = {
+        "verifications": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "is_real_supplier": True,
+                "can_fulfill": True,
+                "confidence_score": 91,
+                "verification_notes": "Verified",
+                "risk_flags": [],
+                "source_quality": "high",
+                "responsiveness_signal": "good",
+                "composite_score": 92.0,
+            }
+        ]
+    }
+
+    with patch(
+        "app.api.v1.outreach._draft_and_send_initial_outreach",
+        new=AsyncMock(side_effect=RuntimeError("mailer transport credential leaked")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/auto-start",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_AUTO_START_FAILURE_DETAIL
+    assert "credential leaked" not in payload["detail"]
+
+
+def test_check_inbox_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-check-inbox-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    monitor = AsyncMock()
+    monitor.check_once = AsyncMock(side_effect=RuntimeError("gmail token leaked in monitor call"))
+
+    with patch("app.agents.inbox_monitor.get_monitor", return_value=monitor):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/check-inbox",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_CHECK_INBOX_FAILURE_DETAIL
+    assert "gmail token leaked" not in payload["detail"]
