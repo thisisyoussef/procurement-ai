@@ -27,6 +27,8 @@ from app.services.project_store import StoreUnavailableError, get_project_store
 logger = logging.getLogger(__name__)
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 _DASHBOARD_ALLOWED_SOURCES = {"dashboard_new", "dashboard_search"}
+_DASHBOARD_CONTACTS_MIN_QUERY_LENGTH = 2
+_DASHBOARD_CONTACTS_QUERY_TOO_SHORT_DETAIL = "Query must include at least 2 non-space characters."
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -101,6 +103,8 @@ async def dashboard_contacts(
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
     query_text = (q or "").strip() or None
+    if query_text and len(query_text) < _DASHBOARD_CONTACTS_MIN_QUERY_LENGTH:
+        raise HTTPException(status_code=422, detail=_DASHBOARD_CONTACTS_QUERY_TOO_SHORT_DETAIL)
     try:
         return await get_dashboard_contacts_for_user(
             user_id=current_user.user_id,

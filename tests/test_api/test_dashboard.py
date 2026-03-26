@@ -848,6 +848,13 @@ def test_dashboard_contacts_ignores_whitespace_query():
     )
 
 
+def test_dashboard_contacts_rejects_single_character_query_after_trim():
+    response = client.get("/api/v1/dashboard/contacts?q=%20a%20", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Query must include at least 2 non-space characters."
+
+
 def test_dashboard_contacts_rejects_overlong_query():
     query = "a" * 121
     response = client.get(f"/api/v1/dashboard/contacts?q={query}", headers=_auth_headers())
