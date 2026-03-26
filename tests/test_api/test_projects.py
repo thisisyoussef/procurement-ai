@@ -729,6 +729,31 @@ def test_cancel_project():
     assert cancel_data["status"] in {"canceled", "failed", "complete"}
 
 
+def test_cancel_project_uses_stage_fallback_when_legacy_status_is_blank():
+    _projects.clear()
+    project_id = "cancel-stage-fallback"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Cancel Stage Fallback",
+        "product_description": "Need steel brackets",
+        "status": "   ",
+        "current_stage": "discovering",
+        "progress_events": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/cancel",
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "canceled"
+    assert _projects[project_id]["status"] == "canceled"
+    assert _projects[project_id]["current_stage"] == "canceled"
+
+
 def test_answer_clarifying_questions_resumes_pipeline():
     _projects.clear()
     project_id = "answer-success"
@@ -881,6 +906,50 @@ def test_restart_project_from_discovering_resets_downstream_state():
     assert updated["recommendation_result"] is None
     assert updated["outreach_state"] is None
     assert updated["decision_preference"] is None
+
+
+def test_restart_project_blocks_legacy_formatted_active_status():
+    _projects.clear()
+    project_id = "proj-restart-active-legacy-status"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Restart Active Legacy Status",
+        "product_description": "Need coated screws",
+        "status": " Discovering ",
+        "current_stage": "discovering",
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/restart",
+        json={"from_stage": "discovering"},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Project is currently running. Cancel the run before restarting."
+
+
+def test_restart_project_blocks_stage_only_active_project():
+    _projects.clear()
+    project_id = "proj-restart-active-stage-only"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Restart Active Stage Only",
+        "product_description": "Need aluminum housings",
+        "status": " ",
+        "current_stage": "verifying",
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/restart",
+        json={"from_stage": "discovering"},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Project is currently running. Cancel the run before restarting."
 
 
 def test_restart_with_additional_context_forces_parsing():
