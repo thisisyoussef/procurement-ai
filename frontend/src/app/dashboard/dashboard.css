@@ -728,6 +728,12 @@
   font-size: 12px;
 }
 
+.dash-filter-hint {
+  margin: -2px 0 10px;
+  color: var(--text3);
+  font-size: 12px;
+}
+
 @keyframes dashPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .3; }

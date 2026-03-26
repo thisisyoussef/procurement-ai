@@ -64,6 +64,7 @@ const ALL_STATUS_FILTERS = new Set<ProjectStatusFilter>([
   'failed',
   'canceled',
 ])
+const CONTACTS_MIN_QUERY_LENGTH = 2
 
 const STATUS_PRESETS: Array<{ key: StatusPreset; label: string; statuses: ProjectStatusFilter[] }> = [
   { key: 'all', label: 'All', statuses: [] },
@@ -207,6 +208,10 @@ function DashboardPageContent() {
   }
 
   const loadContacts = async () => {
+    if (contactsQuery && contactsQuery.length < CONTACTS_MIN_QUERY_LENGTH) {
+      setContactsError(`Enter at least ${CONTACTS_MIN_QUERY_LENGTH} characters to filter contacts.`)
+      return
+    }
     setContactsLoading(true)
     setContactsError(null)
     try {
@@ -274,6 +279,11 @@ function DashboardPageContent() {
 
   const applyContactsQuery = (nextQuery: string) => {
     const normalizedQuery = normalizeProjectQuery(nextQuery)
+    if (normalizedQuery && normalizedQuery.length < CONTACTS_MIN_QUERY_LENGTH) {
+      setContactsError(`Enter at least ${CONTACTS_MIN_QUERY_LENGTH} characters to filter contacts.`)
+      return
+    }
+    setContactsError(null)
     const params = new URLSearchParams(searchParams.toString())
     if (normalizedQuery) params.set('contacts_q', normalizedQuery)
     else params.delete('contacts_q')
@@ -639,6 +649,7 @@ function DashboardPageContent() {
                 Apply
               </button>
             </div>
+            <div className="dash-filter-hint">Use at least 2 characters when filtering contacts.</div>
             {contactsError && <div className="dash-error">Contacts error: {contactsError}</div>}
             {contactsLoading && !contacts && <div className="dash-empty">Loading contacts...</div>}
             {contacts && (
