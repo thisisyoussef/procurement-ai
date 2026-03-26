@@ -170,6 +170,21 @@ def _normalized_status_name(project: dict) -> str:
     return _normalized_stage_name(project)
 
 
+def _query_terms(query_text: str) -> list[str]:
+    return [term for term in query_text.split() if term]
+
+
+def _project_matches_query_terms(project: dict, query_terms: list[str]) -> bool:
+    searchable = " ".join(
+        (
+            str(project.get("id") or "").strip().lower(),
+            str(project.get("title") or "").strip().lower(),
+            str(project.get("product_description") or "").strip().lower(),
+        )
+    )
+    return all(term in searchable for term in query_terms)
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -1464,7 +1479,7 @@ async def list_projects(
     q: str | None = Query(
         default=None,
         max_length=120,
-        description="Optional case-insensitive project title or description keyword filter.",
+        description="Optional case-insensitive project keyword terms filter (title, description, or id).",
     ),
 ):
     """List current user's projects with active work first, then recent activity."""
@@ -1494,17 +1509,16 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower()
+    query_terms = _query_terms((q or "").strip().lower())
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
-    if query_text:
+    if query_terms:
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_terms(project, query_terms)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 

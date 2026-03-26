@@ -654,6 +654,48 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_multi_keyword_query_requires_all_terms():
+    _projects.clear()
+    _projects["coffee-capsules"] = {
+        "id": "coffee-capsules",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Biodegradable Capsules",
+        "product_description": "Need coffee-compatible capsule supplier.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["coffee-filters"] = {
+        "id": "coffee-filters",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Coffee Filters",
+        "product_description": "Need premium paper filters.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=coffee%20capsule", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["coffee-capsules"]
+
+
+def test_list_projects_multi_keyword_query_matches_project_id_terms():
+    _projects.clear()
+    _projects["run-2026-fasteners"] = {
+        "id": "run-2026-fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Metal Components",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=2026%20fasteners", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["run-2026-fasteners"]
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {
@@ -680,6 +722,42 @@ def test_list_projects_combines_status_and_description_keyword_filters():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload] == ["fasteners-discovering"]
+
+
+def test_list_projects_combines_status_and_multi_keyword_filters():
+    _projects.clear()
+    _projects["discovering-fasteners"] = {
+        "id": "discovering-fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Fasteners Run",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["complete-fasteners"] = {
+        "id": "complete-fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Fasteners Run Complete",
+        "product_description": "Need zinc-coated steel fasteners for assembly line.",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+    _projects["discovering-labels"] = {
+        "id": "discovering-labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Labels Run",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get(
+        "/api/v1/projects?status=discovering&q=zinc%20fasteners",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["discovering-fasteners"]
 
 
 def test_list_projects_title_keyword_ignores_whitespace_only_query():
