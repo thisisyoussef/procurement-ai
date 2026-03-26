@@ -89,6 +89,7 @@ LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "c
 TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
+PROJECT_SEARCH_FAILURE_DETAIL = "Failed to run quick search. Please try again."
 PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL = "Retrospective has already been submitted for this project."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
@@ -1170,7 +1171,11 @@ async def quick_search(
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
     """Quick synchronous search — runs the full pipeline and returns results."""
-    result = await run_pipeline(request.product_description)
+    try:
+        result = await run_pipeline(request.product_description)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Quick search failed")
+        raise HTTPException(status_code=500, detail=PROJECT_SEARCH_FAILURE_DETAIL) from exc
 
     return {
         "status": result.get("current_stage", "unknown"),

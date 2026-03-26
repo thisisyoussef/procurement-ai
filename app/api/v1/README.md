@@ -62,6 +62,7 @@
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.
 - `POST /api/v1/projects` and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `500` message (`Failed to start project. Please try again.`) for unexpected start failures, without exposing internal exception details.
+- `POST /api/v1/projects/search` now returns a safe, fixed `500` message (`Failed to run quick search. Please try again.`) for unexpected quick-search failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/outreach/start` now returns a safe, fixed `500` message (`Failed to start outreach. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/phone/call` now returns a safe, fixed `500` message (`Failed to start phone call. Please try again.`) for unexpected failures, while preserving actionable `400` validation details.
 - `POST /api/v1/projects/{project_id}/phone/calls/{call_id}/parse` now returns a safe, fixed `500` message (`Failed to parse call transcript. Please try again.`) for unexpected failures, without exposing internal exception details.
