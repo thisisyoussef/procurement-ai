@@ -12,6 +12,7 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 from app.main import app
 from app.api.v1.projects import (
     PROJECT_ANSWER_FAILURE_DETAIL,
+    PROJECT_QUICK_SEARCH_FAILURE_DETAIL,
     PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
     PROJECT_START_FAILURE_DETAIL,
     _projects,
@@ -141,6 +142,51 @@ def test_create_project_internal_error_returns_safe_message():
     assert response.status_code == 500
     payload = response.json()
     assert payload["detail"] == PROJECT_START_FAILURE_DETAIL
+    assert "sensitive failure details" not in payload["detail"]
+
+
+def test_quick_search_accepts_description_without_title():
+    with patch("app.api.v1.projects.run_pipeline", new_callable=AsyncMock) as run_pipeline:
+        run_pipeline.return_value = {
+            "current_stage": "complete",
+            "error": None,
+            "parsed_requirements": {"product_type": "Custom tote bags"},
+        }
+        response = client.post(
+            "/api/v1/projects/search",
+            json={"product_description": "Need 500 custom canvas tote bags for retail launch."},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "complete"
+    assert payload["error"] is None
+    assert payload["parsed_requirements"]["product_type"] == "Custom tote bags"
+
+
+def test_quick_search_rejects_whitespace_only_description():
+    response = client.post(
+        "/api/v1/projects/search",
+        json={"product_description": "      "},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 422
+
+
+def test_quick_search_internal_error_returns_safe_message():
+    with patch("app.api.v1.projects.run_pipeline", new_callable=AsyncMock) as run_pipeline:
+        run_pipeline.side_effect = RuntimeError("sensitive failure details")
+        response = client.post(
+            "/api/v1/projects/search",
+            json={"product_description": "Need 500 custom canvas tote bags for retail launch."},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == PROJECT_QUICK_SEARCH_FAILURE_DETAIL
     assert "sensitive failure details" not in payload["detail"]
 
 

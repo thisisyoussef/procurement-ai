@@ -30,6 +30,17 @@ class ProjectCreateRequest(BaseModel):
     )
 
 
+class QuickSearchRequest(BaseModel):
+    product_description: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=10, max_length=5000),
+    ]
+    auto_outreach: bool = Field(
+        default=False,
+        description="Reserved for compatibility with project creation payloads.",
+    )
+
+
 class ProjectResponse(BaseModel):
     id: UUID
     user_id: UUID
