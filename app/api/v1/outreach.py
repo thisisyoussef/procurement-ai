@@ -58,6 +58,7 @@ from app.repositories.user_repository import get_user_by_id
 logger = logging.getLogger(__name__)
 settings = get_settings()
 OUTREACH_START_FAILURE_DETAIL = "Failed to start outreach. Please try again."
+OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL = "Failed to parse supplier response. Please try again."
 
 
 async def _fetch_business_profile(user_id: str) -> dict[str, str | None] | None:
@@ -1279,9 +1280,11 @@ async def parse_response(
 
         return quote.model_dump()
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Response parsing failed: %s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL) from e
 
 
 @router.post("/follow-up")
