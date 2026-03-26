@@ -126,9 +126,6 @@ async def list_supplier_contacts_for_user(
     # Since project_id is a UUID we can't simply max() it meaningfully, so we use
     # a window-function subquery approach. For simplicity, we'll do a separate
     # subquery that finds the most recent project_id per supplier.
-    from sqlalchemy import literal_column
-    from sqlalchemy.orm import aliased
-
     latest_interaction = (
         select(
             SupplierInteraction.supplier_id.label("si_supplier_id"),
@@ -166,18 +163,20 @@ async def list_supplier_contacts_for_user(
     )
 
     normalized_query = (contact_query or "").strip().lower()
-    if normalized_query:
-        like_pattern = f"%{normalized_query}%"
-        stmt = stmt.where(
-            or_(
-                func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+    query_terms = [term for term in normalized_query.split() if term]
+    if query_terms:
+        for query_term in query_terms:
+            like_pattern = f"%{query_term}%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+                )
             )
-        )
 
     stmt = (
         stmt

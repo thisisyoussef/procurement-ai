@@ -1229,6 +1229,56 @@ def test_dashboard_contacts_service_merges_with_query_filter_before_limit():
     assert response.count == 1
     assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
 
+
+def test_dashboard_contacts_service_multi_keyword_filter_requires_all_terms_before_limit():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-1",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "Acme Precision Metals",
+                        "email": "sales@acme.example",
+                    },
+                    {
+                        "supplier_id": "33333333-3333-3333-3333-333333333333",
+                        "name": "Acme Plastics",
+                        "email": "contact@acmeplastics.example",
+                    },
+                ]
+            },
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=1,
+                contact_query="acme plastics",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Plastics"]
+
+
 def test_contact_matches_query_matches_name_email_phone_and_location():
     contact = {
         "name": "Acme Precision Metals",
@@ -1245,7 +1295,10 @@ def test_contact_matches_query_matches_name_email_phone_and_location():
     assert _contact_matches_query(contact, "3125550142")
     assert _contact_matches_query(contact, "5550142")
     assert _contact_matches_query(contact, "detroit")
+    assert _contact_matches_query(contact, "acme detroit")
+    assert _contact_matches_query(contact, "acme 3125550142")
     assert not _contact_matches_query(contact, "toronto")
+    assert not _contact_matches_query(contact, "acme toronto")
     assert not _contact_matches_query(contact, "555-9999")
     assert not _contact_matches_query(contact, "9999999")
 

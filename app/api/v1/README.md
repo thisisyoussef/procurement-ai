@@ -45,9 +45,10 @@
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
-  limited to 120 characters. Phone matching also supports digit-only queries against formatted
-  phone values (example: `3125550142` matches `+1 (312) 555-0142`). Query filtering is applied
-  before response limiting so relevant matches are preserved.
+  limited to 120 characters. Query terms are split by whitespace, and each term must match at
+  least one supported contact field. Phone matching also supports digit-only terms against
+  formatted phone values (example: `acme 3125550142` matches `Acme` with `+1 (312) 555-0142`).
+  Query filtering is applied before response limiting so relevant matches are preserved.
 - `GET /api/v1/dashboard/contacts` merges DB-backed contact rows with runtime project discovery
   contacts (deduplicated by supplier identity), so newly discovered suppliers remain visible even
   before interaction rows are persisted. If DB access fails, runtime contacts are used as fallback.

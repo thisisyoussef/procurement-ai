@@ -565,9 +565,11 @@ async def get_dashboard_activity_for_user(
 
 
 def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
-    needle = query.strip().lower()
-    if not needle:
+    terms = [term for term in query.strip().lower().split() if term]
+    if not terms:
         return True
+
+    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
     searchable = [
         str(contact.get("name") or ""),
         str(contact.get("email") or ""),
@@ -576,15 +578,19 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
         str(contact.get("city") or ""),
         str(contact.get("country") or ""),
     ]
-    if any(needle in value.lower() for value in searchable):
-        return True
+    searchable_lower = [value.lower() for value in searchable]
 
-    phone_needle = re.sub(r"\D", "", needle)
-    if not phone_needle:
+    for term in terms:
+        if any(term in value for value in searchable_lower):
+            continue
+
+        phone_needle = re.sub(r"\D", "", term)
+        if phone_needle and phone_value and phone_needle in phone_value:
+            continue
+
         return False
 
-    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
-    return bool(phone_value) and phone_needle in phone_value
+    return True
 
 
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
