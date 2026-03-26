@@ -628,6 +628,54 @@ def test_dashboard_summary_greeting_active_count_normalizes_status_whitespace_an
     assert response.json()["greeting"]["active_projects"] == 1
 
 
+def test_dashboard_summary_filters_by_active_alias_when_status_is_blank_and_stage_is_active():
+    projects = get_legacy_project_dict()
+    projects["proj-stage-only-active"] = {
+        "id": "proj-stage-only-active",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Stage only active",
+        "product_description": "Need stamped inserts.",
+        "status": "   ",
+        "current_stage": " Steering ",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-complete"] = {
+        "id": "proj-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete run",
+        "product_description": "Need anodized brackets.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=active", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-stage-only-active"]
+    assert payload["projects"][0]["status"] == "steering"
+
+
+def test_dashboard_summary_greeting_counts_active_when_status_is_blank_and_stage_is_active():
+    projects = get_legacy_project_dict()
+    projects["proj-stage-only-parsing"] = {
+        "id": "proj-stage-only-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Stage only parsing",
+        "product_description": "Need molded enclosures.",
+        "status": "   ",
+        "current_stage": " Parsing ",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["greeting"]["active_projects"] == 1
+
+
 def test_dashboard_summary_greeting_excludes_terminal_statuses_from_active_count():
     projects = get_legacy_project_dict()
     projects["proj-failed"] = {

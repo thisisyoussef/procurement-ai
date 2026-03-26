@@ -22,6 +22,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `GET /api/v1/dashboard/contacts` merges DB-backed supplier contacts with runtime project discovery contacts (deduplicated), ensuring newly discovered suppliers still appear even when they have no DB interaction rows yet; query filtering remains applied before response limiting.
 - `GET /api/v1/dashboard/activity` now falls back to per-project runtime timeline events (newest first) when DB-backed dashboard events are unavailable, while preserving `cursor` pagination semantics.
 - Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
+- Project list and dashboard summary status handling now fall back to canonical `current_stage` when legacy records have blank `status`, so active/closed filters and active counts remain accurate.
 - `POST /api/v1/projects/{id}/answer` now returns a safe `500` detail (`"Failed to process answers. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/start` now returns a safe `500` detail (`"Failed to start outreach. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/parse-response` now returns a safe `500` detail (`"Failed to parse outreach response. Please try again."`) for unexpected failures, without exposing internal exception strings.
@@ -34,6 +35,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects/{id}/retrospective` accepts only the first submission per project; subsequent submissions return `409` with `Retrospective has already been submitted for this project.` and preserve the original feedback.
+- Comparison stage now auto-converts unrealistically low per-unit international freight estimates for heavy/industrial products to `Freight quote required`, appending rationale in weaknesses and analysis narrative.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`

@@ -177,7 +177,10 @@ def _is_active_status(status: Any) -> bool:
 
 
 def _normalized_status(project: dict[str, Any]) -> str:
-    return str(project.get("status") or "").strip().lower()
+    status = str(project.get("status") or "").strip().lower()
+    if status:
+        return status
+    return str(project.get("current_stage") or "").strip().lower()
 
 
 def _normalized_stage(project: dict[str, Any]) -> str:
