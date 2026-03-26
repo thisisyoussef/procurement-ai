@@ -376,6 +376,69 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_filters_projects_by_project_id_keyword():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-abc123"] = {
+        "id": "proj-dash-abc123",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need coated clips.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-def999"] = {
+        "id": "proj-dash-def999",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need molded caps.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=ABC123", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-abc123"]
+
+
+def test_dashboard_summary_combines_status_and_project_id_query_filters():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-abc123-discovering"] = {
+        "id": "proj-dash-abc123-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need coated clips.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-abc123-complete"] = {
+        "id": "proj-dash-abc123-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need coated clips.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?status=discovering&q=ABC123",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == [
+        "proj-dash-abc123-discovering"
+    ]
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {
