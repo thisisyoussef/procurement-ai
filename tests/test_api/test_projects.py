@@ -529,6 +529,35 @@ def test_list_projects_returns_canonical_current_stage_when_missing():
     assert payload[0]["current_stage"] == "discovering"
 
 
+def test_list_projects_filters_by_status_when_legacy_status_is_blank():
+    _projects.clear()
+    _projects["legacy-stage-only"] = {
+        "id": "legacy-stage-only",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy stage only",
+        "status": "   ",
+        "current_stage": " Discovering ",
+        "created_at": "2026-03-15T12:00:00+00:00",
+        "updated_at": "2026-03-15T12:00:00+00:00",
+    }
+    _projects["complete"] = {
+        "id": "complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-14T12:00:00+00:00",
+        "updated_at": "2026-03-14T12:00:00+00:00",
+    }
+
+    response = client.get("/api/v1/projects?status=discovering", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["legacy-stage-only"]
+    assert payload[0]["status"] == "discovering"
+    assert payload[0]["current_stage"] == "discovering"
+
+
 def test_list_projects_active_alias_treats_normalized_status_as_active_for_sorting():
     _projects.clear()
     _projects["active-parsing-legacy"] = {

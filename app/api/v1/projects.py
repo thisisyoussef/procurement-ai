@@ -1487,7 +1487,7 @@ async def list_projects(
             return 0.0
 
     def _sort_key(project: dict) -> tuple[int, float, float]:
-        status = _normalized_project_status(project)
+        status = _normalized_status_name(project)
         is_active = 1 if status in ACTIVE_PIPELINE_STATUSES else 0
         updated = _timestamp_sort_value(project, "updated_at")
         created = _timestamp_sort_value(project, "created_at")
@@ -1498,7 +1498,7 @@ async def list_projects(
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
-        user_projects = [project for project in user_projects if _normalized_project_status(project) in normalized_statuses]
+        user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
     if query_text:
         user_projects = [
             project
@@ -1512,7 +1512,7 @@ async def list_projects(
         {
             "id": p.get("id"),
             "title": p.get("title"),
-            "status": _normalized_project_status(p),
+            "status": _normalized_status_name(p),
             "current_stage": _normalized_stage_name(p),
             "created_at": p.get("created_at"),
             "updated_at": p.get("updated_at"),
