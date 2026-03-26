@@ -21,6 +21,8 @@
   - Then by most recent `updated_at`
   - Then by `created_at` when needed as fallback
 - `GET /api/v1/projects` now returns canonical lowercase, trimmed `status` and `current_stage` values in each list item (legacy stored formatting is normalized in the response).
+- `GET /api/v1/projects` treats blank legacy `status` as the canonical `current_stage` value
+  for filtering, active-first sorting, and response payloads, so stage-only records remain visible.
 - `GET /api/v1/projects` accepts optional repeated `status` query parameters
   (example: `?status=parsing&status=discovering`) and returns only matching statuses.
 - `GET /api/v1/projects` normalizes stored project status values (trim + lowercase) when
@@ -32,6 +34,8 @@
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes
   status formatting (trim + lowercase) before active count aggregation.
+- `GET /api/v1/dashboard/summary` treats blank legacy `status` as the canonical `current_stage`
+  value for status filtering and greeting active-count calculations.
 - `GET /api/v1/dashboard/summary` project cards now normalize legacy status/current stage
   values before rendering (`" Complete "` -> `complete`) so badge and phase UI stay consistent.
 - `GET /api/v1/dashboard/summary` project cards are ordered for actionability:
