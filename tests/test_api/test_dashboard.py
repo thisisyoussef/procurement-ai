@@ -855,6 +855,26 @@ def test_dashboard_contacts_rejects_overlong_query():
     assert response.status_code == 422
 
 
+def test_dashboard_contacts_rejects_single_character_query():
+    response = client.get("/api/v1/dashboard/contacts?q=a", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]
+        == "Contacts search query must be at least 2 characters when provided."
+    )
+
+
+def test_dashboard_contacts_rejects_single_character_query_after_trimming():
+    response = client.get("/api/v1/dashboard/contacts?q=%20a%20", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]
+        == "Contacts search query must be at least 2 characters when provided."
+    )
+
+
 def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
     rows = [
         {
