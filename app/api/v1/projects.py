@@ -1414,7 +1414,7 @@ async def submit_retro(
     """Persist post-project retrospective feedback and update user profile learning."""
     project = await _get_project_or_404(project_id)
     _enforce_project_ownership(project, current_user)
-    if _normalized_project_status(project) != "complete":
+    if _normalized_status_name(project) != "complete":
         raise HTTPException(
             status_code=400,
             detail="Retrospective can only be submitted for completed projects",

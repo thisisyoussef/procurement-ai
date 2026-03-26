@@ -1182,6 +1182,117 @@ def test_submit_retrospective_rejects_non_complete_project():
     assert _projects[project_id]["retrospective"] is None
 
 
+def test_submit_retrospective_allows_legacy_blank_status_when_stage_is_complete():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000126"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Complete Retrospective",
+        "product_description": "Need stamped steel bracket supplier",
+        "status": "   ",
+        "current_stage": " complete ",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json={"supplier_chosen": "Legacy Supplier", "overall_satisfaction": 4},
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "recorded"
+    assert _projects[project_id]["retrospective"]["supplier_chosen"] == "Legacy Supplier"
+
+
+def test_submit_retrospective_rejects_legacy_blank_status_when_stage_not_complete():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000127"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy In-Progress Retrospective",
+        "product_description": "Need high-precision extrusion partner",
+        "status": "   ",
+        "current_stage": "discovering",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json={"supplier_chosen": "Should Not Persist"},
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Retrospective can only be submitted for completed projects"
+    assert _projects[project_id]["retrospective"] is None
+
+
+def test_submit_retrospective_rejects_duplicate_submission_for_legacy_complete_status():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000128"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Duplicate Retrospective",
+        "product_description": "Need low-volume PCB assembly supplier",
+        "status": "   ",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": {"supplier_chosen": "First Supplier"},
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/retrospective",
+        json={"supplier_chosen": "Second Supplier"},
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL
+    assert _projects[project_id]["retrospective"]["supplier_chosen"] == "First Supplier"
+
+
 def test_submit_retrospective_is_visible_in_status():
     _projects.clear()
     project_id = "00000000-0000-0000-0000-000000000121"
