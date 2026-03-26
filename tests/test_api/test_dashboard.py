@@ -735,6 +735,68 @@ def test_dashboard_summary_returns_canonical_status_and_phase_for_legacy_values(
     assert payload["projects"][0]["phase_label"] == "Order placed"
 
 
+def test_dashboard_summary_attention_normalizes_legacy_clarifying_status():
+    projects = get_legacy_project_dict()
+    projects["proj-legacy-clarifying"] = {
+        "id": "proj-legacy-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy clarifying formatting",
+        "product_description": "Need custom spacers.",
+        "status": " Clarifying ",
+        "current_stage": " Clarifying ",
+        "clarifying_questions": [{"id": "q-1"}, {"id": "q-2"}],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["kind"] for item in payload["attention"]] == ["clarifying_required"]
+    assert payload["attention"][0]["project_id"] == "proj-legacy-clarifying"
+
+
+def test_dashboard_summary_attention_uses_stage_when_legacy_status_is_blank():
+    projects = get_legacy_project_dict()
+    projects["proj-stage-only-clarifying"] = {
+        "id": "proj-stage-only-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Stage only clarifying",
+        "product_description": "Need stamped inserts.",
+        "status": "   ",
+        "current_stage": " Clarifying ",
+        "clarifying_questions": [{"id": "q-1"}],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["kind"] for item in payload["attention"]] == ["clarifying_required"]
+    assert payload["attention"][0]["project_id"] == "proj-stage-only-clarifying"
+
+
+def test_dashboard_summary_attention_excludes_non_clarifying_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-complete"] = {
+        "id": "proj-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Completed run",
+        "product_description": "Need anodized brackets.",
+        "status": " complete ",
+        "current_stage": " complete ",
+        "clarifying_questions": [{"id": "q-1"}],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attention"] == []
+
+
 def test_dashboard_summary_sorts_projects_active_first_then_recently_updated():
     projects = get_legacy_project_dict()
     projects["proj-complete-newest"] = {
