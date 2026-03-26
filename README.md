@@ -24,6 +24,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
 - Project list and dashboard summary status handling now fall back to canonical `current_stage` when legacy records have blank `status`, so active/closed filters and active counts remain accurate.
 - `POST /api/v1/projects/{id}/answer` now returns a safe `500` detail (`"Failed to process answers. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/search` now returns a safe `500` detail (`"Failed to run quick search. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/start` now returns a safe `500` detail (`"Failed to start outreach. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/parse-response` now returns a safe `500` detail (`"Failed to parse supplier response. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/phone/call` now returns a safe `500` detail (`"Failed to start phone call. Please try again."`) for unexpected failures, while preserving actionable `400` validation details.
