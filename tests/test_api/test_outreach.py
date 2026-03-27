@@ -11,7 +11,10 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.api.v1.outreach import (
+    OUTREACH_CHECK_INBOX_FAILURE_DETAIL,
+    OUTREACH_FOLLOW_UP_FAILURE_DETAIL,
     OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL,
+    OUTREACH_RECOMPARE_FAILURE_DETAIL,
     OUTREACH_START_FAILURE_DETAIL,
 )
 from app.main import app
@@ -337,6 +340,151 @@ def test_parse_response_preserves_validation_error_for_invalid_supplier_index():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid supplier index"
+
+
+def test_follow_up_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-follow-up-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.generate_follow_ups",
+        new=AsyncMock(side_effect=RuntimeError("provider token leaked")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/follow-up",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_FOLLOW_UP_FAILURE_DETAIL
+    assert "provider token" not in payload["detail"]
+
+
+def test_recompare_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-recompare-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": True,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "unit_price": "4.10",
+                "currency": "USD",
+                "moq": "1000",
+                "lead_time": "4 weeks",
+                "can_fulfill": True,
+                "confidence_score": 95,
+                "raw_text": "Quote details",
+            }
+        ],
+        "events": [],
+    }
+
+    with patch(
+        "app.agents.orchestrator.rerun_from_stage",
+        new=AsyncMock(side_effect=RuntimeError("internal orchestrator traceback")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/recompare",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_RECOMPARE_FAILURE_DETAIL
+    assert "traceback" not in payload["detail"]
+
+
+def test_recompare_preserves_validation_error_for_missing_quotes():
+    _projects.clear()
+    project_id = "proj-outreach-recompare-no-quotes"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/outreach/recompare",
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No parsed quotes to compare"
+
+
+def test_check_inbox_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-check-inbox-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.agents.inbox_monitor.get_monitor",
+        side_effect=RuntimeError("oauth refresh token leaked"),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/check-inbox",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_CHECK_INBOX_FAILURE_DETAIL
+    assert "refresh token" not in payload["detail"]
 
 
 def test_quick_approval_sends_outreach():
