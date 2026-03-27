@@ -607,6 +607,7 @@ async def _runtime_contacts_for_user(
     *,
     user_id: str,
     limit: int,
+    project_statuses: set[str] | None,
     contact_query: str | None,
 ) -> list[dict[str, Any]]:
     try:
@@ -621,6 +622,8 @@ async def _runtime_contacts_for_user(
 
     for project in projects:
         if str(project.get("user_id")) != str(user_id):
+            continue
+        if project_statuses and _normalized_status(project) not in project_statuses:
             continue
 
         project_id = str(project.get("id") or "")
@@ -769,6 +772,7 @@ async def get_dashboard_contacts_for_user(
     *,
     user_id: str,
     limit: int = 50,
+    project_statuses: set[str] | None = None,
     contact_query: str | None = None,
 ) -> DashboardContactsResponse:
     normalized_query = (contact_query or "").strip()
@@ -788,12 +792,14 @@ async def get_dashboard_contacts_for_user(
         rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=limit,
+            project_statuses=project_statuses,
             contact_query=query_filter,
         )
     else:
         runtime_rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=200,
+            project_statuses=project_statuses,
             contact_query=query_filter,
         )
         rows = _merge_contact_rows(
@@ -801,6 +807,25 @@ async def get_dashboard_contacts_for_user(
             supplemental_rows=runtime_rows,
             limit=limit,
         )
+
+    if project_statuses:
+        try:
+            projects = await get_project_store().list_projects()
+        except Exception:  # noqa: BLE001
+            logger.warning("Dashboard contacts status filtering failed", exc_info=True)
+            rows = []
+        else:
+            allowed_project_ids = {
+                str(project.get("id") or "")
+                for project in projects
+                if str(project.get("user_id")) == str(user_id)
+                and _normalized_status(project) in project_statuses
+            }
+            rows = [
+                row
+                for row in rows
+                if str(row.get("last_project_id") or "") in allowed_project_ids
+            ]
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
