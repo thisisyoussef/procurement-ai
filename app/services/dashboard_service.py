@@ -777,6 +777,7 @@ async def get_dashboard_contacts_for_user(
 ) -> DashboardContactsResponse:
     normalized_query = (contact_query or "").strip()
     query_filter = normalized_query or None
+    fetch_limit = 200 if project_statuses else limit
 
     try:
         await _ensure_dashboard_schema()
@@ -784,28 +785,28 @@ async def get_dashboard_contacts_for_user(
             rows = await dashboard_repo.list_supplier_contacts_for_user(
                 session=session,
                 user_id=user_id,
-                limit=limit,
+                limit=fetch_limit,
                 contact_query=query_filter,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard contacts query failed", exc_info=True)
         rows = await _runtime_contacts_for_user(
             user_id=user_id,
-            limit=limit,
+            limit=fetch_limit,
             project_statuses=project_statuses,
             contact_query=query_filter,
         )
     else:
         runtime_rows = await _runtime_contacts_for_user(
             user_id=user_id,
-            limit=200,
+            limit=fetch_limit,
             project_statuses=project_statuses,
             contact_query=query_filter,
         )
         rows = _merge_contact_rows(
             primary_rows=rows,
             supplemental_rows=runtime_rows,
-            limit=limit,
+            limit=fetch_limit,
         )
 
     if project_statuses:
@@ -827,5 +828,6 @@ async def get_dashboard_contacts_for_user(
                 if str(row.get("last_project_id") or "") in allowed_project_ids
             ]
 
+    rows = rows[: max(1, min(limit, 200))]
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
