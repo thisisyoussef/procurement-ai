@@ -376,6 +376,72 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_multi_term_query_matches_across_title_and_description():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-bottle-matte"] = {
+        "id": "proj-dash-bottle-matte",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle supplier shortlist",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-bottle-glossy"] = {
+        "id": "proj-dash-bottle-glossy",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle supplier shortlist",
+        "product_description": "Need premium glossy labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=bottle matte", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-bottle-matte"]
+
+
+def test_dashboard_summary_multi_term_query_tolerates_punctuation_and_spacing():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-food-grade"] = {
+        "id": "proj-dash-food-grade",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Food-Grade Tube Fittings",
+        "product_description": "Need hygienic fittings for beverage line.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q= food,   grade fittings ", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-food-grade"]
+
+
+def test_dashboard_summary_multi_term_query_requires_all_tokens():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-bottle-matte"] = {
+        "id": "proj-dash-bottle-matte",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle supplier shortlist",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=bottle titanium", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json()["projects"] == []
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {

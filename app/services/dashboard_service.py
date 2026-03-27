@@ -204,6 +204,26 @@ def _parse_sort_timestamp(value: Any) -> float:
         return 0.0
 
 
+def _normalized_query_tokens(query: str) -> list[str]:
+    cleaned = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip()
+    if not cleaned:
+        return []
+    return [token for token in cleaned.split(" ") if token]
+
+
+def _project_matches_query_tokens(project: dict[str, Any], query_tokens: list[str]) -> bool:
+    if not query_tokens:
+        return True
+    searchable = " ".join(
+        [
+            str(project.get("title") or ""),
+            str(project.get("product_description") or ""),
+        ]
+    ).lower()
+    normalized_searchable = re.sub(r"[^a-z0-9]+", " ", searchable)
+    return all(token in normalized_searchable for token in query_tokens)
+
+
 def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     def _sort_key(project: dict[str, Any]) -> tuple[int, float, float, str]:
         status = _normalized_status(project)
@@ -488,12 +508,12 @@ async def get_dashboard_summary_for_user(
             for project in sorted_user_projects
             if _normalized_status(project) in project_statuses
         ]
-    if project_query:
+    query_tokens = _normalized_query_tokens(project_query or "")
+    if query_tokens:
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_tokens(project, query_tokens)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

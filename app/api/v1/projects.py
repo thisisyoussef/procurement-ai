@@ -7,6 +7,7 @@ Supports:
 """
 
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -168,6 +169,26 @@ def _normalized_status_name(project: dict) -> str:
     if normalized_status:
         return normalized_status
     return _normalized_stage_name(project)
+
+
+def _normalized_query_tokens(query: str) -> list[str]:
+    cleaned = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip()
+    if not cleaned:
+        return []
+    return [token for token in cleaned.split(" ") if token]
+
+
+def _project_matches_query_tokens(project: dict, query_tokens: list[str]) -> bool:
+    if not query_tokens:
+        return True
+    searchable = " ".join(
+        [
+            str(project.get("title") or ""),
+            str(project.get("product_description") or ""),
+        ]
+    ).lower()
+    normalized_searchable = re.sub(r"[^a-z0-9]+", " ", searchable)
+    return all(token in normalized_searchable for token in query_tokens)
 
 
 def _stage_title(stage_name: str) -> str:
@@ -1494,17 +1515,16 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower()
+    query_tokens = _normalized_query_tokens(q or "")
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
-    if query_text:
+    if query_tokens:
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_tokens(project, query_tokens)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
