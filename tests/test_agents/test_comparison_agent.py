@@ -51,6 +51,16 @@ def _build_suppliers() -> list[DiscoveredSupplier]:
     )]
 
 
+def _build_domestic_suppliers() -> list[DiscoveredSupplier]:
+    return [DiscoveredSupplier(
+        name="RubberCo",
+        country="United States",
+        city="Akron",
+        description="Synthetic rubber compound manufacturer for car tires and automotive applications",
+        categories=["rubber", "tires", "automotive"],
+    )]
+
+
 @pytest.mark.asyncio
 @patch("app.agents.comparison_agent.call_llm_structured", new_callable=AsyncMock)
 async def test_comparison_agent_flags_unrealistically_low_heavy_shipping(mock_llm):
@@ -134,3 +144,47 @@ async def test_comparison_agent_allows_low_per_unit_for_high_volume(mock_llm):
     row = result.comparisons[0]
     assert row.estimated_shipping_cost == "$0.30-$0.80 per unit"
     assert row.estimated_landed_cost == "$2.10-$3.00 per unit"
+
+
+@pytest.mark.asyncio
+@patch("app.agents.comparison_agent.call_llm_structured", new_callable=AsyncMock)
+async def test_comparison_agent_keeps_low_per_unit_for_domestic_lane(mock_llm):
+    mock_llm.return_value = json.dumps(
+        {
+            "comparisons": [
+                {
+                    "supplier_name": "RubberCo",
+                    "supplier_index": 0,
+                    "verification_score": 85,
+                    "estimated_unit_price": "$1.80-$2.20",
+                    "estimated_shipping_cost": "$0.30-$0.80 per unit",
+                    "estimated_landed_cost": "$2.10-$3.00 per unit",
+                    "moq": "3000",
+                    "lead_time": "10-14 days",
+                    "certifications": ["ISO 9001"],
+                    "strengths": ["Domestic trucking network"],
+                    "weaknesses": [],
+                    "overall_score": 84,
+                    "price_score": 4.0,
+                    "quality_score": 4.0,
+                    "shipping_score": 4.1,
+                    "review_score": 3.9,
+                    "lead_time_score": 4.3,
+                }
+            ],
+            "analysis_narrative": "Domestic supplier analysis.",
+            "best_value": "RubberCo",
+            "best_quality": "RubberCo",
+            "best_speed": "RubberCo",
+        }
+    )
+
+    result = await compare_suppliers(
+        _build_requirements(quantity=3000), _build_domestic_suppliers(), _build_verifications()
+    )
+
+    assert result.comparisons
+    row = result.comparisons[0]
+    assert row.estimated_shipping_cost == "$0.30-$0.80 per unit"
+    assert row.estimated_landed_cost == "$2.10-$3.00 per unit"
+    assert "converted to quote-required" not in result.analysis_narrative

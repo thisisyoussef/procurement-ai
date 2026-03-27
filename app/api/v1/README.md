@@ -48,7 +48,8 @@
   It can be combined with optional `status` filters. The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
-  limited to 120 characters. Phone matching also supports digit-only queries against formatted
+  limited to 120 characters, and non-empty queries must be at least 2 characters after trimming.
+  Phone matching also supports digit-only queries against formatted
   phone values (example: `3125550142` matches `+1 (312) 555-0142`). Query filtering is applied
   before response limiting so relevant matches are preserved.
 - `GET /api/v1/dashboard/contacts` merges DB-backed contact rows with runtime project discovery
@@ -64,6 +65,7 @@
 - `POST /api/v1/projects/{project_id}/retrospective` is accepted only when project status is `complete`; non-complete projects receive `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects` trims surrounding whitespace for `title` and `product_description`, and rejects whitespace-only values.
 - `POST /api/v1/projects` and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `500` message (`Failed to start project. Please try again.`) for unexpected start failures, without exposing internal exception details.
+- `POST /api/v1/projects/search` now returns a safe, fixed `500` message (`Failed to run quick search. Please try again.`) for unexpected quick-search failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/outreach/start` now returns a safe, fixed `500` message (`Failed to start outreach. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/outreach/parse-response` now returns a safe, fixed `500` message (`Failed to parse supplier response. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/phone/call` now returns a safe, fixed `500` message (`Failed to start phone call. Please try again.`) for unexpected failures, while preserving actionable `400` validation details.

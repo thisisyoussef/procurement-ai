@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -21,6 +22,105 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "comparison.md").read_text()
+
+HEAVY_PRODUCT_HINTS = {
+    "rubber",
+    "tire",
+    "tyre",
+    "steel",
+    "metal",
+    "industrial",
+    "machinery",
+    "chemical",
+    "resin",
+    "bulk",
+    "textile roll",
+    "fabric roll",
+}
+
+US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS",
+    "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY",
+    "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC",
+}
+
+
+def _parse_first_number(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)", value.replace(",", ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _to_int(value: str | int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    match = re.search(r"\d+", str(value).replace(",", ""))
+    return int(match.group(0)) if match else None
+
+
+def _is_us_location(value: str | None) -> bool:
+    if not value:
+        return False
+    normalized = value.lower()
+    if any(hint in normalized for hint in {"usa", "u.s.", "united states", ", us"}):
+        return True
+    state_match = re.search(r",\s*([A-Za-z]{2})(?:\b|$)", value)
+    return bool(state_match and state_match.group(1).upper() in US_STATE_CODES)
+
+
+def _apply_shipping_sanity_guard(
+    requirements: ParsedRequirements,
+    supplier_profile: dict,
+    comparison_row: dict,
+) -> tuple[dict, bool]:
+    shipping_text = str(comparison_row.get("estimated_shipping_cost") or "")
+    if "per unit" not in shipping_text.lower():
+        return comparison_row, False
+
+    min_shipping = _parse_first_number(shipping_text)
+    if min_shipping is None or min_shipping > 1.0:
+        return comparison_row, False
+
+    supplier_country = str(supplier_profile.get("country") or "")
+    supplier_is_us = supplier_country.lower() in {"us", "usa", "u.s.", "united states", "united states of america"}
+    buyer_is_us = _is_us_location(requirements.delivery_location)
+    is_international_lane = buyer_is_us and not supplier_is_us
+    if not is_international_lane:
+        return comparison_row, False
+
+    quantity = _to_int(comparison_row.get("moq")) or requirements.quantity or 0
+    if quantity >= 20000:
+        return comparison_row, False
+
+    heavy_text = " ".join(
+        [
+            str(requirements.product_type or ""),
+            str(requirements.material or ""),
+            " ".join(requirements.search_queries or []),
+            str(supplier_profile.get("description") or ""),
+            " ".join(supplier_profile.get("categories") or []),
+        ]
+    ).lower()
+    if not any(hint in heavy_text for hint in HEAVY_PRODUCT_HINTS):
+        return comparison_row, False
+
+    normalized = dict(comparison_row)
+    normalized["estimated_shipping_cost"] = "Freight quote required (auto-converted from low-confidence per-unit estimate)"
+    normalized["estimated_landed_cost"] = "Freight quote required to finalize landed cost"
+    weaknesses = normalized.get("weaknesses") or []
+    if not any("freight" in str(w).lower() for w in weaknesses):
+        weaknesses = [*weaknesses, "Freight quote required due to uncertain mode/weight assumptions."]
+    normalized["weaknesses"] = weaknesses
+    return normalized, True
 
 
 async def compare_suppliers(
@@ -196,26 +296,32 @@ In analysis_narrative, if viable suppliers are much fewer than total suppliers, 
                   progress_pct=70)
 
     comparisons = []
+    converted_shipping_rows = 0
     for c in data.get("comparisons", []):
         try:
+            supplier_index = int(c.get("supplier_index", 0))
+            supplier_profile = supplier_profiles[supplier_index] if 0 <= supplier_index < len(supplier_profiles) else {}
+            normalized_row, converted = _apply_shipping_sanity_guard(requirements, supplier_profile, c)
+            if converted:
+                converted_shipping_rows += 1
             comparison_entry = SupplierComparison(
-                supplier_name=c.get("supplier_name", "Unknown"),
-                supplier_index=c.get("supplier_index", 0),
-                verification_score=float(c.get("verification_score", 0)),
-                estimated_unit_price=c.get("estimated_unit_price"),
-                estimated_shipping_cost=c.get("estimated_shipping_cost"),
-                estimated_landed_cost=c.get("estimated_landed_cost"),
-                moq=c.get("moq"),
-                lead_time=c.get("lead_time"),
-                certifications=c.get("certifications", []),
-                strengths=c.get("strengths", []),
-                weaknesses=c.get("weaknesses", []),
-                overall_score=float(c.get("overall_score", 0)),
-                price_score=min(5, max(0, float(c.get("price_score", 0)))),
-                quality_score=min(5, max(0, float(c.get("quality_score", 0)))),
-                shipping_score=min(5, max(0, float(c.get("shipping_score", 0)))),
-                review_score=min(5, max(0, float(c.get("review_score", 0)))),
-                lead_time_score=min(5, max(0, float(c.get("lead_time_score", 0)))),
+                supplier_name=normalized_row.get("supplier_name", "Unknown"),
+                supplier_index=normalized_row.get("supplier_index", 0),
+                verification_score=float(normalized_row.get("verification_score", 0)),
+                estimated_unit_price=normalized_row.get("estimated_unit_price"),
+                estimated_shipping_cost=normalized_row.get("estimated_shipping_cost"),
+                estimated_landed_cost=normalized_row.get("estimated_landed_cost"),
+                moq=normalized_row.get("moq"),
+                lead_time=normalized_row.get("lead_time"),
+                certifications=normalized_row.get("certifications", []),
+                strengths=normalized_row.get("strengths", []),
+                weaknesses=normalized_row.get("weaknesses", []),
+                overall_score=float(normalized_row.get("overall_score", 0)),
+                price_score=min(5, max(0, float(normalized_row.get("price_score", 0)))),
+                quality_score=min(5, max(0, float(normalized_row.get("quality_score", 0)))),
+                shipping_score=min(5, max(0, float(normalized_row.get("shipping_score", 0)))),
+                review_score=min(5, max(0, float(normalized_row.get("review_score", 0)))),
+                lead_time_score=min(5, max(0, float(normalized_row.get("lead_time_score", 0)))),
             )
             comparisons.append(comparison_entry)
         except Exception:
@@ -229,9 +335,16 @@ In analysis_narrative, if viable suppliers are much fewer than total suppliers, 
                   f"Best value: {best_value}. Best quality: {best_quality}.",
                   progress_pct=100)
     logger.info("✅ Comparison complete: %d compared | best_value=%s, best_quality=%s, best_speed=%s", len(comparisons), best_value, best_quality, best_speed)
+    analysis_narrative = data.get("analysis_narrative", "")
+    if converted_shipping_rows:
+        analysis_narrative = (
+            f"{analysis_narrative}\n\nShipping sanity guard: {converted_shipping_rows} estimate(s) "
+            "converted to quote-required because per-unit freight looked unrealistically low for the trade lane."
+        ).strip()
+
     return ComparisonResult(
         comparisons=comparisons,
-        analysis_narrative=data.get("analysis_narrative", ""),
+        analysis_narrative=analysis_narrative,
         best_value=data.get("best_value"),
         best_quality=data.get("best_quality"),
         best_speed=data.get("best_speed"),
