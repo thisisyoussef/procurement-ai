@@ -565,26 +565,31 @@ async def get_dashboard_activity_for_user(
 
 
 def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
-    needle = query.strip().lower()
-    if not needle:
-        return True
-    searchable = [
-        str(contact.get("name") or ""),
-        str(contact.get("email") or ""),
-        str(contact.get("phone") or ""),
-        str(contact.get("website") or ""),
-        str(contact.get("city") or ""),
-        str(contact.get("country") or ""),
-    ]
-    if any(needle in value.lower() for value in searchable):
+    terms = [part.strip().lower() for part in query.split() if part.strip()]
+    if not terms:
         return True
 
-    phone_needle = re.sub(r"\D", "", needle)
-    if not phone_needle:
+    searchable = [
+        str(contact.get("name") or "").lower(),
+        str(contact.get("email") or "").lower(),
+        str(contact.get("phone") or "").lower(),
+        str(contact.get("website") or "").lower(),
+        str(contact.get("city") or "").lower(),
+        str(contact.get("country") or "").lower(),
+    ]
+    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
+
+    for term in terms:
+        if any(term in value for value in searchable):
+            continue
+
+        phone_needle = re.sub(r"\D", "", term)
+        if phone_needle and phone_value and phone_needle in phone_value:
+            continue
+
         return False
 
-    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
-    return bool(phone_value) and phone_needle in phone_value
+    return True
 
 
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
@@ -607,6 +612,7 @@ async def _runtime_contacts_for_user(
     *,
     user_id: str,
     limit: int,
+    project_statuses: set[str] | None,
     contact_query: str | None,
 ) -> list[dict[str, Any]]:
     try:
@@ -621,6 +627,8 @@ async def _runtime_contacts_for_user(
 
     for project in projects:
         if str(project.get("user_id")) != str(user_id):
+            continue
+        if project_statuses and _normalized_status(project) not in project_statuses:
             continue
 
         project_id = str(project.get("id") or "")
@@ -769,6 +777,7 @@ async def get_dashboard_contacts_for_user(
     *,
     user_id: str,
     limit: int = 50,
+    project_statuses: set[str] | None = None,
     contact_query: str | None = None,
 ) -> DashboardContactsResponse:
     normalized_query = (contact_query or "").strip()
@@ -788,12 +797,14 @@ async def get_dashboard_contacts_for_user(
         rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=limit,
+            project_statuses=project_statuses,
             contact_query=query_filter,
         )
     else:
         runtime_rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=200,
+            project_statuses=project_statuses,
             contact_query=query_filter,
         )
         rows = _merge_contact_rows(
@@ -801,6 +812,25 @@ async def get_dashboard_contacts_for_user(
             supplemental_rows=runtime_rows,
             limit=limit,
         )
+
+    if project_statuses:
+        try:
+            projects = await get_project_store().list_projects()
+        except Exception:  # noqa: BLE001
+            logger.warning("Dashboard contacts status filtering failed", exc_info=True)
+            rows = []
+        else:
+            allowed_project_ids = {
+                str(project.get("id") or "")
+                for project in projects
+                if str(project.get("user_id")) == str(user_id)
+                and _normalized_status(project) in project_statuses
+            }
+            rows = [
+                row
+                for row in rows
+                if str(row.get("last_project_id") or "") in allowed_project_ids
+            ]
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))

@@ -109,6 +109,13 @@ async def dashboard_activity(
 @router.get("/contacts", response_model=DashboardContactsResponse)
 async def dashboard_contacts(
     limit: int = Query(default=50, ge=1, le=200),
+    status: list[str] | None = Query(
+        default=None,
+        description=(
+            "Optional project status filter for dashboard contacts. "
+            "Repeat parameter to include multiple statuses."
+        ),
+    ),
     q: str | None = Query(
         default=None,
         max_length=120,
@@ -116,11 +123,13 @@ async def dashboard_contacts(
     ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
+    normalized_statuses = normalize_project_status_filters(status)
     query_text = _normalized_contacts_query_or_422(q)
     try:
         return await get_dashboard_contacts_for_user(
             user_id=current_user.user_id,
             limit=limit,
+            project_statuses=normalized_statuses,
             contact_query=query_text,
         )
     except StoreUnavailableError as exc:

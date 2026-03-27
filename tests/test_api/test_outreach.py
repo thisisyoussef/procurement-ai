@@ -340,6 +340,82 @@ def test_outreach_start_preserves_validation_error_for_invalid_supplier_indices(
     assert response.json()["detail"] == "No valid supplier indices provided"
 
 
+def test_parse_response_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-parse-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.parse_supplier_response",
+        new=AsyncMock(side_effect=RuntimeError("quoted price parser leaked api key")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/parse-response",
+            json={
+                "supplier_index": 0,
+                "response_text": "We can deliver 1000 units in 4 weeks at 4.10 USD each.",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL
+    assert "api key" not in payload["detail"]
+
+
+def test_parse_response_preserves_validation_error_for_invalid_supplier_index():
+    _projects.clear()
+    project_id = "proj-outreach-parse-invalid-supplier"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/outreach/parse-response",
+        json={
+            "supplier_index": 99,
+            "response_text": "We can deliver in six weeks with a 30% deposit.",
+        },
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid supplier index"
+
+
 def test_quick_approval_sends_outreach():
     _projects.clear()
     project_id = "proj-outreach-quick-1"

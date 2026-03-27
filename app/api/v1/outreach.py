@@ -1284,6 +1284,8 @@ async def parse_response(
 
         return quote.model_dump()
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Response parsing failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL) from e
