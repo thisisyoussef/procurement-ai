@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import ProjectEvent
@@ -167,17 +167,44 @@ async def list_supplier_contacts_for_user(
 
     normalized_query = (contact_query or "").strip().lower()
     if normalized_query:
-        like_pattern = f"%{normalized_query}%"
-        stmt = stmt.where(
-            or_(
-                func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
-                func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+        terms = [part.strip() for part in normalized_query.split() if part.strip()]
+        if terms:
+            normalized_phone_digits = func.replace(
+                func.replace(
+                    func.replace(
+                        func.replace(
+                            func.replace(func.coalesce(Supplier.phone, ""), " ", ""),
+                            "-",
+                            "",
+                        ),
+                        "(",
+                        "",
+                    ),
+                    ")",
+                    "",
+                ),
+                "+",
+                "",
             )
-        )
+            term_clauses = []
+            for term in terms:
+                like_pattern = f"%{term}%"
+                per_term = [
+                    func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
+                    func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+                ]
+
+                digits = "".join(ch for ch in term if ch.isdigit())
+                if digits:
+                    per_term.append(normalized_phone_digits.like(f"%{digits}%"))
+
+                term_clauses.append(or_(*per_term))
+
+            stmt = stmt.where(and_(*term_clauses))
 
     stmt = (
         stmt

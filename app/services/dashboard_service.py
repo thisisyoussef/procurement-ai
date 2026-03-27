@@ -565,26 +565,31 @@ async def get_dashboard_activity_for_user(
 
 
 def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
-    needle = query.strip().lower()
-    if not needle:
-        return True
-    searchable = [
-        str(contact.get("name") or ""),
-        str(contact.get("email") or ""),
-        str(contact.get("phone") or ""),
-        str(contact.get("website") or ""),
-        str(contact.get("city") or ""),
-        str(contact.get("country") or ""),
-    ]
-    if any(needle in value.lower() for value in searchable):
+    terms = [part.strip().lower() for part in query.split() if part.strip()]
+    if not terms:
         return True
 
-    phone_needle = re.sub(r"\D", "", needle)
-    if not phone_needle:
+    searchable = [
+        str(contact.get("name") or "").lower(),
+        str(contact.get("email") or "").lower(),
+        str(contact.get("phone") or "").lower(),
+        str(contact.get("website") or "").lower(),
+        str(contact.get("city") or "").lower(),
+        str(contact.get("country") or "").lower(),
+    ]
+    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
+
+    for term in terms:
+        if any(term in value for value in searchable):
+            continue
+
+        phone_needle = re.sub(r"\D", "", term)
+        if phone_needle and phone_value and phone_needle in phone_value:
+            continue
+
         return False
 
-    phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
-    return bool(phone_value) and phone_needle in phone_value
+    return True
 
 
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
