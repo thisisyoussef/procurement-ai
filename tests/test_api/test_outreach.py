@@ -3,6 +3,7 @@
 import os
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.auth import AuthUser, create_access_token
@@ -11,6 +12,7 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.api.v1.outreach import (
+    OUTREACH_FOLLOWUP_FAILURE_DETAIL,
     OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL,
     OUTREACH_START_FAILURE_DETAIL,
 )
@@ -337,6 +339,81 @@ def test_parse_response_preserves_validation_error_for_invalid_supplier_index():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid supplier index"
+
+
+def test_follow_up_generation_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-followup-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.generate_follow_ups",
+        new=AsyncMock(side_effect=RuntimeError("smtp token leaked during follow-up generation")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/follow-up",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_FOLLOWUP_FAILURE_DETAIL
+    assert "smtp token leaked" not in payload["detail"]
+
+
+def test_follow_up_generation_preserves_http_exceptions():
+    _projects.clear()
+    project_id = "proj-outreach-followup-preserve-http-exc"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "email_sent": True,
+                "response_received": False,
+                "follow_ups_sent": 0,
+                "parsed_quote": None,
+            }
+        ],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.generate_follow_ups",
+        new=AsyncMock(return_value=type("Result", (), {"follow_ups": [], "summary": "ok"})()),
+    ), patch(
+        "app.api.v1.outreach._save_project",
+        new=AsyncMock(side_effect=HTTPException(status_code=503, detail="Project store unavailable: test")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/follow-up",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Project store unavailable: test"
 
 
 def test_quick_approval_sends_outreach():
