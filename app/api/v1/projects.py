@@ -7,6 +7,7 @@ Supports:
 """
 
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -194,6 +195,26 @@ def _stage_progress_message(stage_name: str) -> str:
         "outreaching": "Drafting and sending supplier outreach on your behalf.",
     }
     return messages.get(stage_name, f"Working on {stage_name.replace('_', ' ')}.")
+
+
+def _normalized_search_tokens(value: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9]+", str(value or "").lower())
+
+
+def _project_matches_query(project: dict, query_text: str) -> bool:
+    query_tokens = _normalized_search_tokens(query_text)
+    if not query_tokens:
+        return True
+
+    searchable_text = " ".join(
+        [
+            str(project.get("title") or ""),
+            str(project.get("product_description") or ""),
+        ]
+    )
+    searchable_tokens = _normalized_search_tokens(searchable_text)
+    searchable_value = " ".join(searchable_tokens)
+    return all(token in searchable_value for token in query_tokens)
 
 
 async def _get_project_or_404(project_id: str) -> dict:
@@ -1494,7 +1515,7 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower()
+    query_text = (q or "").strip()
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
@@ -1503,8 +1524,7 @@ async def list_projects(
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query(project, query_text)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 

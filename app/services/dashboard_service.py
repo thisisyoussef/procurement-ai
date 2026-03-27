@@ -219,6 +219,26 @@ def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[
     return sorted(projects, key=_sort_key)
 
 
+def _normalized_search_tokens(value: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9]+", str(value or "").lower())
+
+
+def _project_matches_query(project: dict[str, Any], query: str) -> bool:
+    query_tokens = _normalized_search_tokens(query)
+    if not query_tokens:
+        return True
+
+    searchable_text = " ".join(
+        [
+            str(project.get("title") or ""),
+            str(project.get("product_description") or ""),
+        ]
+    )
+    searchable_tokens = _normalized_search_tokens(searchable_text)
+    searchable_value = " ".join(searchable_tokens)
+    return all(token in searchable_value for token in query_tokens)
+
+
 def _project_status_note(project: dict[str, Any]) -> str:
     status = _normalized_status(project) or "unknown"
     stage = _normalized_stage(project) or status
@@ -492,8 +512,7 @@ async def get_dashboard_summary_for_user(
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query(project, project_query)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

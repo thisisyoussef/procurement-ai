@@ -482,6 +482,57 @@ def test_dashboard_summary_combines_status_and_description_query_filters():
     ]
 
 
+def test_dashboard_summary_query_matches_multiple_terms_across_title_and_description():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-multi-match"] = {
+        "id": "proj-dash-multi-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Steel Components Run",
+        "product_description": "Need custom fasteners for tooling.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-partial-match"] = {
+        "id": "proj-dash-partial-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Steel Brackets",
+        "product_description": "Need CNC milling support.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=fasteners%20steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-multi-match"]
+
+
+def test_dashboard_summary_query_tolerates_punctuation_and_extra_spaces():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-punctuation-match"] = {
+        "id": "proj-dash-punctuation-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision steel housings",
+        "product_description": "Need anodized parts and fasteners.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?q=%20steel,%20%20fasteners%20",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-punctuation-match"]
+
+
 def test_dashboard_summary_filters_projects_by_active_alias():
     projects = get_legacy_project_dict()
     projects["proj-dash-steering"] = {

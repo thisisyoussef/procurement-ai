@@ -682,6 +682,48 @@ def test_list_projects_combines_status_and_description_keyword_filters():
     assert [project["id"] for project in payload] == ["fasteners-discovering"]
 
 
+def test_list_projects_keyword_query_matches_multiple_terms_across_fields():
+    _projects.clear()
+    _projects["mixed-match"] = {
+        "id": "mixed-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Steel Components Run",
+        "product_description": "Need custom fasteners for tooling.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["partial-match"] = {
+        "id": "partial-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Steel Brackets",
+        "product_description": "Need CNC milling support.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=fasteners steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["mixed-match"]
+
+
+def test_list_projects_keyword_query_tolerates_punctuation_and_extra_spaces():
+    _projects.clear()
+    _projects["punctuation-match"] = {
+        "id": "punctuation-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision steel housings",
+        "product_description": "Need anodized parts and fasteners.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=%20steel,%20%20fasteners%20", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["punctuation-match"]
+
+
 def test_list_projects_title_keyword_ignores_whitespace_only_query():
     _projects.clear()
     _projects["default-visible"] = {
