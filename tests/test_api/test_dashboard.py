@@ -5,9 +5,11 @@ import os
 from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import postgresql
 
 from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
+from app.repositories.dashboard_repository import list_supplier_contacts_for_user
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
 from app.services.dashboard_service import get_dashboard_activity_for_user
@@ -1245,9 +1247,45 @@ def test_contact_matches_query_matches_name_email_phone_and_location():
     assert _contact_matches_query(contact, "3125550142")
     assert _contact_matches_query(contact, "5550142")
     assert _contact_matches_query(contact, "detroit")
+    assert _contact_matches_query(contact, "acme detroit")
+    assert _contact_matches_query(contact, "acme,detroit")
+    assert _contact_matches_query(contact, "acme 312555")
     assert not _contact_matches_query(contact, "toronto")
+    assert not _contact_matches_query(contact, "acme toronto")
     assert not _contact_matches_query(contact, "555-9999")
     assert not _contact_matches_query(contact, "9999999")
+
+
+def test_dashboard_repository_contacts_query_supports_multi_token_and_phone_digits():
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    class _EmptyResult:
+        def all(self):
+            return []
+
+    session.execute.return_value = _EmptyResult()
+
+    asyncio.run(
+        list_supplier_contacts_for_user(
+            session=session,
+            user_id="00000000-0000-0000-0000-000000000001",
+            limit=50,
+            contact_query="acme 3125550142",
+        )
+    )
+
+    stmt = session.execute.await_args.args[0]
+    compiled = str(
+        stmt.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    ).lower()
+    assert "regexp_replace" in compiled
+    assert "%acme%" in compiled
+    assert "%3125550142%" in compiled
+    assert " and " in compiled
 
 
 def test_dashboard_contacts_service_runtime_fallback_matches_phone_digits_query():

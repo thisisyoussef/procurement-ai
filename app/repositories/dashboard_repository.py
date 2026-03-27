@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import ProjectEvent
@@ -126,9 +126,6 @@ async def list_supplier_contacts_for_user(
     # Since project_id is a UUID we can't simply max() it meaningfully, so we use
     # a window-function subquery approach. For simplicity, we'll do a separate
     # subquery that finds the most recent project_id per supplier.
-    from sqlalchemy import literal_column
-    from sqlalchemy.orm import aliased
-
     latest_interaction = (
         select(
             SupplierInteraction.supplier_id.label("si_supplier_id"),
@@ -167,17 +164,25 @@ async def list_supplier_contacts_for_user(
 
     normalized_query = (contact_query or "").strip().lower()
     if normalized_query:
-        like_pattern = f"%{normalized_query}%"
-        stmt = stmt.where(
-            or_(
+        tokens = [token for token in normalized_query.replace(",", " ").split() if token]
+        token_predicates = []
+        normalized_phone = func.regexp_replace(func.coalesce(Supplier.phone, ""), r"\D", "", "g")
+        for token in tokens:
+            like_pattern = f"%{token}%"
+            phone_digits = "".join(ch for ch in token if ch.isdigit())
+            predicates = [
                 func.lower(func.coalesce(Supplier.name, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.email, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.phone, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
                 func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
-            )
-        )
+            ]
+            if phone_digits:
+                predicates.append(normalized_phone.like(f"%{phone_digits}%"))
+            token_predicates.append(or_(*predicates))
+        if token_predicates:
+            stmt = stmt.where(and_(*token_predicates))
 
     stmt = (
         stmt
