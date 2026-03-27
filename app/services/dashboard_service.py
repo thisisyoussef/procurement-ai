@@ -190,6 +190,13 @@ def _normalized_stage(project: dict[str, Any]) -> str:
     return _normalized_status(project)
 
 
+def _normalized_project_status_filter_values(statuses: set[str] | None) -> set[str] | None:
+    if not statuses:
+        return None
+    normalized = {str(status).strip().lower() for status in statuses if str(status).strip()}
+    return normalized or None
+
+
 def _parse_sort_timestamp(value: Any) -> float:
     if value is None:
         return 0.0
@@ -608,6 +615,7 @@ async def _runtime_contacts_for_user(
     user_id: str,
     limit: int,
     contact_query: str | None,
+    project_statuses: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     try:
         projects = await get_project_store().list_projects()
@@ -621,6 +629,8 @@ async def _runtime_contacts_for_user(
 
     for project in projects:
         if str(project.get("user_id")) != str(user_id):
+            continue
+        if project_statuses and _normalized_status(project) not in project_statuses:
             continue
 
         project_id = str(project.get("id") or "")
@@ -770,9 +780,11 @@ async def get_dashboard_contacts_for_user(
     user_id: str,
     limit: int = 50,
     contact_query: str | None = None,
+    project_statuses: set[str] | None = None,
 ) -> DashboardContactsResponse:
     normalized_query = (contact_query or "").strip()
     query_filter = normalized_query or None
+    normalized_statuses = _normalized_project_status_filter_values(project_statuses)
 
     try:
         await _ensure_dashboard_schema()
@@ -782,6 +794,7 @@ async def get_dashboard_contacts_for_user(
                 user_id=user_id,
                 limit=limit,
                 contact_query=query_filter,
+                project_statuses=normalized_statuses,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard contacts query failed", exc_info=True)
@@ -789,12 +802,14 @@ async def get_dashboard_contacts_for_user(
             user_id=user_id,
             limit=limit,
             contact_query=query_filter,
+            project_statuses=normalized_statuses,
         )
     else:
         runtime_rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=200,
             contact_query=query_filter,
+            project_statuses=normalized_statuses,
         )
         rows = _merge_contact_rows(
             primary_rows=rows,

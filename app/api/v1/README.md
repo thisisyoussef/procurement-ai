@@ -48,6 +48,9 @@
   limited to 120 characters. Phone matching also supports digit-only queries against formatted
   phone values (example: `3125550142` matches `+1 (312) 555-0142`). Query filtering is applied
   before response limiting so relevant matches are preserved.
+- `GET /api/v1/dashboard/contacts` also accepts optional repeated or comma-separated `status`
+  filters (including aliases `active` and `closed`) to limit contacts to suppliers associated
+  with matching project statuses.
 - `GET /api/v1/dashboard/contacts` merges DB-backed contact rows with runtime project discovery
   contacts (deduplicated by supplier identity), so newly discovered suppliers remain visible even
   before interaction rows are persisted. If DB access fails, runtime contacts are used as fallback.

@@ -830,6 +830,7 @@ def test_dashboard_contacts_passes_trimmed_query_to_service():
         user_id="00000000-0000-0000-0000-000000000001",
         limit=50,
         contact_query="acme",
+        project_statuses=None,
     )
 
 
@@ -845,7 +846,47 @@ def test_dashboard_contacts_ignores_whitespace_query():
         user_id="00000000-0000-0000-0000-000000000001",
         limit=50,
         contact_query=None,
+        project_statuses=None,
     )
+
+
+def test_dashboard_contacts_passes_status_filters_to_service():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get(
+            "/api/v1/dashboard/contacts?status=active&status=complete&q=acme",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        contact_query="acme",
+        project_statuses={
+            "parsing",
+            "clarifying",
+            "discovering",
+            "verifying",
+            "steering",
+            "comparing",
+            "recommending",
+            "outreaching",
+            "complete",
+        },
+    )
+
+
+def test_dashboard_contacts_rejects_invalid_status_filter():
+    response = client.get(
+        "/api/v1/dashboard/contacts?status=not-real",
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 422
+    assert "Invalid status filter value(s): not-real" in response.json()["detail"]
 
 
 def test_dashboard_contacts_rejects_overlong_query():
@@ -894,6 +935,7 @@ def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
         user_id="00000000-0000-0000-0000-000000000001",
         limit=1,
         contact_query="acme",
+        project_statuses=None,
     )
 
 
@@ -921,7 +963,100 @@ def test_dashboard_contacts_service_passes_none_query_to_repository():
         user_id="00000000-0000-0000-0000-000000000001",
         limit=5,
         contact_query=None,
+        project_statuses=None,
     )
+
+
+def test_dashboard_contacts_service_passes_status_filters_to_repository():
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ) as list_contacts:
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=5,
+                contact_query=None,
+                project_statuses={"discovering", "complete"},
+            )
+        )
+
+    assert response.count == 0
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=5,
+        contact_query=None,
+        project_statuses={"discovering", "complete"},
+    )
+
+
+def test_dashboard_contacts_service_runtime_fallback_honors_project_status_filter():
+    runtime_projects = [
+        {
+            "id": "proj-runtime-active",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "status": "discovering",
+            "current_stage": "discovering",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "Acme Precision Metals",
+                        "email": "sales@acme.example",
+                    }
+                ]
+            },
+        },
+        {
+            "id": "proj-runtime-closed",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "status": "complete",
+            "current_stage": "complete",
+            "updated_at": "2026-03-21T10:00:00+00:00",
+            "discovery_results": {
+                "suppliers": [
+                    {
+                        "supplier_id": "22222222-2222-2222-2222-222222222222",
+                        "name": "Bravo Tooling",
+                        "email": "hello@bravo.example",
+                    }
+                ]
+            },
+        },
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(side_effect=RuntimeError("db unavailable")),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                contact_query=None,
+                project_statuses={"discovering"},
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
 
 
 def test_dashboard_contacts_service_falls_back_to_runtime_contacts_when_db_unavailable():

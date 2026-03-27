@@ -112,6 +112,7 @@ async def list_supplier_contacts_for_user(
     user_id: str | uuid.UUID,
     limit: int = 50,
     contact_query: str | None = None,
+    project_statuses: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     user_uuid = _normalize_uuid(user_id)
     if user_uuid is None:
@@ -164,6 +165,16 @@ async def list_supplier_contacts_for_user(
         )
         .where(RuntimeProject.user_id == user_uuid)
     )
+
+    if project_statuses:
+        normalized_statuses = {
+            str(status).strip().lower() for status in project_statuses if str(status).strip()
+        }
+        if normalized_statuses:
+            normalized_status = func.lower(func.trim(func.coalesce(RuntimeProject.status, "")))
+            normalized_stage = func.lower(func.trim(func.coalesce(RuntimeProject.current_stage, "")))
+            effective_status = func.coalesce(func.nullif(normalized_status, ""), normalized_stage)
+            stmt = stmt.where(effective_status.in_(normalized_statuses))
 
     normalized_query = (contact_query or "").strip().lower()
     if normalized_query:
