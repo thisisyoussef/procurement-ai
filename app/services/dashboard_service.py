@@ -317,7 +317,7 @@ def _attention_items(projects: list[dict[str, Any]]) -> list[DashboardAttentionI
     for project in projects:
         project_id = str(project.get("id"))
         name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "project"
-        status = str(project.get("status") or "")
+        status = _normalized_status(project)
         outreach = project.get("outreach_state") or {}
 
         if status == "clarifying":

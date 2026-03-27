@@ -735,6 +735,68 @@ def test_dashboard_summary_returns_canonical_status_and_phase_for_legacy_values(
     assert payload["projects"][0]["phase_label"] == "Order placed"
 
 
+def test_dashboard_summary_attention_includes_clarifying_for_legacy_status_formatting():
+    projects = get_legacy_project_dict()
+    projects["proj-legacy-clarifying"] = {
+        "id": "proj-legacy-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy clarifying",
+        "product_description": "Need aluminum trim parts.",
+        "status": " Clarifying ",
+        "current_stage": " Clarifying ",
+        "clarifying_questions": [{"question": "What finish do you need?"}],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attention"][0]["id"] == "proj-legacy-clarifying:clarifying"
+    assert payload["attention"][0]["kind"] == "clarifying_required"
+
+
+def test_dashboard_summary_attention_uses_stage_fallback_for_blank_clarifying_status():
+    projects = get_legacy_project_dict()
+    projects["proj-stage-clarifying"] = {
+        "id": "proj-stage-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Stage clarifying",
+        "product_description": "Need molded lids.",
+        "status": "   ",
+        "current_stage": "Clarifying",
+        "clarifying_questions": [{"question": "What tolerance range is acceptable?"}],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attention"][0]["id"] == "proj-stage-clarifying:clarifying"
+    assert payload["attention"][0]["kind"] == "clarifying_required"
+
+
+def test_dashboard_summary_attention_excludes_non_clarifying_statuses():
+    projects = get_legacy_project_dict()
+    projects["proj-complete-with-questions"] = {
+        "id": "proj-complete-with-questions",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Completed run",
+        "product_description": "Need corrugated inserts.",
+        "status": "complete",
+        "current_stage": "complete",
+        "clarifying_questions": [{"question": "Legacy stale question"}],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attention"] == []
+
+
 def test_dashboard_summary_sorts_projects_active_first_then_recently_updated():
     projects = get_legacy_project_dict()
     projects["proj-complete-newest"] = {

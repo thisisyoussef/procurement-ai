@@ -38,6 +38,9 @@
   value for status filtering and greeting active-count calculations.
 - `GET /api/v1/dashboard/summary` project cards now normalize legacy status/current stage
   values before rendering (`" Complete "` -> `complete`) so badge and phase UI stay consistent.
+- `GET /api/v1/dashboard/summary` attention prompts now normalize legacy status formatting
+  (trim + lowercase, with blank `status` falling back to canonical `current_stage`) so
+  clarifying-required cards still render for legacy records.
 - `GET /api/v1/dashboard/summary` project cards are ordered for actionability:
   active projects first, then by most recent `updated_at`, then `created_at` fallback.
 - `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
