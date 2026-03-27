@@ -63,6 +63,10 @@
 - `POST /api/v1/projects` and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `500` message (`Failed to start project. Please try again.`) for unexpected start failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/outreach/start` now returns a safe, fixed `500` message (`Failed to start outreach. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/outreach/parse-response` now returns a safe, fixed `500` message (`Failed to parse supplier response. Please try again.`) for unexpected failures, without exposing internal exception details.
+- `POST /api/v1/projects/{project_id}/outreach/follow-up` now returns a safe, fixed `500` message (`Failed to generate follow-up drafts. Please try again.`) for unexpected failures, without exposing internal exception details.
+- `POST /api/v1/projects/{project_id}/outreach/recompare` now preserves explicit `400` validation errors (for example `All quoted suppliers are excluded`) and returns a safe, fixed `500` message (`Failed to refresh comparison with real quotes. Please try again.`) for unexpected failures.
+- `POST /api/v1/projects/{project_id}/outreach/auto-start` now returns a safe, fixed `500` message (`Failed to start auto outreach. Please try again.`) for unexpected failures, without exposing internal exception details.
+- `POST /api/v1/projects/{project_id}/outreach/check-inbox` now returns a safe, fixed `500` message (`Failed to check inbox. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/phone/call` now returns a safe, fixed `500` message (`Failed to start phone call. Please try again.`) for unexpected failures, while preserving actionable `400` validation details.
 - `POST /api/v1/projects/{project_id}/phone/calls/{call_id}/parse` now returns a safe, fixed `500` message (`Failed to parse call transcript. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/dashboard/projects/start` is the dashboard quick-start entrypoint:

@@ -11,7 +11,11 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.api.v1.outreach import (
+    OUTREACH_AUTO_START_FAILURE_DETAIL,
+    OUTREACH_CHECK_INBOX_FAILURE_DETAIL,
+    OUTREACH_FOLLOW_UP_FAILURE_DETAIL,
     OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL,
+    OUTREACH_RECOMPARE_FAILURE_DETAIL,
     OUTREACH_START_FAILURE_DETAIL,
 )
 from app.main import app
@@ -337,6 +341,146 @@ def test_parse_response_preserves_validation_error_for_invalid_supplier_index():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid supplier index"
+
+
+def test_follow_up_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-followup-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.api.v1.outreach.generate_follow_ups",
+        new=AsyncMock(side_effect=RuntimeError("smtp token leaked in trace")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/follow-up",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_FOLLOW_UP_FAILURE_DETAIL
+    assert "smtp token leaked" not in payload["detail"]
+
+
+def test_recompare_preserves_validation_error_when_all_quotes_excluded():
+    _projects.clear()
+    project_id = "proj-outreach-recompare-validation"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "excluded_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "unit_price": "4.50",
+                "currency": "USD",
+                "confidence_score": 88,
+                "raw_text": "Quoted 4.50 USD per unit",
+            }
+        ],
+        "events": [],
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/outreach/recompare",
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "All quoted suppliers are excluded"
+
+
+def test_auto_start_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-auto-start-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+        "auto_config": {
+            "mode": "auto",
+            "auto_send_threshold": 80,
+            "max_concurrent_outreach": 2,
+            "follow_up_schedule": [3, 7, 14],
+        },
+    }
+    _projects[project_id]["verification_results"] = {
+        "verifications": [
+            {
+                "supplier_name": "Acme Mills",
+                "supplier_index": 0,
+                "verified_website": "https://acme.example",
+                "verified_email": "sales@acme.example",
+                "verified_phone": None,
+                "google_maps_verified": True,
+                "registration_verified": False,
+                "quality_signals": [],
+                "trust_score": 88,
+                "risk_flags": [],
+                "summary": "verified",
+                "composite_score": 91,
+            }
+        ]
+    }
+
+    with patch(
+        "app.api.v1.outreach._draft_and_send_initial_outreach",
+        new=AsyncMock(side_effect=RuntimeError("mail provider credential leaked")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/auto-start",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_AUTO_START_FAILURE_DETAIL
+    assert "credential leaked" not in payload["detail"]
+
+
+def test_check_inbox_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-check-inbox-safe-error"
+    _seed_project(project_id)
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
+    }
+
+    with patch(
+        "app.agents.inbox_monitor.get_monitor",
+        side_effect=RuntimeError("gmail oauth secret leaked"),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/check-inbox",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_CHECK_INBOX_FAILURE_DETAIL
+    assert "oauth secret" not in payload["detail"]
 
 
 def test_quick_approval_sends_outreach():
