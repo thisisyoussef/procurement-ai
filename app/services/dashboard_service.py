@@ -758,6 +758,7 @@ def _merge_contact_rows(
     rows.sort(
         key=lambda row: (
             -int(row.get("interaction_count") or 0),
+            -int(row.get("project_count") or 0),
             -float(row.get("last_interaction_at") or 0),
             str(row.get("name") or "").lower(),
         )

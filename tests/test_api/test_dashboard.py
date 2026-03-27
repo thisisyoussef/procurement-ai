@@ -10,6 +10,7 @@ from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
+from app.services.dashboard_service import _merge_contact_rows
 from app.services.dashboard_service import get_dashboard_activity_for_user
 from app.services.dashboard_service import get_dashboard_contacts_for_user
 from app.services.project_store import (
@@ -1228,6 +1229,82 @@ def test_dashboard_contacts_service_merges_with_query_filter_before_limit():
 
     assert response.count == 1
     assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
+
+
+def test_merge_contact_rows_prioritizes_project_count_after_interaction_count():
+    rows = _merge_contact_rows(
+        primary_rows=[
+            {
+                "supplier_id": "11111111-1111-1111-1111-111111111111",
+                "name": "Higher Project Count",
+                "interaction_count": 5,
+                "project_count": 4,
+                "last_interaction_at": 100.0,
+            },
+            {
+                "supplier_id": "22222222-2222-2222-2222-222222222222",
+                "name": "Lower Project Count",
+                "interaction_count": 5,
+                "project_count": 2,
+                "last_interaction_at": 200.0,
+            },
+        ],
+        supplemental_rows=[],
+        limit=10,
+    )
+
+    assert [row["name"] for row in rows] == ["Higher Project Count", "Lower Project Count"]
+
+
+def test_merge_contact_rows_uses_last_interaction_after_project_count():
+    rows = _merge_contact_rows(
+        primary_rows=[
+            {
+                "supplier_id": "33333333-3333-3333-3333-333333333333",
+                "name": "Older Interaction",
+                "interaction_count": 3,
+                "project_count": 2,
+                "last_interaction_at": 100.0,
+            },
+            {
+                "supplier_id": "44444444-4444-4444-4444-444444444444",
+                "name": "Newer Interaction",
+                "interaction_count": 3,
+                "project_count": 2,
+                "last_interaction_at": 200.0,
+            },
+        ],
+        supplemental_rows=[],
+        limit=10,
+    )
+
+    assert [row["name"] for row in rows] == ["Newer Interaction", "Older Interaction"]
+
+
+def test_merge_contact_rows_uses_name_as_final_tiebreaker():
+    rows = _merge_contact_rows(
+        primary_rows=[
+            {
+                "supplier_id": "55555555-5555-5555-5555-555555555555",
+                "name": "Bravo Tooling",
+                "interaction_count": 1,
+                "project_count": 1,
+                "last_interaction_at": 50.0,
+            },
+            {
+                "supplier_id": "66666666-6666-6666-6666-666666666666",
+                "name": "Acme Tooling",
+                "interaction_count": 1,
+                "project_count": 1,
+                "last_interaction_at": 50.0,
+            },
+        ],
+        supplemental_rows=[],
+        limit=10,
+    )
+
+    assert [row["name"] for row in rows] == ["Acme Tooling", "Bravo Tooling"]
+
 
 def test_contact_matches_query_matches_name_email_phone_and_location():
     contact = {
