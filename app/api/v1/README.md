@@ -51,6 +51,9 @@
 - `GET /api/v1/dashboard/contacts` merges DB-backed contact rows with runtime project discovery
   contacts (deduplicated by supplier identity), so newly discovered suppliers remain visible even
   before interaction rows are persisted. If DB access fails, runtime contacts are used as fallback.
+- `GET /api/v1/dashboard/contacts?status=...` matches suppliers by any linked project in the
+  requested statuses, not only the supplier's `last_project_id`, while preserving legacy
+  `last_project_id` behavior for rows without full association metadata.
 - `GET /api/v1/dashboard/activity` falls back to in-memory per-project timeline events
   (newest first) when DB-backed dashboard activity rows are unavailable, and keeps
   cursor pagination behavior (`cursor` returns older events only, `next_cursor` is the
