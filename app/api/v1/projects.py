@@ -7,6 +7,7 @@ Supports:
 """
 
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -168,6 +169,24 @@ def _normalized_status_name(project: dict) -> str:
     if normalized_status:
         return normalized_status
     return _normalized_stage_name(project)
+
+
+def _query_tokens(query: str) -> list[str]:
+    return [token for token in re.split(r"[\W_]+", query.lower()) if token]
+
+
+def _project_matches_query_tokens(project: dict, query: str) -> bool:
+    tokens = _query_tokens(query)
+    if not tokens:
+        return True
+
+    searchable = " ".join(
+        [
+            str(project.get("title") or "").lower(),
+            str(project.get("product_description") or "").lower(),
+        ]
+    )
+    return all(token in searchable for token in tokens)
 
 
 def _stage_title(stage_name: str) -> str:
@@ -1503,8 +1522,7 @@ async def list_projects(
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_tokens(project, query_text)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 

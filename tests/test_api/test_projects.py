@@ -654,6 +654,65 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_query_matches_multiple_tokens_across_title_and_description():
+    _projects.clear()
+    _projects["bottle-steel"] = {
+        "id": "bottle-steel",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle sourcing run",
+        "product_description": "Need stainless steel threaded caps for launch.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+    _projects["bottle-only"] = {
+        "id": "bottle-only",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels only",
+        "product_description": "Need premium matte labels.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=steel bottle", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["bottle-steel"]
+
+
+def test_list_projects_query_tolerates_punctuation_and_extra_spaces():
+    _projects.clear()
+    _projects["precision-gear"] = {
+        "id": "precision-gear",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision gear shafts",
+        "product_description": "Need hardened steel shafts.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=  precision,   shafts!! ", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["precision-gear"]
+
+
+def test_list_projects_query_requires_all_tokens():
+    _projects.clear()
+    _projects["labels-run"] = {
+        "id": "labels-run",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Luxury candle labels",
+        "product_description": "Need matte finish labels.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=labels steel", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == []
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {

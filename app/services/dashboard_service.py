@@ -204,6 +204,24 @@ def _parse_sort_timestamp(value: Any) -> float:
         return 0.0
 
 
+def _query_tokens(query: str) -> list[str]:
+    return [token for token in re.split(r"[\W_]+", query.lower()) if token]
+
+
+def _project_matches_query_tokens(project: dict[str, Any], query: str) -> bool:
+    tokens = _query_tokens(query)
+    if not tokens:
+        return True
+
+    searchable = " ".join(
+        [
+            str(project.get("title") or "").lower(),
+            str(project.get("product_description") or "").lower(),
+        ]
+    )
+    return all(token in searchable for token in tokens)
+
+
 def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     def _sort_key(project: dict[str, Any]) -> tuple[int, float, float, str]:
         status = _normalized_status(project)
@@ -492,8 +510,7 @@ async def get_dashboard_summary_for_user(
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_tokens(project, project_query)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]
