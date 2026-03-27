@@ -170,6 +170,35 @@ def _normalized_status_name(project: dict) -> str:
     return _normalized_stage_name(project)
 
 
+def _project_query_matches(project: dict, query_text: str) -> bool:
+    """Return True when a project or discovered supplier field matches keyword search."""
+    needle = query_text.strip().lower()
+    if not needle:
+        return True
+
+    searchable_values: list[str] = [
+        str(project.get("title") or ""),
+        str(project.get("product_description") or ""),
+        str((project.get("parsed_requirements") or {}).get("product_type") or ""),
+    ]
+
+    suppliers = ((project.get("discovery_results") or {}).get("suppliers") or [])
+    for supplier in suppliers:
+        if not isinstance(supplier, dict):
+            continue
+        searchable_values.extend(
+            [
+                str(supplier.get("name") or ""),
+                str(supplier.get("email") or ""),
+                str(supplier.get("website") or ""),
+                str(supplier.get("city") or ""),
+                str(supplier.get("country") or ""),
+            ]
+        )
+
+    return any(needle in value.strip().lower() for value in searchable_values if value.strip())
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -1503,8 +1532,7 @@ async def list_projects(
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if _project_query_matches(project, query_text)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 

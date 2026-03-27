@@ -219,6 +219,34 @@ def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[
     return sorted(projects, key=_sort_key)
 
 
+def _project_matches_query(project: dict[str, Any], query_text: str) -> bool:
+    needle = query_text.strip().lower()
+    if not needle:
+        return True
+
+    searchable_values: list[str] = [
+        str(project.get("title") or ""),
+        str(project.get("product_description") or ""),
+        str((project.get("parsed_requirements") or {}).get("product_type") or ""),
+    ]
+
+    suppliers = ((project.get("discovery_results") or {}).get("suppliers") or [])
+    for supplier in suppliers:
+        if not isinstance(supplier, dict):
+            continue
+        searchable_values.extend(
+            [
+                str(supplier.get("name") or ""),
+                str(supplier.get("email") or ""),
+                str(supplier.get("website") or ""),
+                str(supplier.get("city") or ""),
+                str(supplier.get("country") or ""),
+            ]
+        )
+
+    return any(needle in value.strip().lower() for value in searchable_values if value.strip())
+
+
 def _project_status_note(project: dict[str, Any]) -> str:
     status = _normalized_status(project) or "unknown"
     stage = _normalized_stage(project) or status
@@ -492,8 +520,7 @@ async def get_dashboard_summary_for_user(
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query(project, project_query)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

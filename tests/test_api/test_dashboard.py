@@ -376,6 +376,45 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_filters_projects_by_discovered_supplier_keyword():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-supplier"] = {
+        "id": "proj-dash-supplier",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need forged brackets.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "discovery_results": {
+            "suppliers": [
+                {
+                    "name": "Acme Forge Partners",
+                    "email": "hello@acmeforge.com",
+                    "website": "https://acmeforge.com",
+                }
+            ]
+        },
+    }
+    projects["proj-dash-other"] = {
+        "id": "proj-dash-other",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need cast housings.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "discovery_results": {"suppliers": [{"name": "Metro Castings"}]},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=ACMEFORGE.COM", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-supplier"]
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {
@@ -479,6 +518,46 @@ def test_dashboard_summary_combines_status_and_description_query_filters():
     payload = response.json()
     assert [project["id"] for project in payload["projects"]] == [
         "proj-dash-fasteners-discovering"
+    ]
+
+
+def test_dashboard_summary_combines_status_and_supplier_query_filters():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-supplier-discovering"] = {
+        "id": "proj-dash-supplier-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need forged brackets.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "discovery_results": {
+            "suppliers": [{"name": "TriStar Forge", "website": "https://tristarforge.com"}]
+        },
+    }
+    projects["proj-dash-supplier-complete"] = {
+        "id": "proj-dash-supplier-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need forged brackets.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "discovery_results": {
+            "suppliers": [{"name": "TriStar Forge", "website": "https://tristarforge.com"}]
+        },
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?status=discovering&q=tristarforge.com",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == [
+        "proj-dash-supplier-discovering"
     ]
 
 
