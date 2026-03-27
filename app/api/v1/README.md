@@ -29,8 +29,10 @@
   filtering and ordering active work, so legacy values such as ` Parsing ` still behave as active.
 - `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` also accept `status=active` as
   an alias for all in-progress pipeline statuses (`parsing` through `outreaching`, including `steering`).
-- `GET /api/v1/projects` accepts optional `q` for case-insensitive project title keyword filtering
-  (example: `?q=coffee`), applied after ownership and optional status filtering.
+- `GET /api/v1/projects` accepts optional `q` for case-insensitive keyword filtering across
+  project title, product description, parsed product type, and discovered supplier fields
+  (name, email, website, city, country). Example: `?q=acmeforge.com`.
+  Filtering is applied after ownership and optional status filtering.
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes
   status formatting (trim + lowercase) before active count aggregation.
@@ -41,8 +43,9 @@
 - `GET /api/v1/dashboard/summary` project cards are ordered for actionability:
   active projects first, then by most recent `updated_at`, then `created_at` fallback.
 - `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
-  project-title keyword filtering (example: `?q=coffee`), combinable with optional `status` filters.
-  The `q` value is limited to 120 characters.
+  keyword filtering across project title, product description, parsed product type, and
+  discovered supplier fields (name, email, website, city, country). Example: `?q=acmeforge.com`.
+  It can be combined with optional `status` filters. The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
   limited to 120 characters, and non-empty queries must be at least 2 characters after trimming.
@@ -64,6 +67,7 @@
 - `POST /api/v1/projects` and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `500` message (`Failed to start project. Please try again.`) for unexpected start failures, without exposing internal exception details.
 - `POST /api/v1/projects/search` now returns a safe, fixed `500` message (`Failed to run quick search. Please try again.`) for unexpected quick-search failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/outreach/start` now returns a safe, fixed `500` message (`Failed to start outreach. Please try again.`) for unexpected failures, without exposing internal exception details.
+- `POST /api/v1/projects/{project_id}/outreach/parse-response` now returns a safe, fixed `500` message (`Failed to parse supplier response. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/phone/call` now returns a safe, fixed `500` message (`Failed to start phone call. Please try again.`) for unexpected failures, while preserving actionable `400` validation details.
 - `POST /api/v1/projects/{project_id}/phone/calls/{call_id}/parse` now returns a safe, fixed `500` message (`Failed to parse call transcript. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/dashboard/projects/start` is the dashboard quick-start entrypoint:

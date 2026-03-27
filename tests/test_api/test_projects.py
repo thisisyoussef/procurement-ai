@@ -711,6 +711,43 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_keyword_matches_discovered_supplier_fields():
+    _projects.clear()
+    _projects["precision-gears"] = {
+        "id": "precision-gears",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Transmission components",
+        "product_description": "Need hardened gears for truck transmissions.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "discovery_results": {
+            "suppliers": [
+                {
+                    "name": "Acme Precision Works",
+                    "email": "sales@acmeprecision.com",
+                    "website": "https://acmeprecision.com",
+                    "city": "Detroit",
+                    "country": "USA",
+                }
+            ]
+        },
+    }
+    _projects["labels"] = {
+        "id": "labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Packaging labels",
+        "product_description": "Need premium matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "discovery_results": {"suppliers": [{"name": "Northprint Labs"}]},
+    }
+
+    response = client.get("/api/v1/projects?q=ACMEPRECISION.COM", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["precision-gears"]
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {
@@ -737,6 +774,40 @@ def test_list_projects_combines_status_and_description_keyword_filters():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload] == ["fasteners-discovering"]
+
+
+def test_list_projects_combines_status_and_supplier_keyword_filters():
+    _projects.clear()
+    _projects["supplier-discovering"] = {
+        "id": "supplier-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need forged fittings.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "discovery_results": {
+            "suppliers": [{"name": "TriStar Forge", "website": "https://tristarforge.com"}]
+        },
+    }
+    _projects["supplier-complete"] = {
+        "id": "supplier-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need forged fittings.",
+        "status": "complete",
+        "current_stage": "complete",
+        "discovery_results": {
+            "suppliers": [{"name": "TriStar Forge", "website": "https://tristarforge.com"}]
+        },
+    }
+
+    response = client.get(
+        "/api/v1/projects?status=discovering&q=tristarforge.com",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["supplier-discovering"]
 
 
 def test_list_projects_title_keyword_ignores_whitespace_only_query():
