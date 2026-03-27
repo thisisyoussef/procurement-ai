@@ -20,18 +20,25 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `GET /api/v1/projects?q=...` and `GET /api/v1/dashboard/summary?q=...` match keywords against both project titles and product descriptions (case-insensitive).
 - `GET /api/v1/dashboard/contacts?q=...` matches supplier keyword fragments against contact name, email, phone, website, city, and country (case-insensitive), including digit-only phone lookup against formatted numbers (for example `3125550142` matches `+1 (312) 555-0142`); multi-term queries (for example `acme detroit`) require all terms to match across those fields, and filtering is applied before result limiting so relevant matches are not dropped.
 - `GET /api/v1/dashboard/contacts` accepts project status filters via repeated params (`?status=discovering&status=complete`) or comma-separated lists (`?status=discovering,complete`), including aliases `active` and `closed`; when set, contacts are scoped to projects in those statuses.
+- `GET /api/v1/dashboard/contacts?q=...` non-empty queries must be at least 2 characters (whitespace-only still behaves as no filter).
 - `GET /api/v1/dashboard/contacts` merges DB-backed supplier contacts with runtime project discovery contacts (deduplicated), ensuring newly discovered suppliers still appear even when they have no DB interaction rows yet; query filtering remains applied before response limiting.
 - `GET /api/v1/dashboard/activity` now falls back to per-project runtime timeline events (newest first) when DB-backed dashboard events are unavailable, while preserving `cursor` pagination semantics.
 - Project status filters on `GET /api/v1/projects` and `GET /api/v1/dashboard/summary` accept repeated params (`?status=complete&status=failed`) and comma-separated lists (`?status=complete,failed`), including aliases `active` and `closed`.
 - Project list and dashboard summary status handling now fall back to canonical `current_stage` when legacy records have blank `status`, so active/closed filters and active counts remain accurate.
 - `POST /api/v1/projects/{id}/answer` now returns a safe `500` detail (`"Failed to process answers. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/search` now returns a safe `500` detail (`"Failed to run quick search. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/start` now returns a safe `500` detail (`"Failed to start outreach. Please try again."`) for unexpected failures, without exposing internal exception strings.
-- `POST /api/v1/projects/{id}/outreach/parse-response` now returns a safe `500` detail (`"Failed to parse supplier response. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/parse-response` now returns a safe `500` detail (`"Failed to parse outreach response. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/follow-up` now returns a safe `500` detail (`"Failed to generate follow-up emails. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/recompare` now returns a safe `500` detail (`"Failed to refresh comparison. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/auto-start` now returns a safe `500` detail (`"Failed to start auto-outreach. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/check-inbox` now returns a safe `500` detail (`"Failed to check inbox. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/phone/call` now returns a safe `500` detail (`"Failed to start phone call. Please try again."`) for unexpected failures, while preserving actionable `400` validation details.
 - `POST /api/v1/projects/{id}/phone/calls/{call_id}/parse` now returns a safe `500` detail (`"Failed to parse call transcript. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects/{id}/retrospective` accepts only the first submission per project; subsequent submissions return `409` with `Retrospective has already been submitted for this project.` and preserve the original feedback.
+- Comparison stage now auto-converts unrealistically low per-unit international freight estimates for heavy/industrial products to `Freight quote required`, appending rationale in weaknesses and analysis narrative.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`

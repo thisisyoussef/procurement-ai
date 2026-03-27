@@ -12,6 +12,7 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 from app.main import app
 from app.api.v1.projects import (
     PROJECT_ANSWER_FAILURE_DETAIL,
+    PROJECT_SEARCH_FAILURE_DETAIL,
     PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
     PROJECT_START_FAILURE_DETAIL,
     _projects,
@@ -142,6 +143,62 @@ def test_create_project_internal_error_returns_safe_message():
     payload = response.json()
     assert payload["detail"] == PROJECT_START_FAILURE_DETAIL
     assert "sensitive failure details" not in payload["detail"]
+
+
+def test_quick_search_returns_pipeline_summary_fields():
+    with patch("app.api.v1.projects.run_pipeline", new=AsyncMock()) as run_pipeline:
+        run_pipeline.return_value = {
+            "current_stage": "complete",
+            "error": None,
+            "parsed_requirements": {"product_type": "Bottle"},
+            "discovery_results": {"suppliers": [{"name": "Acme"}]},
+            "verification_results": {"verified_suppliers": [{"name": "Acme"}]},
+            "comparison_result": {"winner": "Acme"},
+            "recommendation_result": {"top_pick": "Acme"},
+        }
+        response = client.post(
+            "/api/v1/projects/search",
+            json={
+                "title": "Quick Search Bottles",
+                "product_description": "Need 1,000 BPA-free water bottles",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "complete"
+    assert payload["error"] is None
+    assert payload["parsed_requirements"]["product_type"] == "Bottle"
+    assert payload["recommendation"]["top_pick"] == "Acme"
+
+
+def test_quick_search_returns_safe_error_message_on_unexpected_failure():
+    with patch("app.api.v1.projects.run_pipeline", new=AsyncMock(side_effect=RuntimeError("internal trace token"))):
+        response = client.post(
+            "/api/v1/projects/search",
+            json={
+                "title": "Quick Search Bottles",
+                "product_description": "Need 1,000 BPA-free water bottles",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == PROJECT_SEARCH_FAILURE_DETAIL
+    assert "internal trace token" not in payload["detail"]
+
+
+def test_quick_search_requires_auth():
+    response = client.post(
+        "/api/v1/projects/search",
+        json={
+            "title": "Quick Search Bottles",
+            "product_description": "Need 1,000 BPA-free water bottles",
+        },
+    )
+    assert response.status_code == 401
 
 
 def test_get_nonexistent_project():

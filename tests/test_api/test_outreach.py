@@ -11,6 +11,8 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.api.v1.projects import _projects
 from app.api.v1.outreach import (
+    OUTREACH_CHECK_INBOX_FAILURE_DETAIL,
+    OUTREACH_FOLLOW_UP_FAILURE_DETAIL,
     OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL,
     OUTREACH_START_FAILURE_DETAIL,
 )
@@ -121,6 +123,17 @@ def _seed_project(project_id: str) -> None:
             "executive_summary": "",
             "caveats": [],
         },
+    }
+
+
+def _seed_outreach_state(project_id: str) -> None:
+    _projects[project_id]["outreach_state"] = {
+        "selected_suppliers": [0],
+        "supplier_statuses": [],
+        "draft_emails": [],
+        "follow_up_emails": [],
+        "parsed_quotes": [],
+        "events": [],
     }
 
 
@@ -246,6 +259,70 @@ def test_outreach_start_internal_error_returns_safe_message():
     payload = response.json()
     assert payload["detail"] == OUTREACH_START_FAILURE_DETAIL
     assert "smtp password leaked" not in payload["detail"]
+
+
+def test_outreach_parse_response_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-parse-safe-error"
+    _seed_project(project_id)
+    _seed_outreach_state(project_id)
+
+    with patch(
+        "app.api.v1.outreach.parse_supplier_response",
+        new=AsyncMock(side_effect=RuntimeError("llm api key leaked in parser")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/parse-response",
+            json={"supplier_index": 0, "response_text": "Sample supplier response"},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL
+    assert "llm api key leaked" not in payload["detail"]
+
+
+def test_outreach_follow_up_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-follow-up-safe-error"
+    _seed_project(project_id)
+    _seed_outreach_state(project_id)
+
+    with patch(
+        "app.api.v1.outreach.generate_follow_ups",
+        new=AsyncMock(side_effect=RuntimeError("smtp password leaked in follow-up agent")),
+    ):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/follow-up",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_FOLLOW_UP_FAILURE_DETAIL
+    assert "smtp password leaked" not in payload["detail"]
+
+
+def test_outreach_check_inbox_internal_error_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-inbox-safe-error"
+    _seed_project(project_id)
+    _seed_outreach_state(project_id)
+
+    monitor = AsyncMock()
+    monitor.check_once = AsyncMock(side_effect=RuntimeError("gmail token leaked"))
+
+    with patch("app.agents.inbox_monitor.get_monitor", return_value=monitor):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/check-inbox",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_CHECK_INBOX_FAILURE_DETAIL
+    assert "gmail token leaked" not in payload["detail"]
 
 
 def test_outreach_start_preserves_validation_error_for_invalid_supplier_indices():
