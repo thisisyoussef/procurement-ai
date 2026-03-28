@@ -821,10 +821,27 @@ async def get_dashboard_contacts_for_user(
                 if str(project.get("user_id")) == str(user_id)
                 and _normalized_status(project) in project_statuses
             }
+            allowed_supplier_ids: set[str] = set()
+            if allowed_project_ids:
+                try:
+                    async with async_session_factory() as session:
+                        allowed_supplier_ids = await dashboard_repo.list_supplier_ids_for_projects(
+                            session=session,
+                            user_id=user_id,
+                            project_ids=allowed_project_ids,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Dashboard contacts supplier-status association lookup failed",
+                        exc_info=True,
+                    )
             rows = [
                 row
                 for row in rows
-                if str(row.get("last_project_id") or "") in allowed_project_ids
+                if (
+                    str(row.get("last_project_id") or "") in allowed_project_ids
+                    or str(row.get("supplier_id") or "") in allowed_supplier_ids
+                )
             ]
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]

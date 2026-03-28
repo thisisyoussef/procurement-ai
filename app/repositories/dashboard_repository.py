@@ -205,3 +205,32 @@ async def list_supplier_contacts_for_user(
             }
         )
     return suppliers
+
+
+async def list_supplier_ids_for_projects(
+    session: AsyncSession,
+    *,
+    user_id: str | uuid.UUID,
+    project_ids: set[str],
+) -> set[str]:
+    """Return supplier IDs that have interactions on any of the provided projects."""
+    user_uuid = _normalize_uuid(user_id)
+    if user_uuid is None or not project_ids:
+        return set()
+
+    project_uuids = [project_uuid for raw_id in project_ids if (project_uuid := _normalize_uuid(raw_id))]
+    if not project_uuids:
+        return set()
+
+    stmt = (
+        select(SupplierInteraction.supplier_id)
+        .join(RuntimeProject, RuntimeProject.id == SupplierInteraction.project_id)
+        .where(
+            RuntimeProject.user_id == user_uuid,
+            SupplierInteraction.project_id.in_(project_uuids),
+        )
+        .distinct()
+    )
+
+    rows = (await session.execute(stmt)).scalars().all()
+    return {str(value) for value in rows if value is not None}
