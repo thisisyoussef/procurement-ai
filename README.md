@@ -32,6 +32,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects/{id}/retrospective` accepts only the first submission per project; subsequent submissions return `409` with `Retrospective has already been submitted for this project.` and preserve the original feedback.
+- `POST /api/v1/projects/{id}/retrospective` now returns a safe `500` detail (`"Failed to submit retrospective. Please try again."`) for unexpected failures, without exposing internal exception strings.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`
