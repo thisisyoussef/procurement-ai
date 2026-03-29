@@ -196,6 +196,8 @@ async def list_supplier_contacts_for_user(
                     func.lower(func.coalesce(Supplier.website, "")).like(like_pattern),
                     func.lower(func.coalesce(Supplier.city, "")).like(like_pattern),
                     func.lower(func.coalesce(Supplier.country, "")).like(like_pattern),
+                    func.lower(func.coalesce(RuntimeProject.title, "")).like(like_pattern),
+                    func.lower(func.coalesce(RuntimeProject.product_description, "")).like(like_pattern),
                 ]
 
                 digits = "".join(ch for ch in term if ch.isdigit())
