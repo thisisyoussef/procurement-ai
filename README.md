@@ -38,6 +38,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects/{id}/retrospective` accepts only the first submission per project; subsequent submissions return `409` with `Retrospective has already been submitted for this project.` and preserve the original feedback.
+- `POST /api/v1/projects/{id}/cancel` and `POST /api/v1/projects/{id}/restart` now treat legacy records with blank `status` by falling back to canonical `current_stage`, so active runs can still be canceled and active-stage restarts are still blocked.
 - Comparison stage now auto-converts unrealistically low per-unit international freight estimates for heavy/industrial products to `Freight quote required`, appending rationale in weaknesses and analysis narrative.
 
 ## Local Development

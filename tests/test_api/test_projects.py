@@ -786,6 +786,78 @@ def test_cancel_project():
     assert cancel_data["status"] in {"canceled", "failed", "complete"}
 
 
+def test_cancel_project_uses_stage_when_status_missing():
+    _projects.clear()
+    project_id = "legacy-cancel-stage-fallback"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Active Project",
+        "product_description": "Need automotive clips",
+        "status": "   ",
+        "current_stage": "discovering",
+        "progress_events": [],
+    }
+
+    cancel_response = client.post(
+        f"/api/v1/projects/{project_id}/cancel",
+        headers=_auth_headers(),
+    )
+
+    assert cancel_response.status_code == 200
+    payload = cancel_response.json()
+    assert payload["project_id"] == project_id
+    assert payload["status"] == "canceled"
+    assert _projects[project_id]["status"] == "canceled"
+    assert _projects[project_id]["current_stage"] == "canceled"
+
+
+def test_cancel_project_legacy_terminal_stage_returns_already_terminal():
+    _projects.clear()
+    project_id = "legacy-cancel-terminal-stage"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Complete Project",
+        "product_description": "Need precision washers",
+        "status": " ",
+        "current_stage": "complete",
+    }
+
+    cancel_response = client.post(
+        f"/api/v1/projects/{project_id}/cancel",
+        headers=_auth_headers(),
+    )
+
+    assert cancel_response.status_code == 200
+    payload = cancel_response.json()
+    assert payload["status"] == "complete"
+    assert payload["already_terminal"] is True
+
+
+def test_restart_project_rejects_active_stage_when_status_missing():
+    _projects.clear()
+    project_id = "legacy-restart-active-stage"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Legacy Running Project",
+        "product_description": "Need forged components",
+        "status": "",
+        "current_stage": "verifying",
+        "parsed_requirements": {"product_type": "Forging"},
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/restart",
+        json={"from_stage": "discovering"},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Project is currently running. Cancel the run before restarting."
+
+
 def test_answer_clarifying_questions_resumes_pipeline():
     _projects.clear()
     project_id = "answer-success"

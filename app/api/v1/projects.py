@@ -999,7 +999,7 @@ async def cancel_project(
     project = await _get_project_or_404(project_id)
     _enforce_project_ownership(project, current_user)
 
-    project_status = project.get("status")
+    project_status = _normalized_status_name(project)
     if project_status in {"complete", "failed", "canceled"}:
         return {
             "project_id": project_id,
@@ -1051,7 +1051,7 @@ async def restart_project(
     project = await _get_project_or_404(project_id)
     _enforce_project_ownership(project, current_user)
 
-    project_status = str(project.get("status") or "")
+    project_status = _normalized_status_name(project)
     if project_status in ACTIVE_PIPELINE_STATUSES:
         raise HTTPException(
             status_code=409,
