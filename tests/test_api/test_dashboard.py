@@ -6,7 +6,7 @@ from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
+from app.api.v1.dashboard import DASHBOARD_STORE_UNAVAILABLE_DETAIL, PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
@@ -153,7 +153,7 @@ def test_dashboard_start_project_internal_error_returns_safe_message():
     assert "sensitive failure details" not in payload["detail"]
 
 
-def test_dashboard_start_project_store_unavailable_preserves_503_mapping():
+def test_dashboard_start_project_store_unavailable_returns_safe_message():
     with patch("app.api.v1.dashboard.get_project_store") as get_store:
         store = AsyncMock()
         store.create_project.side_effect = StoreUnavailableError("memory backend offline")
@@ -169,7 +169,44 @@ def test_dashboard_start_project_store_unavailable_preserves_503_mapping():
         )
 
     assert response.status_code == 503
-    assert "Project store unavailable: memory backend offline" == response.json()["detail"]
+    assert response.json()["detail"] == DASHBOARD_STORE_UNAVAILABLE_DETAIL
+    assert "memory backend offline" not in response.json()["detail"]
+
+
+def test_dashboard_summary_store_unavailable_returns_safe_message():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_summary_for_user",
+        new=AsyncMock(side_effect=StoreUnavailableError("summary store offline")),
+    ):
+        response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == DASHBOARD_STORE_UNAVAILABLE_DETAIL
+    assert "summary store offline" not in response.json()["detail"]
+
+
+def test_dashboard_activity_store_unavailable_returns_safe_message():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_activity_for_user",
+        new=AsyncMock(side_effect=StoreUnavailableError("activity store offline")),
+    ):
+        response = client.get("/api/v1/dashboard/activity", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == DASHBOARD_STORE_UNAVAILABLE_DETAIL
+    assert "activity store offline" not in response.json()["detail"]
+
+
+def test_dashboard_contacts_store_unavailable_returns_safe_message():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(side_effect=StoreUnavailableError("contacts store offline")),
+    ):
+        response = client.get("/api/v1/dashboard/contacts", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == DASHBOARD_STORE_UNAVAILABLE_DETAIL
+    assert "contacts store offline" not in response.json()["detail"]
 
 
 def test_dashboard_summary_filters_projects_by_single_status():
