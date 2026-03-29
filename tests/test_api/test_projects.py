@@ -12,11 +12,13 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 from app.main import app
 from app.api.v1.projects import (
     PROJECT_ANSWER_FAILURE_DETAIL,
+    PROJECT_STORE_UNAVAILABLE_DETAIL,
     PROJECT_SEARCH_FAILURE_DETAIL,
     PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
     PROJECT_START_FAILURE_DETAIL,
     _projects,
 )
+from app.services.project_store import StoreUnavailableError
 
 client = TestClient(app)
 
@@ -145,6 +147,26 @@ def test_create_project_internal_error_returns_safe_message():
     assert "sensitive failure details" not in payload["detail"]
 
 
+def test_create_project_store_unavailable_returns_safe_message():
+    with patch("app.api.v1.projects.get_project_store") as get_store:
+        store = AsyncMock()
+        store.create_project.side_effect = StoreUnavailableError("db password exposed")
+        get_store.return_value = store
+        response = client.post(
+            "/api/v1/projects",
+            json={
+                "title": "Test Project",
+                "product_description": "I need 500 custom canvas tote bags for my brand",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "db password exposed" not in payload["detail"]
+
+
 def test_quick_search_returns_pipeline_summary_fields():
     with patch("app.api.v1.projects.run_pipeline", new=AsyncMock()) as run_pipeline:
         run_pipeline.return_value = {
@@ -205,6 +227,34 @@ def test_get_nonexistent_project():
     """Test 404 for nonexistent project."""
     response = client.get("/api/v1/projects/nonexistent-id/status", headers=_auth_headers())
     assert response.status_code == 404
+
+
+def test_get_project_status_store_unavailable_returns_safe_message():
+    with patch("app.api.v1.projects.get_project_store") as get_store:
+        store = AsyncMock()
+        store.get_project.side_effect = StoreUnavailableError("memory backend offline")
+        get_store.return_value = store
+
+        response = client.get("/api/v1/projects/nonexistent-id/status", headers=_auth_headers())
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "memory backend offline" not in payload["detail"]
+
+
+def test_list_projects_store_unavailable_returns_safe_message():
+    with patch("app.api.v1.projects.get_project_store") as get_store:
+        store = AsyncMock()
+        store.list_projects.side_effect = StoreUnavailableError("connection refused")
+        get_store.return_value = store
+
+        response = client.get("/api/v1/projects", headers=_auth_headers())
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "connection refused" not in payload["detail"]
 
 
 def test_list_projects():
