@@ -879,6 +879,88 @@ def test_answer_clarifying_questions_requires_clarifying_status():
     assert response.json()["detail"] == "Project is not waiting for answers"
 
 
+def test_skip_clarifying_questions_resumes_pipeline():
+    _projects.clear()
+    project_id = "skip-clarifying-success"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Skip Clarifying Success",
+        "product_description": "Need custom metal enclosures.",
+        "status": "clarifying",
+        "current_stage": "clarifying",
+        "parsed_requirements": {"product_type": "Enclosure"},
+        "clarifying_questions": [{"field": "quantity", "question": "How many units?"}],
+        "checkpoint_responses": {},
+    }
+
+    with patch("app.api.v1.projects._resume_pipeline_task", new=AsyncMock()) as resume_pipeline:
+        response = client.post(
+            f"/api/v1/projects/{project_id}/skip-questions",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "resumed"
+    updated = _projects[project_id]
+    assert updated["status"] == "discovering"
+    assert updated["current_stage"] == "discovering"
+    assert updated["clarifying_questions"] is None
+    resume_pipeline.assert_awaited_once_with(project_id)
+
+
+def test_skip_clarifying_questions_is_idempotent_after_initial_skip():
+    _projects.clear()
+    project_id = "skip-clarifying-idempotent"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Skip Clarifying Idempotent",
+        "product_description": "Need custom machined brackets.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "parsed_requirements": {"product_type": "Bracket"},
+        "clarifying_questions": None,
+        "checkpoint_responses": {},
+    }
+
+    with patch("app.api.v1.projects._resume_pipeline_task", new=AsyncMock()) as resume_pipeline:
+        response = client.post(
+            f"/api/v1/projects/{project_id}/skip-questions",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "resumed"
+    assert payload["message"] == "Clarifying questions already skipped, pipeline is running"
+    resume_pipeline.assert_not_awaited()
+
+
+def test_skip_clarifying_questions_requires_clarifying_status():
+    _projects.clear()
+    project_id = "skip-clarifying-wrong-status"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Skip Clarifying Wrong Status",
+        "product_description": "Need precision molded plastic parts.",
+        "status": "comparing",
+        "current_stage": "comparing",
+        "parsed_requirements": {"product_type": "Housing"},
+        "clarifying_questions": None,
+        "checkpoint_responses": {},
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/skip-questions",
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Project is not waiting for answers"
+
+
 def test_restart_project_from_discovering_resets_downstream_state():
     _projects.clear()
     project_id = "proj-restart-discover"

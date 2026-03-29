@@ -1389,7 +1389,14 @@ async def skip_clarifying_questions(
     project = await _get_project_or_404(project_id)
     _enforce_project_ownership(project, current_user)
 
-    if project.get("status") != "clarifying":
+    status = str(project.get("status") or "").strip().lower()
+    current_stage = str(project.get("current_stage") or "").strip().lower()
+    has_pending_questions = bool(project.get("clarifying_questions"))
+
+    if status != "clarifying":
+        already_skipped = status == "discovering" and current_stage == "discovering" and not has_pending_questions
+        if already_skipped:
+            return {"status": "resumed", "message": "Clarifying questions already skipped, pipeline is running"}
         raise HTTPException(status_code=400, detail="Project is not waiting for answers")
 
     project["clarifying_questions"] = None
