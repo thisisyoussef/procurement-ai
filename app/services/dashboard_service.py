@@ -190,6 +190,19 @@ def _normalized_stage(project: dict[str, Any]) -> str:
     return _normalized_status(project)
 
 
+def _project_query_terms(query_text: str) -> list[str]:
+    return [token for token in query_text.split() if token]
+
+
+def _project_matches_query(project: dict[str, Any], query_text: str) -> bool:
+    terms = _project_query_terms(query_text)
+    if not terms:
+        return True
+    title = str(project.get("title") or "").strip().lower()
+    description = str(project.get("product_description") or "").strip().lower()
+    return all(term in title or term in description for term in terms)
+
+
 def _parse_sort_timestamp(value: Any) -> float:
     if value is None:
         return 0.0
@@ -492,8 +505,7 @@ async def get_dashboard_summary_for_user(
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query(project, project_query)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

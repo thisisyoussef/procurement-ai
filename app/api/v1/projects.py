@@ -171,6 +171,19 @@ def _normalized_status_name(project: dict) -> str:
     return _normalized_stage_name(project)
 
 
+def _query_terms(query_text: str) -> list[str]:
+    return [token for token in query_text.split() if token]
+
+
+def _project_matches_query(project: dict, query_text: str) -> bool:
+    terms = _query_terms(query_text)
+    if not terms:
+        return True
+    title = str(project.get("title") or "").strip().lower()
+    description = str(project.get("product_description") or "").strip().lower()
+    return all(term in title or term in description for term in terms)
+
+
 def _stage_title(stage_name: str) -> str:
     titles = {
         "parsing": "Parsing requirements",
@@ -1505,12 +1518,7 @@ async def list_projects(
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
     if query_text:
-        user_projects = [
-            project
-            for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
-        ]
+        user_projects = [project for project in user_projects if _project_matches_query(project, query_text)]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
     return [

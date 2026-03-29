@@ -711,6 +711,70 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_multi_term_query_matches_title_tokens():
+    _projects.clear()
+    _projects["bottle-shortlist"] = {
+        "id": "bottle-shortlist",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle labels supplier shortlist",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["single-term-only"] = {
+        "id": "single-term-only",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle source list",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=bottle shortlist", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["bottle-shortlist"]
+
+
+def test_list_projects_multi_term_query_matches_across_title_and_description():
+    _projects.clear()
+    _projects["cross-field-match"] = {
+        "id": "cross-field-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle source run",
+        "product_description": "Need premium matte labels for launch.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["partial-match"] = {
+        "id": "partial-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle source run",
+        "product_description": "Need carton inserts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=bottle labels", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["cross-field-match"]
+
+
+def test_list_projects_multi_term_query_requires_all_terms():
+    _projects.clear()
+    _projects["single-token"] = {
+        "id": "single-token",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle source run",
+        "product_description": "Need launch-ready packaging.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=bottle shortlist", headers=_auth_headers())
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {
