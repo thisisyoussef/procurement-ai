@@ -129,6 +129,15 @@ class ProjectRestartRequest(BaseModel):
     )
 
 
+class ProjectArchiveRequest(BaseModel):
+    """Archive a terminal project so it is hidden from default lists."""
+    reason: str | None = Field(
+        default=None,
+        max_length=240,
+        description="Optional short reason for archiving the project.",
+    )
+
+
 class PhoneCallStartRequest(BaseModel):
     """Request to initiate an AI phone call to a supplier."""
     supplier_index: int

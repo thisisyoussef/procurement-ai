@@ -786,6 +786,86 @@ def test_cancel_project():
     assert cancel_data["status"] in {"canceled", "failed", "complete"}
 
 
+def test_archive_project_marks_terminal_project_and_sets_metadata():
+    _projects.clear()
+    project_id = "archive-complete"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Archive Candidate",
+        "product_description": "Need forged steel brackets.",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-20T12:00:00+00:00",
+        "updated_at": "2026-03-20T12:00:00+00:00",
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/archive",
+        json={"reason": "Done and approved"},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"project_id": project_id, "status": "archived"}
+    assert isinstance(_projects[project_id].get("archived_at"), str)
+    assert _projects[project_id]["archive_reason"] == "Done and approved"
+
+
+def test_archive_project_rejects_non_terminal_project():
+    _projects.clear()
+    project_id = "archive-active"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Still Running",
+        "product_description": "Need precision molded parts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/archive",
+        json={"reason": "Too early"},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Only terminal projects can be archived."
+
+
+def test_list_projects_excludes_archived_by_default_but_can_include_them():
+    _projects.clear()
+    _projects["visible-project"] = {
+        "id": "visible-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Visible",
+        "status": "complete",
+        "current_stage": "complete",
+        "created_at": "2026-03-20T12:00:00+00:00",
+        "updated_at": "2026-03-20T12:00:00+00:00",
+    }
+    _projects["archived-project"] = {
+        "id": "archived-project",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Archived",
+        "status": "failed",
+        "current_stage": "failed",
+        "archived_at": "2026-03-21T12:00:00+00:00",
+        "archive_reason": "No longer needed",
+        "created_at": "2026-03-19T12:00:00+00:00",
+        "updated_at": "2026-03-21T12:00:00+00:00",
+    }
+
+    default_response = client.get("/api/v1/projects", headers=_auth_headers())
+    assert default_response.status_code == 200
+    assert [project["id"] for project in default_response.json()] == ["visible-project"]
+
+    include_response = client.get("/api/v1/projects?include_archived=true", headers=_auth_headers())
+    assert include_response.status_code == 200
+    assert {project["id"] for project in include_response.json()} == {"visible-project", "archived-project"}
+
+
 def test_answer_clarifying_questions_resumes_pipeline():
     _projects.clear()
     project_id = "answer-success"

@@ -45,6 +45,7 @@ from app.schemas.agent_state import (
 )
 from app.schemas.project import (
     ClarifyingAnswerRequest,
+    ProjectArchiveRequest,
     PipelineStatusResponse,
     ProjectDecisionPreferenceRequest,
     ProjectCreateRequest,
@@ -1153,6 +1154,44 @@ async def restart_project(
     }
 
 
+@router.post("/{project_id}/archive")
+async def archive_project(
+    project_id: str,
+    request: ProjectArchiveRequest,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Archive a terminal project to hide it from default list views."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    normalized_status = _normalized_status_name(project)
+    if normalized_status not in TERMINAL_PROJECT_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Only terminal projects can be archived.",
+        )
+
+    if project.get("archived_at"):
+        return {"project_id": project_id, "status": "archived", "already_archived": True}
+
+    project["archived_at"] = datetime.now(timezone.utc).isoformat()
+    archive_reason = (request.reason or "").strip()
+    if archive_reason:
+        project["archive_reason"] = archive_reason
+
+    await record_project_event(
+        project,
+        event_type="project_archived",
+        title="Project archived",
+        description="Moved this finished project out of default list views.",
+        priority="info",
+        phase="order",
+        payload={"reason_provided": bool(archive_reason)},
+    )
+    await _save_project(project)
+    return {"project_id": project_id, "status": "archived"}
+
+
 @router.get("/{project_id}/run-sync")
 async def run_project_sync(
     project_id: str,
@@ -1471,6 +1510,10 @@ async def list_projects(
         max_length=120,
         description="Optional case-insensitive project title or description keyword filter.",
     ),
+    include_archived: bool = Query(
+        default=False,
+        description="When true, include archived projects in the response.",
+    ),
 ):
     """List current user's projects with active work first, then recent activity."""
     store = get_project_store()
@@ -1502,6 +1545,8 @@ async def list_projects(
     query_text = (q or "").strip().lower()
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
+    if not include_archived:
+        user_projects = [project for project in user_projects if not str(project.get("archived_at") or "").strip()]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
     if query_text:
@@ -1519,6 +1564,8 @@ async def list_projects(
             "title": p.get("title"),
             "status": _normalized_status_name(p),
             "current_stage": _normalized_stage_name(p),
+            "archived_at": p.get("archived_at"),
+            "archive_reason": p.get("archive_reason"),
             "created_at": p.get("created_at"),
             "updated_at": p.get("updated_at"),
         }
