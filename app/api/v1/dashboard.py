@@ -26,10 +26,16 @@ from app.services.project_store import StoreUnavailableError, get_project_store
 
 logger = logging.getLogger(__name__)
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
+PROJECT_STORE_UNAVAILABLE_DETAIL = "Project data is temporarily unavailable. Please try again."
 _DASHBOARD_ALLOWED_SOURCES = {"dashboard_new", "dashboard_search"}
 DASHBOARD_CONTACT_QUERY_MIN_LENGTH = 2
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+def _raise_store_unavailable_http_503(exc: StoreUnavailableError) -> None:
+    logger.warning("Dashboard project store unavailable", exc_info=True)
+    raise HTTPException(status_code=503, detail=PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
 
 def _normalized_dashboard_source(source: str | None) -> str:
@@ -86,7 +92,7 @@ async def dashboard_summary(
             project_query=query_text,
         )
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        _raise_store_unavailable_http_503(exc)
 
 
 @router.get("/activity", response_model=DashboardActivityResponse)
@@ -102,7 +108,7 @@ async def dashboard_activity(
             cursor=cursor,
         )
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        _raise_store_unavailable_http_503(exc)
     return DashboardActivityResponse(events=events, next_cursor=next_cursor)
 
 
@@ -133,7 +139,7 @@ async def dashboard_contacts(
             contact_query=query_text,
         )
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        _raise_store_unavailable_http_503(exc)
 
 
 @router.post("/projects/start", response_model=DashboardProjectStartResponse)
@@ -190,7 +196,7 @@ async def start_project_from_dashboard(
         )
         await store.save_project(project)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        _raise_store_unavailable_http_503(exc)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to create dashboard project")
         raise HTTPException(status_code=500, detail=PROJECT_START_FAILURE_DETAIL) from exc
