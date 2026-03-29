@@ -576,6 +576,8 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
         str(contact.get("website") or "").lower(),
         str(contact.get("city") or "").lower(),
         str(contact.get("country") or "").lower(),
+        str(contact.get("project_title") or "").lower(),
+        str(contact.get("project_description") or "").lower(),
     ]
     phone_value = re.sub(r"\D", "", str(contact.get("phone") or ""))
 
@@ -646,6 +648,8 @@ async def _runtime_contacts_for_user(
                 "phone": supplier.get("phone"),
                 "city": supplier.get("city"),
                 "country": supplier.get("country"),
+                "project_title": str(project.get("title") or "").strip(),
+                "project_description": str(project.get("product_description") or "").strip(),
             }
             if not contact["name"]:
                 continue
