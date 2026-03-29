@@ -826,10 +826,26 @@ async def get_dashboard_contacts_for_user(
                 if str(project.get("user_id")) == str(user_id)
                 and _normalized_status(project) in project_statuses
             }
+            allowed_supplier_ids: set[str] = set()
+            for project in projects:
+                if str(project.get("user_id")) != str(user_id):
+                    continue
+                if _normalized_status(project) not in project_statuses:
+                    continue
+                for supplier in ((project.get("discovery_results") or {}).get("suppliers") or []):
+                    if not isinstance(supplier, dict):
+                        continue
+                    supplier_id = str(supplier.get("supplier_id") or "").strip()
+                    if supplier_id:
+                        allowed_supplier_ids.add(supplier_id)
+
             rows = [
                 row
                 for row in rows
-                if str(row.get("last_project_id") or "") in allowed_project_ids
+                if (
+                    str(row.get("last_project_id") or "") in allowed_project_ids
+                    or str(row.get("supplier_id") or "").strip() in allowed_supplier_ids
+                )
             ]
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
