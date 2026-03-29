@@ -686,6 +686,71 @@ def test_list_projects_title_keyword_filter_is_case_insensitive():
     assert [project["id"] for project in payload] == ["motor-shafts"]
 
 
+def test_list_projects_title_keyword_supports_multi_term_non_contiguous_match():
+    _projects.clear()
+    _projects["stainless-bottle"] = {
+        "id": "stainless-bottle",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle supplier shortlist for stainless steel run",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+    _projects["labels"] = {
+        "id": "labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Luxury Candle Labels",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=stainless bottle", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["stainless-bottle"]
+
+
+def test_list_projects_title_keyword_supports_multi_term_across_title_and_description():
+    _projects.clear()
+    _projects["cross-field"] = {
+        "id": "cross-field",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Container supplier shortlist",
+        "product_description": "Need food-grade lids for shipment.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["single-field"] = {
+        "id": "single-field",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Container options",
+        "product_description": "Need rigid packaging only.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=container lids", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["cross-field"]
+
+
+def test_list_projects_title_keyword_multi_term_requires_all_terms():
+    _projects.clear()
+    _projects["partial-match"] = {
+        "id": "partial-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle supplier shortlist",
+        "product_description": "Need labels for packaging.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=bottle gasket", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == []
+
+
 def test_list_projects_keyword_matches_product_description():
     _projects.clear()
     _projects["fasteners"] = {

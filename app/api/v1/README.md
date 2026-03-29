@@ -32,6 +32,8 @@
 - `GET /api/v1/projects` accepts optional `q` for case-insensitive project title keyword filtering
   (example: `?q=coffee`), applied after ownership and optional status filtering.
   The `q` value is limited to 120 characters.
+- `GET /api/v1/projects` multi-term queries (example: `?q=stainless bottle`) require all
+  terms to match across title and/or product description text.
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes
   status formatting (trim + lowercase) before active count aggregation.
 - `GET /api/v1/dashboard/summary` treats blank legacy `status` as the canonical `current_stage`
