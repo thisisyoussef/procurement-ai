@@ -90,6 +90,7 @@ TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
 PROJECT_SEARCH_FAILURE_DETAIL = "Failed to run quick search. Please try again."
+PROJECT_RETROSPECTIVE_FAILURE_DETAIL = "Failed to submit retrospective. Please try again."
 PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL = "Retrospective has already been submitted for this project."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
@@ -1417,43 +1418,52 @@ async def submit_retro(
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
     """Persist post-project retrospective feedback and update user profile learning."""
-    project = await _get_project_or_404(project_id)
-    _enforce_project_ownership(project, current_user)
-    if _normalized_project_status(project) != "complete":
-        raise HTTPException(
-            status_code=400,
-            detail="Retrospective can only be submitted for completed projects",
-        )
-    if project.get("retrospective"):
-        raise HTTPException(
-            status_code=409,
-            detail=PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
-        )
-
-    project["retrospective"] = request.model_dump(mode="json")
-
     try:
-        context = BuyerContext(**(project.get("buyer_context") or {}))
-        await update_user_profile_from_project(
-            user_id=str(current_user.user_id),
-            project_state=project,
-            buyer_context=context,
-            user_feedback=request.model_dump(mode="json"),
+        project = await _get_project_or_404(project_id)
+        _enforce_project_ownership(project, current_user)
+        if _normalized_project_status(project) != "complete":
+            raise HTTPException(
+                status_code=400,
+                detail="Retrospective can only be submitted for completed projects",
+            )
+        if project.get("retrospective"):
+            raise HTTPException(
+                status_code=409,
+                detail=PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
+            )
+
+        project["retrospective"] = request.model_dump(mode="json")
+
+        try:
+            context = BuyerContext(**(project.get("buyer_context") or {}))
+            await update_user_profile_from_project(
+                user_id=str(current_user.user_id),
+                project_state=project,
+                buyer_context=context,
+                user_feedback=request.model_dump(mode="json"),
+            )
+        except Exception:
+            logger.warning("Failed to update user profile from retrospective", exc_info=True)
+
+        await record_project_event(
+            project,
+            event_type="retrospective_submitted",
+            title="Retrospective recorded",
+            description="Captured post-project feedback for future sourcing improvements.",
+            priority="info",
+            phase="order",
         )
-    except Exception:
-        logger.warning("Failed to update user profile from retrospective", exc_info=True)
+        await _save_project(project)
 
-    await record_project_event(
-        project,
-        event_type="retrospective_submitted",
-        title="Retrospective recorded",
-        description="Captured post-project feedback for future sourcing improvements.",
-        priority="info",
-        phase="order",
-    )
-    await _save_project(project)
-
-    return {"project_id": project_id, "status": "recorded"}
+        return {"project_id": project_id, "status": "recorded"}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Retrospective submission failed")
+        raise HTTPException(
+            status_code=500,
+            detail=PROJECT_RETROSPECTIVE_FAILURE_DETAIL,
+        ) from exc
 
 
 @router.get("")
