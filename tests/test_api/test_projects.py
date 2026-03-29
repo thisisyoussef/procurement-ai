@@ -15,8 +15,10 @@ from app.api.v1.projects import (
     PROJECT_SEARCH_FAILURE_DETAIL,
     PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
     PROJECT_START_FAILURE_DETAIL,
+    PROJECT_STORE_UNAVAILABLE_DETAIL,
     _projects,
 )
+from app.services.project_store import StoreUnavailableError
 
 client = TestClient(app)
 
@@ -145,6 +147,27 @@ def test_create_project_internal_error_returns_safe_message():
     assert "sensitive failure details" not in payload["detail"]
 
 
+def test_create_project_store_unavailable_returns_safe_message():
+    with patch("app.api.v1.projects.get_project_store") as get_store:
+        store = AsyncMock()
+        store.create_project.side_effect = StoreUnavailableError("db host tcp://internal-db:5432 refused")
+        get_store.return_value = store
+
+        response = client.post(
+            "/api/v1/projects",
+            json={
+                "title": "Test Project",
+                "product_description": "I need 500 custom canvas tote bags for my brand",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "internal-db" not in payload["detail"]
+
+
 def test_quick_search_returns_pipeline_summary_fields():
     with patch("app.api.v1.projects.run_pipeline", new=AsyncMock()) as run_pipeline:
         run_pipeline.return_value = {
@@ -207,6 +230,20 @@ def test_get_nonexistent_project():
     assert response.status_code == 404
 
 
+def test_get_project_status_store_unavailable_returns_safe_message():
+    with patch("app.api.v1.projects.get_project_store") as get_store:
+        store = AsyncMock()
+        store.get_project.side_effect = StoreUnavailableError("dsn=postgres://internal")
+        get_store.return_value = store
+
+        response = client.get("/api/v1/projects/proj-503/status", headers=_auth_headers())
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "postgres://internal" not in payload["detail"]
+
+
 def test_list_projects():
     """Test listing projects."""
     _projects.clear()
@@ -257,6 +294,20 @@ def test_list_projects():
     assert [project["current_stage"] for project in payload] == ["parsing", "discovering", "complete"]
     assert "created_at" in payload[0]
     assert "updated_at" in payload[0]
+
+
+def test_list_projects_store_unavailable_returns_safe_message():
+    with patch("app.api.v1.projects.get_project_store") as get_store:
+        store = AsyncMock()
+        store.list_projects.side_effect = StoreUnavailableError("db password leaked")
+        get_store.return_value = store
+
+        response = client.get("/api/v1/projects", headers=_auth_headers())
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "password" not in payload["detail"]
 
 
 def test_list_projects_sorts_legacy_projects_without_timestamps_last_within_status_group():

@@ -39,6 +39,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects/{id}/retrospective` accepts only the first submission per project; subsequent submissions return `409` with `Retrospective has already been submitted for this project.` and preserve the original feedback.
 - Comparison stage now auto-converts unrealistically low per-unit international freight estimates for heavy/industrial products to `Freight quote required`, appending rationale in weaknesses and analysis narrative.
+- `POST /api/v1/projects`, `GET /api/v1/projects`, and `GET /api/v1/projects/{id}/status` now return a safe `503` detail (`"Project service is temporarily unavailable. Please try again."`) when the project store is unavailable, instead of exposing raw infrastructure error strings.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`

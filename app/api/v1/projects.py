@@ -90,6 +90,7 @@ TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
 PROJECT_SEARCH_FAILURE_DETAIL = "Failed to run quick search. Please try again."
+PROJECT_STORE_UNAVAILABLE_DETAIL = "Project service is temporarily unavailable. Please try again."
 PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL = "Retrospective has already been submitted for this project."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
@@ -202,7 +203,7 @@ async def _get_project_or_404(project_id: str) -> dict:
     try:
         project = await store.get_project(project_id)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -221,7 +222,7 @@ async def _save_project(project: dict) -> None:
     try:
         await store.save_project(project)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
 
 async def _create_project(project: dict) -> None:
@@ -232,7 +233,7 @@ async def _create_project(project: dict) -> None:
     try:
         await store.create_project(project)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
 
 def _is_canceled(project: dict | None) -> bool:
@@ -1477,7 +1478,7 @@ async def list_projects(
     try:
         projects = await store.list_projects()
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
     def _timestamp_sort_value(project: dict, field: str) -> float:
         value = project.get(field)
