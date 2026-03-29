@@ -85,11 +85,12 @@ ACTIVE_PIPELINE_STATUSES = {
     "recommending",
     "outreaching",
 }
-LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled"}
-TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled"}
+LISTABLE_PROJECT_STATUSES = ACTIVE_PIPELINE_STATUSES | {"complete", "failed", "canceled", "archived"}
+TERMINAL_PROJECT_STATUSES = {"complete", "failed", "canceled", "archived"}
 PROJECT_START_FAILURE_DETAIL = "Failed to start project. Please try again."
 PROJECT_ANSWER_FAILURE_DETAIL = "Failed to process answers. Please try again."
 PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL = "Retrospective has already been submitted for this project."
+PROJECT_ARCHIVE_ACTIVE_DETAIL = "Active projects cannot be archived. Cancel or complete the run first."
 
 RESTARTABLE_STAGES = {"parsing", "discovering"}
 DECISION_LANES = {"best_overall", "best_low_risk", "best_speed_to_order"}
@@ -1451,6 +1452,26 @@ async def submit_retro(
     return {"project_id": project_id, "status": "recorded"}
 
 
+@router.post("/{project_id}/archive")
+async def archive_project(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_auth_user),
+):
+    """Archive a project so it is hidden from default project list results."""
+    project = await _get_project_or_404(project_id)
+    _enforce_project_ownership(project, current_user)
+
+    normalized_status = _normalized_status_name(project)
+    if normalized_status in ACTIVE_PIPELINE_STATUSES:
+        raise HTTPException(status_code=409, detail=PROJECT_ARCHIVE_ACTIVE_DETAIL)
+
+    project["status"] = "archived"
+    project["current_stage"] = "archived"
+    await _save_project(project)
+
+    return {"project_id": project_id, "status": "archived"}
+
+
 @router.get("")
 async def list_projects(
     current_user: AuthUser = Depends(get_current_auth_user),
@@ -1499,6 +1520,8 @@ async def list_projects(
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
+    else:
+        user_projects = [project for project in user_projects if _normalized_status_name(project) != "archived"]
     if query_text:
         user_projects = [
             project

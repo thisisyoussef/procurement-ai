@@ -11,6 +11,7 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 
 from app.main import app
 from app.api.v1.projects import (
+    PROJECT_ARCHIVE_ACTIVE_DETAIL,
     PROJECT_ANSWER_FAILURE_DETAIL,
     PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
     PROJECT_START_FAILURE_DETAIL,
@@ -704,6 +705,91 @@ def test_list_projects_title_keyword_rejects_overlong_query():
     response = client.get(f"/api/v1/projects?q={query}", headers=_auth_headers())
 
     assert response.status_code == 422
+
+
+def test_list_projects_hides_archived_by_default_and_includes_with_explicit_filter():
+    _projects.clear()
+    _projects["active"] = {
+        "id": "active",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "created_at": "2026-03-15T12:00:00+00:00",
+        "updated_at": "2026-03-15T12:00:00+00:00",
+    }
+    _projects["archived"] = {
+        "id": "archived",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Archived",
+        "status": "archived",
+        "current_stage": "archived",
+        "created_at": "2026-03-14T12:00:00+00:00",
+        "updated_at": "2026-03-16T12:00:00+00:00",
+    }
+
+    default_response = client.get("/api/v1/projects", headers=_auth_headers())
+    assert default_response.status_code == 200
+    assert [project["id"] for project in default_response.json()] == ["active"]
+
+    archived_response = client.get("/api/v1/projects?status=archived", headers=_auth_headers())
+    assert archived_response.status_code == 200
+    assert [project["id"] for project in archived_response.json()] == ["archived"]
+
+
+def test_archive_project_marks_project_archived_for_owner():
+    _projects.clear()
+    project_id = "archive-complete"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Archive Me",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.post(f"/api/v1/projects/{project_id}/archive", headers=_auth_headers())
+
+    assert response.status_code == 200
+    assert response.json() == {"project_id": project_id, "status": "archived"}
+    assert _projects[project_id]["status"] == "archived"
+    assert _projects[project_id]["current_stage"] == "archived"
+
+
+def test_archive_project_rejects_active_project():
+    _projects.clear()
+    project_id = "archive-active"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active Run",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.post(f"/api/v1/projects/{project_id}/archive", headers=_auth_headers())
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == PROJECT_ARCHIVE_ACTIVE_DETAIL
+    assert _projects[project_id]["status"] == "discovering"
+
+
+def test_archive_project_forbidden_for_non_owner():
+    _projects.clear()
+    project_id = "archive-forbidden"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000099",
+        "title": "Not Yours",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.post(f"/api/v1/projects/{project_id}/archive", headers=_auth_headers())
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Forbidden"
+    assert _projects[project_id]["status"] == "complete"
 
 
 def test_cancel_project():
