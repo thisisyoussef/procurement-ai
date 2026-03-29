@@ -18,6 +18,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 
 ## Search Behavior
 - `GET /api/v1/projects?q=...` and `GET /api/v1/dashboard/summary?q=...` match keywords against both project titles and product descriptions (case-insensitive).
+- `GET /api/v1/projects?q=...` and `GET /api/v1/dashboard/summary?q=...` now support multi-term queries (for example `bottle labels`) and require every term to match across title and/or product description fields.
 - `GET /api/v1/dashboard/contacts?q=...` matches supplier keyword fragments against contact name, email, phone, website, city, and country (case-insensitive), including digit-only phone lookup against formatted numbers (for example `3125550142` matches `+1 (312) 555-0142`); multi-term queries (for example `acme detroit`) require all terms to match across those fields, and filtering is applied before result limiting so relevant matches are not dropped.
 - `GET /api/v1/dashboard/contacts` accepts project status filters via repeated params (`?status=discovering&status=complete`) or comma-separated lists (`?status=discovering,complete`), including aliases `active` and `closed`; when set, contacts are scoped to projects in those statuses.
 - `GET /api/v1/dashboard/contacts?q=...` non-empty queries must be at least 2 characters (whitespace-only still behaves as no filter).

@@ -711,6 +711,48 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_multi_term_query_matches_across_title_and_description():
+    _projects.clear()
+    _projects["hybrid-match"] = {
+        "id": "hybrid-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision bottle molds",
+        "product_description": "Need FDA compliant labels for export packaging.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["single-term-only"] = {
+        "id": "single-term-only",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle shortlist",
+        "product_description": "Need corrugated cartons.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=bottle%20labels", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["hybrid-match"]
+
+
+def test_list_projects_multi_term_query_requires_all_terms():
+    _projects.clear()
+    _projects["partial-only"] = {
+        "id": "partial-only",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle procurement",
+        "product_description": "Need production tooling.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+
+    response = client.get("/api/v1/projects?q=bottle%20labels", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == []
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {

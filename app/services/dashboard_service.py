@@ -492,8 +492,7 @@ async def get_dashboard_summary_for_user(
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query(project, project_query)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]
@@ -590,6 +589,18 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
         return False
 
     return True
+
+
+def _project_matches_query(project: dict[str, Any], query: str) -> bool:
+    terms = [part.strip().lower() for part in query.split() if part.strip()]
+    if not terms:
+        return True
+
+    searchable = [
+        str(project.get("title") or "").strip().lower(),
+        str(project.get("product_description") or "").strip().lower(),
+    ]
+    return all(any(term in value for value in searchable) for term in terms)
 
 
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:

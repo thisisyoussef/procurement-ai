@@ -376,6 +376,54 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_multi_term_query_matches_across_title_and_description():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-hybrid"] = {
+        "id": "proj-dash-hybrid",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle sourcing sprint",
+        "product_description": "Need premium labels for export packaging.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-partial"] = {
+        "id": "proj-dash-partial",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle sourcing sprint",
+        "product_description": "Need corrugated inserts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=bottle%20labels", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-hybrid"]
+
+
+def test_dashboard_summary_multi_term_query_requires_all_terms():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-partial"] = {
+        "id": "proj-dash-partial",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle sourcing sprint",
+        "product_description": "Need corrugated inserts.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=bottle%20labels", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projects"] == []
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {
