@@ -1327,11 +1327,13 @@ def test_dashboard_contacts_service_filters_db_rows_by_project_status():
     store = AsyncMock()
     store.list_projects = AsyncMock(return_value=runtime_projects)
 
+    list_contacts = AsyncMock(return_value=[db_rows[0]])
+
     with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
         "app.services.dashboard_service.async_session_factory"
     ) as session_factory, patch(
         "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
-        new=AsyncMock(return_value=db_rows),
+        new=list_contacts,
     ), patch(
         "app.services.dashboard_service.get_project_store",
         return_value=store,
@@ -1350,6 +1352,82 @@ def test_dashboard_contacts_service_filters_db_rows_by_project_status():
 
     assert response.count == 1
     assert [supplier.name for supplier in response.suppliers] == ["Active Supplier"]
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=10,
+        contact_query=None,
+        project_ids={"proj-active"},
+    )
+
+
+def test_dashboard_contacts_service_keeps_suppliers_when_status_match_is_not_last_project():
+    db_rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Cross-Project Supplier",
+            "website": "https://cross.example",
+            "email": "sales@cross.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 5,
+            "project_count": 2,
+            "last_interaction_at": 1710000001.0,
+            # Can point to a non-matching project; service should not post-filter this away.
+            "last_project_id": "proj-closed",
+        }
+    ]
+    runtime_projects = [
+        {
+            "id": "proj-active",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "status": "discovering",
+            "updated_at": "2026-03-20T10:00:00+00:00",
+            "discovery_results": {"suppliers": []},
+        },
+        {
+            "id": "proj-closed",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "status": "complete",
+            "updated_at": "2026-03-21T10:00:00+00:00",
+            "discovery_results": {"suppliers": []},
+        },
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=runtime_projects)
+    list_contacts = AsyncMock(return_value=db_rows)
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=list_contacts,
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                project_statuses={"discovering"},
+                contact_query=None,
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Cross-Project Supplier"]
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=10,
+        contact_query=None,
+        project_ids={"proj-active"},
+    )
 
 
 def test_contact_matches_query_matches_name_email_phone_and_location():
