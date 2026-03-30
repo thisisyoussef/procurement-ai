@@ -123,6 +123,7 @@ async def list_supplier_contacts_for_user(
     user_id: str | uuid.UUID,
     limit: int = 50,
     contact_query: str | None = None,
+    project_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     user_uuid = _normalize_uuid(user_id)
     if user_uuid is None:
@@ -175,6 +176,16 @@ async def list_supplier_contacts_for_user(
         )
         .where(RuntimeProject.user_id == user_uuid)
     )
+
+    if project_ids is not None:
+        normalized_project_ids = [
+            project_uuid
+            for project_id in project_ids
+            if (project_uuid := _normalize_uuid(project_id)) is not None
+        ]
+        if not normalized_project_ids:
+            return []
+        stmt = stmt.where(SupplierInteraction.project_id.in_(normalized_project_ids))
 
     normalized_query = (contact_query or "").strip().lower()
     if normalized_query:
