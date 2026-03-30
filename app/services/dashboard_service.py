@@ -532,11 +532,33 @@ async def get_dashboard_summary_for_user(
 
     project_cards = [_project_card(project) for project in filtered_projects]
     attention = _attention_items(filtered_projects)
-    activity = await _db_activity_for_user(user_id=user_id, limit=20, cursor=None)
+    has_project_filters = bool(project_statuses or project_query)
+    filtered_project_ids: set[str] | None = None
+    if has_project_filters:
+        filtered_project_ids = {
+            str(project.get("id") or "").strip()
+            for project in filtered_projects
+            if str(project.get("id") or "").strip()
+        }
+
+    activity: list[DashboardActivityItem] = []
+    if not has_project_filters or filtered_project_ids:
+        activity = await _db_activity_for_user(
+            user_id=user_id,
+            limit=20,
+            cursor=None,
+            project_ids=filtered_project_ids,
+        )
 
     if not activity:
         # Fallback to in-project timeline events so UI still has a feed without DB events.
-        activity = await _runtime_activity_for_user(user_id=user_id, limit=20, cursor=None)
+        if not has_project_filters or filtered_project_ids:
+            activity = await _runtime_activity_for_user(
+                user_id=user_id,
+                limit=20,
+                cursor=None,
+                project_ids=filtered_project_ids,
+            )
 
     project_name_by_id = {card.id: card.name for card in project_cards}
     for event in activity:

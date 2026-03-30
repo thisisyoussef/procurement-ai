@@ -482,6 +482,156 @@ def test_dashboard_summary_combines_status_and_description_query_filters():
     ]
 
 
+def test_dashboard_summary_status_filter_scopes_recent_activity_to_filtered_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-activity-discovering"] = {
+        "id": "proj-summary-activity-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Discovering run",
+        "product_description": "Need custom bottle labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-discovering",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Discovering started",
+                "description": "Started active run.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-activity-complete"] = {
+        "id": "proj-summary-activity-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete run",
+        "product_description": "Need custom bottle labels.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-complete",
+                "timestamp": 250.0,
+                "event_type": "project_completed",
+                "title": "Project completed",
+                "description": "Closed run.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=discovering", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-summary-activity-discovering"]
+    assert [event["id"] for event in payload["recent_activity"]] == ["evt-summary-discovering"]
+
+
+def test_dashboard_summary_query_filter_scopes_recent_activity_to_matching_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-query-match"] = {
+        "id": "proj-summary-query-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle sourcing run",
+        "product_description": "Need insulated bottles.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-query-match",
+                "timestamp": 300.0,
+                "event_type": "supplier_verified",
+                "title": "Bottle supplier verified",
+                "description": "Verified bottle supplier.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-query-other"] = {
+        "id": "proj-summary-query-other",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Carton sourcing run",
+        "product_description": "Need matte cartons.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-query-other",
+                "timestamp": 250.0,
+                "event_type": "supplier_verified",
+                "title": "Carton supplier verified",
+                "description": "Verified carton supplier.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=bottle", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-summary-query-match"]
+    assert [event["id"] for event in payload["recent_activity"]] == ["evt-summary-query-match"]
+
+
+def test_dashboard_summary_no_project_match_returns_empty_recent_activity():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-nonmatch-a"] = {
+        "id": "proj-summary-nonmatch-a",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Carton sourcing run",
+        "product_description": "Need matte cartons.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-nonmatch-a",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Created",
+                "description": "Created carton run.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-nonmatch-b"] = {
+        "id": "proj-summary-nonmatch-b",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Fastener sourcing run",
+        "product_description": "Need zinc fasteners.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-nonmatch-b",
+                "timestamp": 250.0,
+                "event_type": "project_completed",
+                "title": "Completed",
+                "description": "Completed fastener run.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=failed&q=bottle", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projects"] == []
+    assert payload["recent_activity"] == []
+
+
 def test_dashboard_summary_filters_projects_by_active_alias():
     projects = get_legacy_project_dict()
     projects["proj-dash-steering"] = {
