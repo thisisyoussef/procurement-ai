@@ -137,7 +137,9 @@ async def start_project_from_dashboard(
 ):
     store = get_project_store()
     project_id = str(uuid.uuid4())
-    title = (request.title or request.description[:80]).strip() or "New sourcing mission"
+    custom_title = (request.title or "").strip()
+    description_preview = request.description.strip()[:80]
+    title = custom_title or description_preview or "New sourcing mission"
     source = _normalized_dashboard_source(request.source)
 
     project = {

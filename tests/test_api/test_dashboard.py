@@ -85,6 +85,56 @@ def test_dashboard_start_project_uses_custom_title_and_auto_outreach():
     assert project["auto_outreach"] is True
 
 
+def test_dashboard_start_project_trims_custom_title():
+    with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "title": "   Spring launch bottles   ",
+                "description": "Need 500 insulated bottles, matte black finish, and fast lead time.",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    project = get_legacy_project_dict()[payload["project_id"]]
+    assert project["title"] == "Spring launch bottles"
+
+
+def test_dashboard_start_project_uses_description_preview_when_custom_title_is_whitespace():
+    with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "title": "   ",
+                "description": "Need 500 insulated bottles, matte black finish, and fast lead time.",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    project = get_legacy_project_dict()[payload["project_id"]]
+    assert project["title"] == "Need 500 insulated bottles, matte black finish, and fast lead time."
+
+
+def test_dashboard_start_project_uses_description_preview_when_custom_title_missing():
+    with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "description": "Need 500 insulated bottles, matte black finish, and fast lead time.",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    project = get_legacy_project_dict()[payload["project_id"]]
+    assert project["title"] == "Need 500 insulated bottles, matte black finish, and fast lead time."
+
+
 def test_dashboard_start_project_normalizes_source_whitespace_and_case():
     with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
         response = client.post(
