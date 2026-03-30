@@ -84,15 +84,22 @@ async def dashboard_activity(
             "Repeat parameter to include multiple statuses."
         ),
     ),
+    q: str | None = Query(
+        default=None,
+        max_length=120,
+        description="Optional case-insensitive activity keyword filter.",
+    ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
     normalized_statuses = normalize_project_status_filters(status)
+    query_text = (q or "").strip() or None
     try:
         events, next_cursor = await get_dashboard_activity_for_user(
             user_id=current_user.user_id,
             limit=limit,
             cursor=cursor,
             project_statuses=normalized_statuses,
+            activity_query=query_text,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc

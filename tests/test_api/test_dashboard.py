@@ -1709,6 +1709,108 @@ def test_dashboard_activity_endpoint_supports_closed_alias_status_filter():
     assert [event["id"] for event in payload["events"]] == ["evt-failed"]
 
 
+def test_dashboard_activity_endpoint_filters_by_keyword():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-keyword"] = {
+        "id": "proj-activity-keyword",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Water bottle run",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-quote-ready",
+                "timestamp": 300.0,
+                "event_type": "supplier_responded",
+                "title": "Quote ready",
+                "description": "Received quote from Acme supplier.",
+                "priority": "info",
+            },
+            {
+                "id": "evt-discovery-started",
+                "timestamp": 250.0,
+                "event_type": "project_created",
+                "title": "Discovery started",
+                "description": "Searching suppliers.",
+                "priority": "info",
+            },
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/activity?q=quote", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-quote-ready"]
+
+
+def test_dashboard_activity_endpoint_keyword_filter_is_case_and_whitespace_insensitive():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-keyword-normalized"] = {
+        "id": "proj-activity-keyword-normalized",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Packaging run",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-runtime-quote",
+                "timestamp": 300.0,
+                "event_type": "supplier_responded",
+                "title": "Supplier Quote Ready",
+                "description": "Quote received.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/activity?q=%20%20QUOTE%20%20", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-runtime-quote"]
+
+
+def test_dashboard_activity_endpoint_combines_status_and_keyword_filters():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-discovering-keyword"] = {
+        "id": "proj-activity-discovering-keyword",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active run",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-active-quote",
+                "timestamp": 300.0,
+                "event_type": "supplier_responded",
+                "title": "Quote ready",
+                "description": "Quote from active project.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-activity-complete-keyword"] = {
+        "id": "proj-activity-complete-keyword",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Closed run",
+        "status": "complete",
+        "timeline_events": [
+            {
+                "id": "evt-closed-quote",
+                "timestamp": 250.0,
+                "event_type": "supplier_responded",
+                "title": "Quote ready",
+                "description": "Quote from complete project.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/activity?status=discovering&q=quote",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-active-quote"]
+
+
 def test_dashboard_activity_endpoint_rejects_invalid_status_filter():
     response = client.get("/api/v1/dashboard/activity?status=in_progress", headers=_auth_headers())
 

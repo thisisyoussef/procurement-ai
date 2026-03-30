@@ -409,6 +409,20 @@ def _activity_from_timeline(project: dict[str, Any], project_name: str) -> list[
     return events
 
 
+def _activity_matches_query(event: DashboardActivityItem, query: str) -> bool:
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    searchable = [
+        str(event.title or "").lower(),
+        str(event.description or "").lower(),
+        str(event.project_name or "").lower(),
+        str(event.type or "").lower(),
+        str(event.project_id or "").lower(),
+    ]
+    return any(needle in value for value in searchable)
+
+
 async def _runtime_activity_for_user(
     *,
     user_id: str,
@@ -567,7 +581,9 @@ async def get_dashboard_activity_for_user(
     limit: int,
     cursor: float | None,
     project_statuses: set[str] | None = None,
+    activity_query: str | None = None,
 ) -> tuple[list[DashboardActivityItem], str | None]:
+    query_filter = (activity_query or "").strip().lower() or None
     project_ids: set[str] | None = None
     if project_statuses:
         projects = await get_project_store().list_projects()
@@ -581,19 +597,27 @@ async def get_dashboard_activity_for_user(
         if not project_ids:
             return [], None
 
+    source_limit = limit
+    if query_filter:
+        source_limit = min(500, max(limit * 5, limit))
+
     events = await _db_activity_for_user(
         user_id=user_id,
-        limit=limit,
+        limit=source_limit,
         cursor=cursor,
         project_ids=project_ids,
     )
     if not events:
         events = await _runtime_activity_for_user(
             user_id=user_id,
-            limit=limit,
+            limit=source_limit,
             cursor=cursor,
             project_ids=project_ids,
         )
+    if query_filter:
+        events = [event for event in events if _activity_matches_query(event, query_filter)]
+
+    events = events[: max(1, limit)]
     next_cursor = None
     if events:
         next_cursor = str(events[-1].at)
