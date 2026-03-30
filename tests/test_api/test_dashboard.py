@@ -562,6 +562,125 @@ def test_dashboard_summary_filters_projects_by_closed_alias():
     assert statuses == ["canceled", "complete", "failed"]
 
 
+def test_dashboard_summary_filters_recent_activity_by_status():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-discovering"] = {
+        "id": "proj-summary-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Discovering project",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-summary-discovering",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Discovering started",
+                "description": "Started discovering suppliers.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-complete"] = {
+        "id": "proj-summary-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete project",
+        "status": "complete",
+        "current_stage": "complete",
+        "timeline_events": [
+            {
+                "id": "evt-summary-complete",
+                "timestamp": 250.0,
+                "event_type": "project_completed",
+                "title": "Project complete",
+                "description": "Run complete.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=[])):
+        response = client.get("/api/v1/dashboard/summary?status=discovering", headers=_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["recent_activity"]] == ["evt-summary-discovering"]
+
+
+def test_dashboard_summary_filters_recent_activity_by_closed_alias():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-parsing"] = {
+        "id": "proj-summary-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Parsing project",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "timeline_events": [
+            {
+                "id": "evt-summary-parsing",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Project started",
+                "description": "Run started.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-failed"] = {
+        "id": "proj-summary-failed",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Failed project",
+        "status": "failed",
+        "current_stage": "failed",
+        "timeline_events": [
+            {
+                "id": "evt-summary-failed",
+                "timestamp": 250.0,
+                "event_type": "project_failed",
+                "title": "Project failed",
+                "description": "Run failed.",
+                "priority": "high",
+            }
+        ],
+    }
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=[])):
+        response = client.get("/api/v1/dashboard/summary?status=closed", headers=_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["recent_activity"]] == ["evt-summary-failed"]
+
+
+def test_dashboard_summary_returns_no_recent_activity_when_status_filter_matches_no_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-only-parsing"] = {
+        "id": "proj-summary-only-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Only parsing project",
+        "status": "parsing",
+        "current_stage": "parsing",
+        "timeline_events": [
+            {
+                "id": "evt-summary-only-parsing",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Project started",
+                "description": "Run started.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=AsyncMock(return_value=[])):
+        response = client.get("/api/v1/dashboard/summary?status=complete", headers=_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projects"] == []
+    assert payload["recent_activity"] == []
+
+
 def test_dashboard_summary_rejects_invalid_status_filter():
     projects = get_legacy_project_dict()
     projects["proj-dash-6"] = {
