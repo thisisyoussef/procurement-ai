@@ -376,6 +376,54 @@ def test_dashboard_summary_filters_projects_by_description_keyword_case_insensit
     assert [project["id"] for project in payload["projects"]] == ["proj-dash-fasteners"]
 
 
+def test_dashboard_summary_query_requires_all_terms_across_title_and_description():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-motor-aluminum"] = {
+        "id": "proj-dash-motor-aluminum",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need anodized aluminum finish for tooling.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-motor-steel"] = {
+        "id": "proj-dash-motor-steel",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor brackets",
+        "product_description": "Need steel sheet fabrication.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=motor%20aluminum", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-motor-aluminum"]
+
+
+def test_dashboard_summary_query_all_term_match_is_order_insensitive():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-motor-aluminum"] = {
+        "id": "proj-dash-motor-aluminum",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need anodized aluminum finish for tooling.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=ALUMINUM%20motor", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-dash-motor-aluminum"]
+
+
 def test_dashboard_summary_ignores_whitespace_only_title_query():
     projects = get_legacy_project_dict()
     projects["proj-dash-bottle"] = {
@@ -479,6 +527,40 @@ def test_dashboard_summary_combines_status_and_description_query_filters():
     payload = response.json()
     assert [project["id"] for project in payload["projects"]] == [
         "proj-dash-fasteners-discovering"
+    ]
+
+
+def test_dashboard_summary_combines_status_and_multi_term_query_filters():
+    projects = get_legacy_project_dict()
+    projects["proj-dash-motor-aluminum-discovering"] = {
+        "id": "proj-dash-motor-aluminum-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need anodized aluminum finish.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+    projects["proj-dash-motor-aluminum-complete"] = {
+        "id": "proj-dash-motor-aluminum-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need anodized aluminum finish.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get(
+        "/api/v1/dashboard/summary?status=discovering&q=motor%20aluminum",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == [
+        "proj-dash-motor-aluminum-discovering"
     ]
 
 

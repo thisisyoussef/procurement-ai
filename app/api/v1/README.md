@@ -31,6 +31,8 @@
   an alias for all in-progress pipeline statuses (`parsing` through `outreaching`, including `steering`).
 - `GET /api/v1/projects` accepts optional `q` for case-insensitive project title keyword filtering
   (example: `?q=coffee`), applied after ownership and optional status filtering.
+  Multi-term queries require all terms to match in the title/description text (order-insensitive),
+  for example `?q=motor aluminum`.
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/summary` greeting counts `steering` as active work and normalizes
   status formatting (trim + lowercase) before active count aggregation.
@@ -42,6 +44,8 @@
   active projects first, then by most recent `updated_at`, then `created_at` fallback.
 - `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
   project-title keyword filtering (example: `?q=coffee`), combinable with optional `status` filters.
+  Multi-term queries require all terms to match in title/description text (order-insensitive),
+  for example `?q=motor aluminum`.
   The `q` value is limited to 120 characters.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is

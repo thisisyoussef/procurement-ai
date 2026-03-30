@@ -654,6 +654,48 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_keyword_requires_all_terms_across_title_and_description():
+    _projects.clear()
+    _projects["motor-housing-aluminum"] = {
+        "id": "motor-housing-aluminum",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision Motor Housing",
+        "product_description": "Need anodized aluminum finish.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+    _projects["motor-bracket-steel"] = {
+        "id": "motor-bracket-steel",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision Motor Bracket",
+        "product_description": "Need cold-rolled steel parts.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=motor aluminum", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["motor-housing-aluminum"]
+
+
+def test_list_projects_keyword_all_term_match_is_order_insensitive():
+    _projects.clear()
+    _projects["motor-housing-aluminum"] = {
+        "id": "motor-housing-aluminum",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision Motor Housing",
+        "product_description": "Need anodized aluminum finish.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=ALUMINUM%20motor", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["motor-housing-aluminum"]
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {
@@ -680,6 +722,34 @@ def test_list_projects_combines_status_and_description_keyword_filters():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload] == ["fasteners-discovering"]
+
+
+def test_list_projects_combines_status_and_multi_term_query_filters():
+    _projects.clear()
+    _projects["motor-aluminum-discovering"] = {
+        "id": "motor-aluminum-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need anodized aluminum finish.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["motor-aluminum-complete"] = {
+        "id": "motor-aluminum-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Precision motor housings",
+        "product_description": "Need anodized aluminum finish.",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.get(
+        "/api/v1/projects?status=discovering&q=motor%20aluminum",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["motor-aluminum-discovering"]
 
 
 def test_list_projects_title_keyword_ignores_whitespace_only_query():

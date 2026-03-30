@@ -219,6 +219,19 @@ def _sorted_projects_for_dashboard(projects: list[dict[str, Any]]) -> list[dict[
     return sorted(projects, key=_sort_key)
 
 
+def _query_terms(query_text: str | None) -> list[str]:
+    return [term for term in (query_text or "").strip().lower().split() if term]
+
+
+def _project_matches_query_terms(project: dict[str, Any], query_terms: list[str]) -> bool:
+    if not query_terms:
+        return True
+    title = str(project.get("title") or "").strip().lower()
+    description = str(project.get("product_description") or "").strip().lower()
+    searchable_text = f"{title} {description}".strip()
+    return all(term in searchable_text for term in query_terms)
+
+
 def _project_status_note(project: dict[str, Any]) -> str:
     status = _normalized_status(project) or "unknown"
     stage = _normalized_stage(project) or status
@@ -500,12 +513,12 @@ async def get_dashboard_summary_for_user(
             for project in sorted_user_projects
             if _normalized_status(project) in project_statuses
         ]
-    if project_query:
+    query_terms = _query_terms(project_query)
+    if query_terms:
         filtered_projects = [
             project
             for project in filtered_projects
-            if project_query in str(project.get("title") or "").strip().lower()
-            or project_query in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_terms(project, query_terms)
         ]
 
     project_cards = [_project_card(project) for project in filtered_projects]

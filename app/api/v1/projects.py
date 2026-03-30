@@ -196,6 +196,19 @@ def _stage_progress_message(stage_name: str) -> str:
     return messages.get(stage_name, f"Working on {stage_name.replace('_', ' ')}.")
 
 
+def _query_terms(query_text: str | None) -> list[str]:
+    return [term for term in (query_text or "").strip().lower().split() if term]
+
+
+def _project_matches_query_terms(project: dict, query_terms: list[str]) -> bool:
+    if not query_terms:
+        return True
+    title = str(project.get("title") or "").strip().lower()
+    description = str(project.get("product_description") or "").strip().lower()
+    searchable_text = f"{title} {description}".strip()
+    return all(term in searchable_text for term in query_terms)
+
+
 async def _get_project_or_404(project_id: str) -> dict:
     store = get_project_store()
     try:
@@ -1494,17 +1507,16 @@ async def list_projects(
         return (is_active, updated, created)
 
     normalized_statuses = normalize_project_status_filters(status)
-    query_text = (q or "").strip().lower()
+    query_terms = _query_terms(q)
 
     user_projects = [p for p in projects if str(p.get("user_id")) == str(current_user.user_id)]
     if normalized_statuses:
         user_projects = [project for project in user_projects if _normalized_status_name(project) in normalized_statuses]
-    if query_text:
+    if query_terms:
         user_projects = [
             project
             for project in user_projects
-            if query_text in str(project.get("title") or "").strip().lower()
-            or query_text in str(project.get("product_description") or "").strip().lower()
+            if _project_matches_query_terms(project, query_terms)
         ]
     ordered_projects = sorted(user_projects, key=_sort_key, reverse=True)
 
