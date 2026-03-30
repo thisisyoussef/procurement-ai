@@ -688,6 +688,7 @@ async def _runtime_contacts_for_user(
 
             existing = aggregated.get(supplier_key)
             if not existing:
+                associated_project_ids = [project_id] if project_id else []
                 aggregated[supplier_key] = {
                     "supplier_id": supplier_id,
                     "name": contact["name"],
@@ -700,6 +701,7 @@ async def _runtime_contacts_for_user(
                     "project_count": 1 if project_id else 0,
                     "last_interaction_at": project_ts or None,
                     "last_project_id": project_id or None,
+                    "associated_project_ids": associated_project_ids,
                 }
                 if project_id:
                     project_ids.add(project_id)
@@ -712,6 +714,7 @@ async def _runtime_contacts_for_user(
             if project_ts >= float(existing.get("last_interaction_at") or 0):
                 existing["last_interaction_at"] = project_ts or None
                 existing["last_project_id"] = project_id or existing.get("last_project_id")
+            existing["associated_project_ids"] = sorted(project_ids)
 
             if not existing.get("email") and contact.get("email"):
                 existing["email"] = contact["email"]
@@ -747,6 +750,14 @@ def _merge_contact_rows(
         key, supplier_id = _runtime_contact_key_and_id(row)
         existing = merged.get(key)
         if not existing:
+            associated_project_ids = {
+                str(project_id)
+                for project_id in (row.get("associated_project_ids") or [])
+                if str(project_id or "").strip()
+            }
+            last_project_id = str(row.get("last_project_id") or "").strip()
+            if last_project_id:
+                associated_project_ids.add(last_project_id)
             merged[key] = {
                 "supplier_id": row.get("supplier_id") or supplier_id,
                 "name": row.get("name"),
@@ -759,6 +770,7 @@ def _merge_contact_rows(
                 "project_count": int(row.get("project_count") or 0),
                 "last_interaction_at": row.get("last_interaction_at"),
                 "last_project_id": row.get("last_project_id"),
+                "associated_project_ids": sorted(associated_project_ids),
             }
             return
 
@@ -776,6 +788,24 @@ def _merge_contact_rows(
         if row_last_interaction >= existing_last_interaction:
             existing["last_interaction_at"] = row.get("last_interaction_at")
             existing["last_project_id"] = row.get("last_project_id") or existing.get("last_project_id")
+
+        associated_project_ids = {
+            str(project_id)
+            for project_id in (existing.get("associated_project_ids") or [])
+            if str(project_id or "").strip()
+        }
+        associated_project_ids.update(
+            str(project_id)
+            for project_id in (row.get("associated_project_ids") or [])
+            if str(project_id or "").strip()
+        )
+        row_last_project_id = str(row.get("last_project_id") or "").strip()
+        existing_last_project_id = str(existing.get("last_project_id") or "").strip()
+        if row_last_project_id:
+            associated_project_ids.add(row_last_project_id)
+        if existing_last_project_id:
+            associated_project_ids.add(existing_last_project_id)
+        existing["associated_project_ids"] = sorted(associated_project_ids)
 
         if not existing.get("email") and row.get("email"):
             existing["email"] = row.get("email")
@@ -857,11 +887,27 @@ async def get_dashboard_contacts_for_user(
                 if str(project.get("user_id")) == str(user_id)
                 and _normalized_status(project) in project_statuses
             }
+
+            def _row_matches_allowed_projects(row: dict[str, Any]) -> bool:
+                associated_project_ids = {
+                    str(project_id)
+                    for project_id in (row.get("associated_project_ids") or [])
+                    if str(project_id or "").strip()
+                }
+                if not associated_project_ids:
+                    last_project_id = str(row.get("last_project_id") or "").strip()
+                    if last_project_id:
+                        associated_project_ids.add(last_project_id)
+                return bool(associated_project_ids & allowed_project_ids)
+
             rows = [
                 row
                 for row in rows
-                if str(row.get("last_project_id") or "") in allowed_project_ids
+                if _row_matches_allowed_projects(row)
             ]
 
-    suppliers = [DashboardSupplierContact(**row) for row in rows]
+    suppliers = [
+        DashboardSupplierContact(**{k: v for k, v in row.items() if k != "associated_project_ids"})
+        for row in rows
+    ]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
