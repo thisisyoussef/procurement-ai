@@ -1818,6 +1818,95 @@ def test_dashboard_activity_endpoint_rejects_invalid_status_filter():
     assert response.json()["detail"].startswith("Invalid status filter value(s): in_progress")
 
 
+def test_dashboard_activity_endpoint_filters_by_keyword_case_insensitive():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-acme"] = {
+        "id": "proj-activity-acme",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Acme run",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-acme",
+                "timestamp": 300.0,
+                "event_type": "supplier_response",
+                "title": "Supplier replied",
+                "description": "Acme Plastics sent pricing details.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-activity-other"] = {
+        "id": "proj-activity-other",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Non-match run",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-other",
+                "timestamp": 250.0,
+                "event_type": "project_created",
+                "title": "Project started",
+                "description": "Kickoff complete.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/activity?q=ACME", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-acme"]
+
+
+def test_dashboard_activity_endpoint_treats_whitespace_query_as_unfiltered():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-a"] = {
+        "id": "proj-activity-a",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Project A",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-a",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Created",
+                "description": "First event.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-activity-b"] = {
+        "id": "proj-activity-b",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Project B",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-b",
+                "timestamp": 250.0,
+                "event_type": "project_created",
+                "title": "Created",
+                "description": "Second event.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/activity?q=%20%20%20", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-a", "evt-b"]
+
+
+def test_dashboard_activity_endpoint_rejects_overlong_query():
+    query = "a" * 121
+    response = client.get(f"/api/v1/dashboard/activity?q={query}", headers=_auth_headers())
+
+    assert response.status_code == 422
+
+
 def test_dashboard_activity_service_runtime_fallback_honors_cursor():
     projects = [
         {

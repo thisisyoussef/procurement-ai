@@ -429,6 +429,7 @@ async def _runtime_activity_for_user(
     limit: int,
     cursor: float | None,
     project_ids: set[str] | None = None,
+    activity_query: str | None = None,
 ) -> list[DashboardActivityItem]:
     try:
         projects = await get_project_store().list_projects()
@@ -452,6 +453,11 @@ async def _runtime_activity_for_user(
     if cursor is not None:
         fallback_events = [item for item in fallback_events if item.at < cursor]
 
+    if activity_query:
+        fallback_events = [
+            item for item in fallback_events if _activity_matches_query(item, activity_query)
+        ]
+
     return fallback_events[: max(1, limit)]
 
 
@@ -460,6 +466,7 @@ async def _db_activity_for_user(
     limit: int,
     cursor: float | None,
     project_ids: set[str] | None = None,
+    activity_query: str | None = None,
 ) -> list[DashboardActivityItem]:
     try:
         await _ensure_dashboard_schema()
@@ -474,6 +481,7 @@ async def _db_activity_for_user(
                 limit=limit,
                 before=before,
                 project_ids=project_ids,
+                event_query=activity_query,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard DB activity query failed; falling back to runtime timeline", exc_info=True)
@@ -606,6 +614,7 @@ async def get_dashboard_activity_for_user(
         limit=source_limit,
         cursor=cursor,
         project_ids=project_ids,
+        activity_query=activity_query,
     )
     if not events:
         events = await _runtime_activity_for_user(
@@ -613,6 +622,7 @@ async def get_dashboard_activity_for_user(
             limit=source_limit,
             cursor=cursor,
             project_ids=project_ids,
+            activity_query=activity_query,
         )
     if query_filter:
         events = [event for event in events if _activity_matches_query(event, query_filter)]

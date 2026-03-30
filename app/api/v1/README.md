@@ -55,6 +55,9 @@
   (newest first) when DB-backed dashboard activity rows are unavailable, and keeps
   cursor pagination behavior (`cursor` returns older events only, `next_cursor` is the
   last event timestamp returned).
+- `GET /api/v1/dashboard/activity` accepts optional `q` for case-insensitive keyword
+  filtering across event title, description, event type, and project name. The `q`
+  value is limited to 120 characters.
 - Project list items include optional `created_at` and `updated_at` timestamps.
 - `GET /api/v1/projects/{project_id}/status` now includes `retrospective` when post-run feedback has already been submitted (otherwise `null`).
 - `GET /api/v1/projects/{project_id}/status` now returns canonical lowercase, trimmed `status` and `current_stage`; if either field is blank in legacy records, it falls back to the other canonical value so clients always receive a consistent stage/status pair.

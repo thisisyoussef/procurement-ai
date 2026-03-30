@@ -74,6 +74,7 @@ async def list_project_events(
     limit: int = 50,
     before: datetime | None = None,
     project_ids: set[str] | None = None,
+    event_query: str | None = None,
 ) -> list[dict[str, Any]]:
     user_uuid = _normalize_uuid(user_id)
     if user_uuid is None:
@@ -98,6 +99,17 @@ async def list_project_events(
         if not normalized_project_ids:
             return []
         stmt = stmt.where(ProjectEvent.project_id.in_(normalized_project_ids))
+
+    normalized_query = (event_query or "").strip().lower()
+    if normalized_query:
+        like_pattern = f"%{normalized_query}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(func.coalesce(ProjectEvent.title, "")).like(like_pattern),
+                func.lower(func.coalesce(ProjectEvent.description, "")).like(like_pattern),
+                func.lower(func.coalesce(ProjectEvent.event_type, "")).like(like_pattern),
+            )
+        )
 
     rows = (await session.execute(stmt)).scalars().all()
     return [
