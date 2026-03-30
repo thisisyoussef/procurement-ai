@@ -414,6 +414,7 @@ async def _runtime_activity_for_user(
     user_id: str,
     limit: int,
     cursor: float | None,
+    project_ids: set[str] | None = None,
 ) -> list[DashboardActivityItem]:
     try:
         projects = await get_project_store().list_projects()
@@ -421,7 +422,12 @@ async def _runtime_activity_for_user(
         logger.warning("Dashboard runtime activity query failed", exc_info=True)
         return []
 
-    user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
+    user_projects = [
+        project
+        for project in projects
+        if str(project.get("user_id")) == str(user_id)
+        and (project_ids is None or str(project.get("id") or "") in project_ids)
+    ]
     fallback_events: list[DashboardActivityItem] = []
     for project in user_projects:
         name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "Project"
@@ -435,7 +441,12 @@ async def _runtime_activity_for_user(
     return fallback_events[: max(1, limit)]
 
 
-async def _db_activity_for_user(user_id: str, limit: int, cursor: float | None) -> list[DashboardActivityItem]:
+async def _db_activity_for_user(
+    user_id: str,
+    limit: int,
+    cursor: float | None,
+    project_ids: set[str] | None = None,
+) -> list[DashboardActivityItem]:
     try:
         await _ensure_dashboard_schema()
         before = None
@@ -448,6 +459,7 @@ async def _db_activity_for_user(user_id: str, limit: int, cursor: float | None) 
                 user_id=user_id,
                 limit=limit,
                 before=before,
+                project_ids=project_ids,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard DB activity query failed; falling back to runtime timeline", exc_info=True)
@@ -554,10 +566,34 @@ async def get_dashboard_activity_for_user(
     user_id: str,
     limit: int,
     cursor: float | None,
+    project_statuses: set[str] | None = None,
 ) -> tuple[list[DashboardActivityItem], str | None]:
-    events = await _db_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
+    project_ids: set[str] | None = None
+    if project_statuses:
+        projects = await get_project_store().list_projects()
+        project_ids = {
+            str(project.get("id") or "")
+            for project in projects
+            if str(project.get("user_id")) == str(user_id)
+            and _normalized_status(project) in project_statuses
+            and str(project.get("id") or "").strip()
+        }
+        if not project_ids:
+            return [], None
+
+    events = await _db_activity_for_user(
+        user_id=user_id,
+        limit=limit,
+        cursor=cursor,
+        project_ids=project_ids,
+    )
     if not events:
-        events = await _runtime_activity_for_user(user_id=user_id, limit=limit, cursor=cursor)
+        events = await _runtime_activity_for_user(
+            user_id=user_id,
+            limit=limit,
+            cursor=cursor,
+            project_ids=project_ids,
+        )
     next_cursor = None
     if events:
         next_cursor = str(events[-1].at)

@@ -73,6 +73,7 @@ async def list_project_events(
     user_id: str | uuid.UUID,
     limit: int = 50,
     before: datetime | None = None,
+    project_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     user_uuid = _normalize_uuid(user_id)
     if user_uuid is None:
@@ -87,6 +88,16 @@ async def list_project_events(
 
     if before is not None:
         stmt = stmt.where(ProjectEvent.created_at < before)
+
+    if project_ids is not None:
+        normalized_project_ids = [
+            project_uuid
+            for project_id in project_ids
+            if (project_uuid := _normalize_uuid(project_id)) is not None
+        ]
+        if not normalized_project_ids:
+            return []
+        stmt = stmt.where(ProjectEvent.project_id.in_(normalized_project_ids))
 
     rows = (await session.execute(stmt)).scalars().all()
     return [

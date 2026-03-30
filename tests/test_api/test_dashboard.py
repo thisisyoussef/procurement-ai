@@ -1549,6 +1549,95 @@ def test_dashboard_activity_service_falls_back_to_runtime_timeline_when_db_empty
     assert next_cursor == "200.0"
 
 
+def test_dashboard_activity_endpoint_filters_by_status():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-discovering"] = {
+        "id": "proj-activity-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Discovering project",
+        "status": "discovering",
+        "timeline_events": [
+            {
+                "id": "evt-discovering",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Discovering started",
+                "description": "Discovering suppliers.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-activity-complete"] = {
+        "id": "proj-activity-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Complete project",
+        "status": "complete",
+        "timeline_events": [
+            {
+                "id": "evt-complete",
+                "timestamp": 250.0,
+                "event_type": "project_completed",
+                "title": "Project complete",
+                "description": "Run complete.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/activity?status=discovering", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-discovering"]
+
+
+def test_dashboard_activity_endpoint_supports_closed_alias_status_filter():
+    projects = get_legacy_project_dict()
+    projects["proj-activity-parsing"] = {
+        "id": "proj-activity-parsing",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Parsing project",
+        "status": "parsing",
+        "timeline_events": [
+            {
+                "id": "evt-parsing",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Project started",
+                "description": "Run started.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-activity-failed"] = {
+        "id": "proj-activity-failed",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Failed project",
+        "status": "failed",
+        "timeline_events": [
+            {
+                "id": "evt-failed",
+                "timestamp": 250.0,
+                "event_type": "project_failed",
+                "title": "Project failed",
+                "description": "Run failed.",
+                "priority": "high",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/activity?status=closed", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [event["id"] for event in payload["events"]] == ["evt-failed"]
+
+
+def test_dashboard_activity_endpoint_rejects_invalid_status_filter():
+    response = client.get("/api/v1/dashboard/activity?status=in_progress", headers=_auth_headers())
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("Invalid status filter value(s): in_progress")
+
+
 def test_dashboard_activity_service_runtime_fallback_honors_cursor():
     projects = [
         {

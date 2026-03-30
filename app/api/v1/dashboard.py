@@ -77,13 +77,22 @@ async def dashboard_summary(
 async def dashboard_activity(
     cursor: float | None = Query(default=None),
     limit: int = Query(default=30, ge=1, le=100),
+    status: list[str] | None = Query(
+        default=None,
+        description=(
+            "Optional project status filter for dashboard activity. "
+            "Repeat parameter to include multiple statuses."
+        ),
+    ),
     current_user: AuthUser = Depends(get_current_auth_user),
 ):
+    normalized_statuses = normalize_project_status_filters(status)
     try:
         events, next_cursor = await get_dashboard_activity_for_user(
             user_id=current_user.user_id,
             limit=limit,
             cursor=cursor,
+            project_statuses=normalized_statuses,
         )
     except StoreUnavailableError as exc:
         raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
