@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
+from app.schemas.dashboard import DashboardActivityItem
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
 from app.services.dashboard_service import get_dashboard_activity_for_user
 from app.services.dashboard_service import get_dashboard_contacts_for_user
+from app.services.dashboard_service import get_dashboard_summary_for_user
 from app.services.project_store import (
     StoreUnavailableError,
     get_legacy_project_dict,
@@ -816,6 +818,176 @@ def test_dashboard_summary_sorts_by_created_at_when_updated_at_missing():
         "proj-active-created-newer",
         "proj-active-created-older",
     ]
+
+
+def test_dashboard_summary_status_filter_scopes_recent_activity_to_filtered_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-active"] = {
+        "id": "proj-active",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active bottle run",
+        "product_description": "Need insulated bottles.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "parsed_requirements": {},
+    }
+    projects["proj-complete"] = {
+        "id": "proj-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Closed labels run",
+        "product_description": "Need label stock.",
+        "status": "complete",
+        "current_stage": "complete",
+        "parsed_requirements": {},
+    }
+
+    async def _fake_db_activity_for_user(*, project_ids: set[str] | None = None, **_: object):
+        events = [
+            DashboardActivityItem(
+                id="event-active",
+                at=1710000200.0,
+                time_label="1 minute ago",
+                title="Active project event",
+                description="Discovering suppliers",
+                project_id="proj-active",
+                type="stage_started",
+            ),
+            DashboardActivityItem(
+                id="event-complete",
+                at=1710000100.0,
+                time_label="2 minutes ago",
+                title="Complete project event",
+                description="Project complete",
+                project_id="proj-complete",
+                type="stage_completed",
+            ),
+        ]
+        if project_ids is None:
+            return events
+        return [event for event in events if event.project_id in project_ids]
+
+    with patch(
+        "app.services.dashboard_service._db_activity_for_user",
+        new=AsyncMock(side_effect=_fake_db_activity_for_user),
+    ):
+        summary = asyncio.run(
+            get_dashboard_summary_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                full_name="Procurement Lead",
+                email="lead@example.com",
+                project_statuses={"discovering"},
+                project_query=None,
+            )
+        )
+
+    assert [project.id for project in summary.projects] == ["proj-active"]
+    assert [event.id for event in summary.recent_activity] == ["event-active"]
+
+
+def test_dashboard_summary_query_filter_scopes_recent_activity_to_matching_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-bottle"] = {
+        "id": "proj-bottle",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Bottle sourcing run",
+        "product_description": "Need insulated bottles.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "parsed_requirements": {},
+    }
+    projects["proj-label"] = {
+        "id": "proj-label",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Label sourcing run",
+        "product_description": "Need premium labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "parsed_requirements": {},
+    }
+
+    async def _fake_db_activity_for_user(*, project_ids: set[str] | None = None, **_: object):
+        events = [
+            DashboardActivityItem(
+                id="event-bottle",
+                at=1710000200.0,
+                time_label="1 minute ago",
+                title="Bottle follow-up",
+                description="Supplier replied",
+                project_id="proj-bottle",
+                type="supplier_update",
+            ),
+            DashboardActivityItem(
+                id="event-label",
+                at=1710000100.0,
+                time_label="2 minutes ago",
+                title="Label follow-up",
+                description="Supplier replied",
+                project_id="proj-label",
+                type="supplier_update",
+            ),
+        ]
+        if project_ids is None:
+            return events
+        return [event for event in events if event.project_id in project_ids]
+
+    with patch(
+        "app.services.dashboard_service._db_activity_for_user",
+        new=AsyncMock(side_effect=_fake_db_activity_for_user),
+    ):
+        summary = asyncio.run(
+            get_dashboard_summary_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                full_name="Procurement Lead",
+                email="lead@example.com",
+                project_statuses=None,
+                project_query="bottle",
+            )
+        )
+
+    assert [project.id for project in summary.projects] == ["proj-bottle"]
+    assert [event.id for event in summary.recent_activity] == ["event-bottle"]
+
+
+def test_dashboard_summary_empty_project_filter_returns_empty_recent_activity():
+    projects = get_legacy_project_dict()
+    projects["proj-label"] = {
+        "id": "proj-label",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Label sourcing run",
+        "product_description": "Need premium labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "parsed_requirements": {},
+    }
+
+    with patch(
+        "app.services.dashboard_service._db_activity_for_user",
+        new=AsyncMock(
+            return_value=[
+                DashboardActivityItem(
+                    id="event-label",
+                    at=1710000100.0,
+                    time_label="2 minutes ago",
+                    title="Label follow-up",
+                    description="Supplier replied",
+                    project_id="proj-label",
+                    type="supplier_update",
+                )
+            ]
+        ),
+    ):
+        summary = asyncio.run(
+            get_dashboard_summary_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                full_name="Procurement Lead",
+                email="lead@example.com",
+                project_statuses={"complete"},
+                project_query=None,
+            )
+        )
+
+    assert summary.projects == []
+    assert summary.recent_activity == []
 
 
 def test_dashboard_contacts_passes_trimmed_query_to_service():
