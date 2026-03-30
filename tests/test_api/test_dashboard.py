@@ -1279,6 +1279,119 @@ def test_dashboard_contacts_service_merges_with_query_filter_before_limit():
     assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
 
 
+def test_dashboard_contacts_service_prefers_more_recent_contact_over_higher_interaction_count():
+    db_rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "High Volume Legacy",
+            "website": "https://legacy.example",
+            "email": "sales@legacy.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 25,
+            "project_count": 8,
+            "last_interaction_at": 1710000000.0,
+            "last_project_id": "proj-db-legacy",
+        },
+        {
+            "supplier_id": "22222222-2222-2222-2222-222222222222",
+            "name": "Recent New Supplier",
+            "website": "https://recent.example",
+            "email": "hello@recent.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 2,
+            "project_count": 1,
+            "last_interaction_at": 1810000000.0,
+            "last_project_id": "proj-db-recent",
+        },
+    ]
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=db_rows),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=AsyncMock(list_projects=AsyncMock(return_value=[])),
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                project_statuses=None,
+                contact_query=None,
+            )
+        )
+
+    assert response.count == 2
+    assert [supplier.name for supplier in response.suppliers] == ["Recent New Supplier", "High Volume Legacy"]
+
+
+def test_dashboard_contacts_service_uses_interaction_count_as_tiebreaker_when_recency_matches():
+    db_rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Same Time Lower Volume",
+            "website": "https://lower.example",
+            "email": "sales@lower.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 3,
+            "project_count": 2,
+            "last_interaction_at": 1810000000.0,
+            "last_project_id": "proj-db-1",
+        },
+        {
+            "supplier_id": "22222222-2222-2222-2222-222222222222",
+            "name": "Same Time Higher Volume",
+            "website": "https://higher.example",
+            "email": "sales@higher.example",
+            "phone": None,
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 9,
+            "project_count": 4,
+            "last_interaction_at": 1810000000.0,
+            "last_project_id": "proj-db-2",
+        },
+    ]
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=db_rows),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=AsyncMock(list_projects=AsyncMock(return_value=[])),
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                project_statuses=None,
+                contact_query=None,
+            )
+        )
+
+    assert response.count == 2
+    assert [supplier.name for supplier in response.suppliers] == [
+        "Same Time Higher Volume",
+        "Same Time Lower Volume",
+    ]
+
+
 def test_dashboard_contacts_service_filters_db_rows_by_project_status():
     db_rows = [
         {

@@ -673,6 +673,17 @@ def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
     return f"derived:{raw_key}", stable_id
 
 
+def _sort_contact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            -float(row.get("last_interaction_at") or 0),
+            -int(row.get("interaction_count") or 0),
+            str(row.get("name") or "").lower(),
+        ),
+    )
+
+
 async def _runtime_contacts_for_user(
     *,
     user_id: str,
@@ -758,14 +769,7 @@ async def _runtime_contacts_for_user(
             if not existing.get("country") and contact.get("country"):
                 existing["country"] = contact["country"]
 
-    rows = list(aggregated.values())
-    rows.sort(
-        key=lambda row: (
-            -int(row.get("interaction_count") or 0),
-            -float(row.get("last_interaction_at") or 0),
-            str(row.get("name") or "").lower(),
-        )
-    )
+    rows = _sort_contact_rows(list(aggregated.values()))
     return rows[: max(1, min(limit, 200))]
 
 
@@ -827,14 +831,7 @@ def _merge_contact_rows(
     for row in supplemental_rows:
         _upsert(row)
 
-    rows = list(merged.values())
-    rows.sort(
-        key=lambda row: (
-            -int(row.get("interaction_count") or 0),
-            -float(row.get("last_interaction_at") or 0),
-            str(row.get("name") or "").lower(),
-        )
-    )
+    rows = _sort_contact_rows(list(merged.values()))
     return rows[: max(1, min(limit, 200))]
 
 
