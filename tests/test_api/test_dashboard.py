@@ -6,7 +6,10 @@ from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
+from app.api.v1.dashboard import (
+    DASHBOARD_PROJECT_STORE_UNAVAILABLE_DETAIL,
+    PROJECT_START_FAILURE_DETAIL,
+)
 from app.core.auth import AuthUser, create_access_token
 from app.schemas.dashboard import DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
@@ -169,7 +172,41 @@ def test_dashboard_start_project_store_unavailable_preserves_503_mapping():
         )
 
     assert response.status_code == 503
-    assert "Project store unavailable: memory backend offline" == response.json()["detail"]
+    assert response.json()["detail"] == DASHBOARD_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "memory backend offline" not in response.json()["detail"]
+
+
+def test_dashboard_summary_store_unavailable_returns_safe_503_message():
+    with patch("app.api.v1.dashboard.get_dashboard_summary_for_user", new_callable=AsyncMock) as get_summary:
+        get_summary.side_effect = StoreUnavailableError("internal redis timeout")
+
+        response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == DASHBOARD_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "internal redis timeout" not in response.json()["detail"]
+
+
+def test_dashboard_activity_store_unavailable_returns_safe_503_message():
+    with patch("app.api.v1.dashboard.get_dashboard_activity_for_user", new_callable=AsyncMock) as get_activity:
+        get_activity.side_effect = StoreUnavailableError("runtime cache miss")
+
+        response = client.get("/api/v1/dashboard/activity", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == DASHBOARD_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "runtime cache miss" not in response.json()["detail"]
+
+
+def test_dashboard_contacts_store_unavailable_returns_safe_503_message():
+    with patch("app.api.v1.dashboard.get_dashboard_contacts_for_user", new_callable=AsyncMock) as get_contacts:
+        get_contacts.side_effect = StoreUnavailableError("database replication lag")
+
+        response = client.get("/api/v1/dashboard/contacts", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == DASHBOARD_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "database replication lag" not in response.json()["detail"]
 
 
 def test_dashboard_summary_filters_projects_by_single_status():

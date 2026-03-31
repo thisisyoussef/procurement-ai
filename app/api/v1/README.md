@@ -68,6 +68,7 @@
 - `POST /api/v1/projects/{project_id}/outreach/parse-response` now returns a safe, fixed `500` message (`Failed to parse supplier response. Please try again.`) for unexpected failures, without exposing internal exception details.
 - `POST /api/v1/projects/{project_id}/phone/call` now returns a safe, fixed `500` message (`Failed to start phone call. Please try again.`) for unexpected failures, while preserving actionable `400` validation details.
 - `POST /api/v1/projects/{project_id}/phone/calls/{call_id}/parse` now returns a safe, fixed `500` message (`Failed to parse call transcript. Please try again.`) for unexpected failures, without exposing internal exception details.
+- `GET /api/v1/dashboard/summary`, `GET /api/v1/dashboard/activity`, `GET /api/v1/dashboard/contacts`, and `POST /api/v1/dashboard/projects/start` now return a safe, fixed `503` message (`Project data is temporarily unavailable. Please try again.`) for project storage outages, without exposing backend exception details.
 - `POST /api/v1/dashboard/projects/start` is the dashboard quick-start entrypoint:
   - Accepts dashboard source context and normalizes to supported values (`dashboard_search`, `dashboard_new`)
   - Unknown or malformed `source` values default to `dashboard_new`
