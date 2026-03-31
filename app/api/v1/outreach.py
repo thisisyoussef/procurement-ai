@@ -62,6 +62,7 @@ OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL = "Failed to parse outreach response. Ple
 OUTREACH_FOLLOW_UP_FAILURE_DETAIL = "Failed to generate follow-up emails. Please try again."
 OUTREACH_RECOMPARE_FAILURE_DETAIL = "Failed to refresh comparison. Please try again."
 OUTREACH_AUTO_START_FAILURE_DETAIL = "Failed to start auto-outreach. Please try again."
+OUTREACH_AUTO_SEND_FAILURE_DETAIL = "Failed to send queued outreach emails. Please try again."
 OUTREACH_CHECK_INBOX_FAILURE_DETAIL = "Failed to check inbox. Please try again."
 
 
@@ -1320,6 +1321,8 @@ async def generate_follow_up_emails(
 
         return {"follow_ups": [fu.model_dump() for fu in result.follow_ups], "summary": result.summary}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Follow-up generation failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=OUTREACH_FOLLOW_UP_FAILURE_DETAIL) from e
@@ -1581,6 +1584,8 @@ async def recompare_with_quotes(
 
         return {"status": "success", "message": f"Re-compared with {len(outreach.parsed_quotes)} real quotes"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Recompare failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=OUTREACH_RECOMPARE_FAILURE_DETAIL) from e
@@ -1601,131 +1606,137 @@ async def trigger_auto_send(
         owner_email = await resolve_project_owner_email(project)
     set_owner_email(outreach, owner_email)
 
-    queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
-    if not queued:
-        return {"status": "nothing_to_send", "queued_count": 0}
+    try:
+        queued = [d for d in outreach.draft_emails if d.status == "auto_queued"]
+        if not queued:
+            return {"status": "nothing_to_send", "queued_count": 0}
 
-    discovery = DiscoveryResults(**project["discovery_results"])
+        discovery = DiscoveryResults(**project["discovery_results"])
 
-    sent = 0
-    failed = 0
-    for draft in queued:
-        status = _get_or_create_supplier_status(
-            outreach=outreach,
-            supplier_index=draft.supplier_index,
-            supplier_name=draft.supplier_name,
-        )
-
-        if status.excluded or draft.supplier_index in outreach.excluded_suppliers:
-            draft.status = "failed"
-            failed += 1
-            _set_supplier_delivery_failure(status, status.exclusion_reason or "Supplier excluded from outreach")
-            record_outbound_email(
-                outreach,
+        sent = 0
+        failed = 0
+        for draft in queued:
+            status = _get_or_create_supplier_status(
+                outreach=outreach,
                 supplier_index=draft.supplier_index,
                 supplier_name=draft.supplier_name,
-                to_email=draft.recipient_email,
-                from_email=settings.from_email,
-                cc_emails=_cc_list(owner_email),
+            )
+
+            if status.excluded or draft.supplier_index in outreach.excluded_suppliers:
+                draft.status = "failed"
+                failed += 1
+                _set_supplier_delivery_failure(status, status.exclusion_reason or "Supplier excluded from outreach")
+                record_outbound_email(
+                    outreach,
+                    supplier_index=draft.supplier_index,
+                    supplier_name=draft.supplier_name,
+                    to_email=draft.recipient_email,
+                    from_email=settings.from_email,
+                    cc_emails=_cc_list(owner_email),
+                    subject=draft.subject,
+                    body=draft.body,
+                    resend_email_id=None,
+                    delivery_status="failed",
+                    source="auto_send_endpoint",
+                    event_type="send_failed",
+                    details={"reason": "supplier_excluded"},
+                )
+                _append_event(
+                    outreach,
+                    "send_failed",
+                    supplier_index=draft.supplier_index,
+                    supplier_name=draft.supplier_name,
+                    reason="supplier_excluded",
+                    source="auto_send_endpoint",
+                )
+                continue
+
+            recipient = draft.recipient_email
+            if not recipient and 0 <= draft.supplier_index < len(discovery.suppliers):
+                recipient = discovery.suppliers[draft.supplier_index].email
+
+            if not recipient:
+                draft.status = "failed"
+                failed += 1
+                _set_supplier_delivery_failure(status, "No supplier email found")
+                record_outbound_email(
+                    outreach,
+                    supplier_index=draft.supplier_index,
+                    supplier_name=draft.supplier_name,
+                    to_email=None,
+                    from_email=settings.from_email,
+                    cc_emails=_cc_list(owner_email),
+                    subject=draft.subject,
+                    body=draft.body,
+                    resend_email_id=None,
+                    delivery_status="failed",
+                    source="auto_send_endpoint",
+                    event_type="send_failed",
+                    details={"reason": "missing_email"},
+                )
+                _append_event(
+                    outreach,
+                    "send_failed",
+                    supplier_index=draft.supplier_index,
+                    supplier_name=draft.supplier_name,
+                    reason="missing_email",
+                    source="auto_send_endpoint",
+                )
+                continue
+
+            result = await _send_and_track_email(
+                project=project,
+                outreach=outreach,
+                supplier_index=draft.supplier_index,
+                supplier_name=draft.supplier_name,
+                recipient=recipient,
                 subject=draft.subject,
                 body=draft.body,
-                resend_email_id=None,
-                delivery_status="failed",
-                source="auto_send_endpoint",
-                event_type="send_failed",
-                details={"reason": "supplier_excluded"},
+                source_label="auto_send_endpoint",
+                owner_email=owner_email,
             )
-            _append_event(
-                outreach,
-                "send_failed",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                reason="supplier_excluded",
-                source="auto_send_endpoint",
-            )
-            continue
+            if result.get("sent"):
+                draft.status = "sent"
+                sent += 1
+                _set_supplier_delivery_success(status, result.get("id", ""))
+                _append_event(
+                    outreach,
+                    "email_sent",
+                    supplier_index=draft.supplier_index,
+                    supplier_name=draft.supplier_name,
+                    email_id=result.get("id", ""),
+                    source="auto_send_endpoint",
+                )
+            else:
+                draft.status = "failed"
+                failed += 1
+                _set_supplier_delivery_failure(status, result.get("error", "unknown"))
+                _append_event(
+                    outreach,
+                    "send_failed",
+                    supplier_index=draft.supplier_index,
+                    supplier_name=draft.supplier_name,
+                    reason=result.get("error", "unknown"),
+                    source="auto_send_endpoint",
+                )
 
-        recipient = draft.recipient_email
-        if not recipient and 0 <= draft.supplier_index < len(discovery.suppliers):
-            recipient = discovery.suppliers[draft.supplier_index].email
+            # Rate-limit: Resend allows max 2 req/sec
+            await asyncio.sleep(0.6)
 
-        if not recipient:
-            draft.status = "failed"
-            failed += 1
-            _set_supplier_delivery_failure(status, "No supplier email found")
-            record_outbound_email(
-                outreach,
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                to_email=None,
-                from_email=settings.from_email,
-                cc_emails=_cc_list(owner_email),
-                subject=draft.subject,
-                body=draft.body,
-                resend_email_id=None,
-                delivery_status="failed",
-                source="auto_send_endpoint",
-                event_type="send_failed",
-                details={"reason": "missing_email"},
-            )
-            _append_event(
-                outreach,
-                "send_failed",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                reason="missing_email",
-                source="auto_send_endpoint",
-            )
-            continue
-
-        result = await _send_and_track_email(
-            project=project,
-            outreach=outreach,
-            supplier_index=draft.supplier_index,
-            supplier_name=draft.supplier_name,
-            recipient=recipient,
-            subject=draft.subject,
-            body=draft.body,
-            source_label="auto_send_endpoint",
-            owner_email=owner_email,
-        )
-        if result.get("sent"):
-            draft.status = "sent"
-            sent += 1
-            _set_supplier_delivery_success(status, result.get("id", ""))
-            _append_event(
-                outreach,
-                "email_sent",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                email_id=result.get("id", ""),
-                source="auto_send_endpoint",
-            )
-        else:
-            draft.status = "failed"
-            failed += 1
-            _set_supplier_delivery_failure(status, result.get("error", "unknown"))
-            _append_event(
-                outreach,
-                "send_failed",
-                supplier_index=draft.supplier_index,
-                supplier_name=draft.supplier_name,
-                reason=result.get("error", "unknown"),
-                source="auto_send_endpoint",
-            )
-
-        # Rate-limit: Resend allows max 2 req/sec
-        await asyncio.sleep(0.6)
-
-    project["outreach_state"] = outreach.model_dump(mode="json")
-    await _save_project(project)
-    remaining_queued = len([d for d in outreach.draft_emails if d.status == "auto_queued"])
-    return {
-        "status": "processed",
-        "emails_sent": sent,
-        "failed_count": failed,
-        "remaining_queued": remaining_queued,
-    }
+        project["outreach_state"] = outreach.model_dump(mode="json")
+        await _save_project(project)
+        remaining_queued = len([d for d in outreach.draft_emails if d.status == "auto_queued"])
+        return {
+            "status": "processed",
+            "emails_sent": sent,
+            "failed_count": failed,
+            "remaining_queued": remaining_queued,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Auto-send failed: %s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=OUTREACH_AUTO_SEND_FAILURE_DETAIL) from e
 
 
 @router.get("/scheduler-status")
@@ -2118,6 +2129,8 @@ async def check_inbox(
             "communication_monitor": outreach.communication_monitor.model_dump(),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Inbox check failed: %s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=OUTREACH_CHECK_INBOX_FAILURE_DETAIL) from e

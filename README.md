@@ -33,6 +33,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `POST /api/v1/projects/{id}/outreach/parse-response` now returns a safe `500` detail (`"Failed to parse outreach response. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/follow-up` now returns a safe `500` detail (`"Failed to generate follow-up emails. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/recompare` now returns a safe `500` detail (`"Failed to refresh comparison. Please try again."`) for unexpected failures, without exposing internal exception strings.
+- `POST /api/v1/projects/{id}/outreach/auto-send` now returns a safe `500` detail (`"Failed to send queued outreach emails. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/auto-start` now returns a safe `500` detail (`"Failed to start auto-outreach. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/outreach/check-inbox` now returns a safe `500` detail (`"Failed to check inbox. Please try again."`) for unexpected failures, without exposing internal exception strings.
 - `POST /api/v1/projects/{id}/phone/call` now returns a safe `500` detail (`"Failed to start phone call. Please try again."`) for unexpected failures, while preserving actionable `400` validation details.
