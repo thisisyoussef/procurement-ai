@@ -5,8 +5,13 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.api.v1.phone import PHONE_CALL_PARSE_FAILURE_DETAIL, PHONE_CALL_START_FAILURE_DETAIL
+from app.api.v1.phone import (
+    PHONE_CALL_PARSE_FAILURE_DETAIL,
+    PHONE_CALL_START_FAILURE_DETAIL,
+    PHONE_PROJECT_STORE_UNAVAILABLE_DETAIL,
+)
 from app.core.auth import AuthUser, create_access_token
+from app.services.project_store import StoreUnavailableError
 from app.services.project_store import get_legacy_project_dict, reset_project_store_for_tests
 
 os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
@@ -118,3 +123,49 @@ def test_parse_phone_call_internal_error_returns_safe_message() -> None:
     payload = response.json()
     assert payload["detail"] == PHONE_CALL_PARSE_FAILURE_DETAIL
     assert "llm parser internal error context" not in payload["detail"]
+
+
+def test_phone_call_store_unavailable_returns_safe_message() -> None:
+    with patch("app.api.v1.phone.get_project_store") as get_store:
+        store = AsyncMock()
+        store.get_project.side_effect = StoreUnavailableError("db credentials exposed")
+        get_store.return_value = store
+
+        response = client.post(
+            "/api/v1/projects/proj-phone-unavailable/phone/call",
+            json={"supplier_index": 0, "phone_number": "+13125550111", "questions": []},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PHONE_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "db credentials exposed" not in payload["detail"]
+
+
+def test_phone_configure_store_unavailable_returns_safe_message() -> None:
+    with patch("app.api.v1.phone.get_project_store") as get_store:
+        store = AsyncMock()
+        store.get_project.return_value = {
+            "id": "proj-phone-config-unavailable",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "outreach_state": {},
+        }
+        store.save_project.side_effect = StoreUnavailableError("write path internals leaked")
+        get_store.return_value = store
+
+        response = client.post(
+            "/api/v1/projects/proj-phone-config-unavailable/phone/configure",
+            json={
+                "enabled": True,
+                "voice_id": "voice-1",
+                "max_call_duration_seconds": 300,
+                "default_questions": [],
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == PHONE_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "write path internals leaked" not in payload["detail"]

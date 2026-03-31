@@ -26,6 +26,7 @@ from app.services.supplier_memory import record_supplier_interaction
 logger = logging.getLogger(__name__)
 PHONE_CALL_START_FAILURE_DETAIL = "Failed to start phone call. Please try again."
 PHONE_CALL_PARSE_FAILURE_DETAIL = "Failed to parse call transcript. Please try again."
+PHONE_PROJECT_STORE_UNAVAILABLE_DETAIL = "Phone service is temporarily unavailable. Please try again."
 
 router = APIRouter(prefix="/projects/{project_id}/phone", tags=["phone"])
 
@@ -35,7 +36,7 @@ async def _get_project(project_id: str, current_user: AuthUser) -> dict:
     try:
         project = await store.get_project(project_id)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=PHONE_PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if str(project.get("user_id")) != str(current_user.user_id):
@@ -48,7 +49,7 @@ async def _save_project(project: dict) -> None:
     try:
         await store.save_project(project)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=PHONE_PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
 
 def _get_outreach_state(project: dict) -> OutreachState:

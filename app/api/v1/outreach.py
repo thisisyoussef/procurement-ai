@@ -63,6 +63,7 @@ OUTREACH_FOLLOW_UP_FAILURE_DETAIL = "Failed to generate follow-up emails. Please
 OUTREACH_RECOMPARE_FAILURE_DETAIL = "Failed to refresh comparison. Please try again."
 OUTREACH_AUTO_START_FAILURE_DETAIL = "Failed to start auto-outreach. Please try again."
 OUTREACH_CHECK_INBOX_FAILURE_DETAIL = "Failed to check inbox. Please try again."
+OUTREACH_PROJECT_STORE_UNAVAILABLE_DETAIL = "Outreach service is temporarily unavailable. Please try again."
 
 
 async def _fetch_business_profile(user_id: str) -> dict[str, str | None] | None:
@@ -109,7 +110,7 @@ async def _get_project(project_id: str, current_user: AuthUser) -> dict:
     try:
         project = await store.get_project(project_id)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=OUTREACH_PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if str(project.get("user_id")) != str(current_user.user_id):
@@ -122,7 +123,7 @@ async def _save_project(project: dict) -> None:
     try:
         await store.save_project(project)
     except StoreUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=f"Project store unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=OUTREACH_PROJECT_STORE_UNAVAILABLE_DETAIL) from exc
 
 
 def _get_outreach_state(project: dict) -> OutreachState:

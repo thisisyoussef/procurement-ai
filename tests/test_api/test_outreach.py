@@ -14,9 +14,11 @@ from app.api.v1.outreach import (
     OUTREACH_CHECK_INBOX_FAILURE_DETAIL,
     OUTREACH_FOLLOW_UP_FAILURE_DETAIL,
     OUTREACH_PARSE_RESPONSE_FAILURE_DETAIL,
+    OUTREACH_PROJECT_STORE_UNAVAILABLE_DETAIL,
     OUTREACH_START_FAILURE_DETAIL,
 )
 from app.main import app
+from app.services.project_store import StoreUnavailableError
 
 client = TestClient(app)
 
@@ -338,6 +340,28 @@ def test_outreach_start_preserves_validation_error_for_invalid_supplier_indices(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "No valid supplier indices provided"
+
+
+def test_outreach_start_store_unavailable_returns_safe_message():
+    _projects.clear()
+    project_id = "proj-outreach-store-unavailable"
+    _seed_project(project_id)
+
+    with patch("app.api.v1.outreach.get_project_store") as get_store:
+        store = AsyncMock()
+        store.get_project.side_effect = StoreUnavailableError("redis connection string leaked")
+        get_store.return_value = store
+
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outreach/start",
+            json={"supplier_indices": [0]},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == OUTREACH_PROJECT_STORE_UNAVAILABLE_DETAIL
+    assert "redis connection string leaked" not in payload["detail"]
 
 
 def test_parse_response_internal_error_returns_safe_message():
