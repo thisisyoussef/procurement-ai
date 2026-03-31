@@ -72,6 +72,26 @@ INDUSTRIAL_MARKETPLACE_NAMES = {
     "indiamart",
 }
 
+PRODUCT_TYPE_STOPWORDS = {
+    "and",
+    "or",
+    "for",
+    "with",
+    "the",
+    "custom",
+    "oem",
+    "manufacturer",
+    "manufacturers",
+    "manufacturing",
+    "factory",
+    "factories",
+    "supplier",
+    "suppliers",
+    "wholesale",
+    "company",
+    "group",
+}
+
 
 def _dedupe_raw_candidates(raw_results: list[dict]) -> list[dict]:
     """Deduplicate raw search candidates by URL/name signature."""
@@ -91,6 +111,78 @@ def _dedupe_raw_candidates(raw_results: list[dict]) -> list[dict]:
         seen.add(key)
         deduped.append(row)
     return deduped
+
+
+def _normalize_product_token(token: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "", token.lower()).strip()
+    if len(normalized) <= 2:
+        return ""
+    if normalized.endswith("ies") and len(normalized) > 4:
+        return normalized[:-3] + "y"
+    if normalized.endswith("es") and len(normalized) > 4:
+        return normalized[:-2]
+    if normalized.endswith("s") and len(normalized) > 3:
+        return normalized[:-1]
+    return normalized
+
+
+def _tokenize_product_text(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    tokens: set[str] = set()
+    for raw in re.findall(r"[a-zA-Z0-9]+", text.lower()):
+        if raw in PRODUCT_TYPE_STOPWORDS:
+            continue
+        normalized = _normalize_product_token(raw)
+        if normalized and normalized not in PRODUCT_TYPE_STOPWORDS:
+            tokens.add(normalized)
+    return tokens
+
+
+def _supplier_matches_product_type(supplier: DiscoveredSupplier, requirements: ParsedRequirements) -> bool:
+    requirement_tokens = _tokenize_product_text(requirements.product_type)
+    if not requirement_tokens:
+        return True
+
+    # Keep sparse legacy records when there is not enough metadata to confidently
+    # mark them as off-category.
+    if not (supplier.description or supplier.categories):
+        return True
+
+    supplier_text = " ".join(
+        part
+        for part in [
+            supplier.name,
+            supplier.description,
+            " ".join(supplier.categories or []),
+        ]
+        if part
+    )
+    supplier_tokens = _tokenize_product_text(supplier_text)
+    if not supplier_tokens:
+        return True
+
+    if requirement_tokens.intersection(supplier_tokens):
+        return True
+
+    requirement_phrase = (requirements.product_type or "").strip().lower()
+    supplier_text_lower = supplier_text.lower()
+    return bool(requirement_phrase and requirement_phrase in supplier_text_lower)
+
+
+def _apply_product_type_guardrail(
+    suppliers: list[DiscoveredSupplier],
+    requirements: ParsedRequirements,
+) -> tuple[list[DiscoveredSupplier], int]:
+    filtered = 0
+    for supplier in suppliers:
+        if supplier.filtered_reason:
+            continue
+        if _supplier_matches_product_type(supplier, requirements):
+            continue
+        supplier.filtered_reason = "wrong_product_type"
+        filtered += 1
+    return suppliers, filtered
 
 
 # ── Product Page URL Validation ──────────────────────────────────
@@ -895,10 +987,10 @@ async def discover_suppliers(
     suppliers, intermediaries_resolved = await _filter_and_resolve_intermediaries(
         suppliers, requirements
     )
+    suppliers, product_type_filtered = _apply_product_type_guardrail(suppliers, requirements)
 
     # ── Step 4: Iterative expansion if needed ─────────────────
     search_rounds = 1
-    expansion_reason = None
 
     for round_num in range(3):  # Max 3 quality expansion rounds
         should_expand, reason = _should_expand_search(suppliers, requirements)
@@ -906,7 +998,6 @@ async def discover_suppliers(
             break
 
         search_rounds += 1
-        expansion_reason = reason
         logger.info("🔄 Search expansion round %d (reason: %s)", round_num + 2, reason)
         emit_progress("discovering", "expanding_search",
                       f"Round {round_num + 2}: Expanding search — {reason}. Finding more suppliers...")
@@ -949,6 +1040,8 @@ async def discover_suppliers(
                 suppliers, requirements
             )
             intermediaries_resolved += extra_resolved
+            suppliers, extra_filtered = _apply_product_type_guardrail(suppliers, requirements)
+            product_type_filtered += extra_filtered
 
     # ── Step 5: Split by LLM filter_decision ──────────────────
     # The LLM has already evaluated every supplier and set filter_decision
@@ -973,6 +1066,8 @@ async def discover_suppliers(
                     ", ".join(f"{s.name} ({s.filtered_reason})" for s in filtered_suppliers[:5]))
         emit_progress("discovering", "filtering",
                       f"Filtered {len(filtered_suppliers)} irrelevant results based on LLM analysis")
+    if product_type_filtered:
+        logger.info("Filtered %d off-category suppliers via product-type guardrail", product_type_filtered)
 
     # Safety net: if too few suppliers survived, promote top excluded ones
     # by relevance score. This handles edge cases where the LLM was overly strict.
@@ -982,7 +1077,11 @@ async def discover_suppliers(
     )
     if len(main_suppliers) < target_min_viable and filtered_suppliers:
         needed = target_min_viable - len(main_suppliers)
-        promotable = sorted(filtered_suppliers, key=lambda x: x.relevance_score, reverse=True)
+        promotable = sorted(
+            [s for s in filtered_suppliers if s.filtered_reason != "wrong_product_type"],
+            key=lambda x: x.relevance_score,
+            reverse=True,
+        )
         promoted = promotable[:needed]
 
         if promoted:

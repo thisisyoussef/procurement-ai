@@ -178,6 +178,42 @@ async def test_discovery_filters_cross_category_memory_suppliers(monkeypatch):
     assert any(s.name == "Atlas Packaging Group" and s.filtered_reason == "wrong_product_type" for s in result.filtered_suppliers)
 
 
+@pytest.mark.asyncio
+async def test_discovery_keeps_sparse_memory_supplier_when_metadata_is_missing(monkeypatch):
+    requirements = ParsedRequirements(
+        product_type="heavyweight hoodies",
+        search_queries=["heavyweight hoodie manufacturer"],
+    )
+    sparse_supplier = DiscoveredSupplier(
+        supplier_id="66666666-6666-6666-6666-666666666666",
+        name="Legacy Supplier Record",
+        description=None,
+        categories=[],
+        source="supplier_memory",
+        relevance_score=59,
+    )
+
+    monkeypatch.setattr(supplier_discovery, "_search_google", AsyncMock(return_value=[]))
+    monkeypatch.setattr(supplier_discovery, "_search_web", AsyncMock(return_value=[]))
+    monkeypatch.setattr(supplier_discovery, "_search_marketplaces", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_search_supplier_memory",
+        AsyncMock(return_value=[sparse_supplier]),
+    )
+    monkeypatch.setattr(
+        supplier_discovery,
+        "_filter_and_resolve_intermediaries",
+        AsyncMock(side_effect=lambda suppliers, _requirements: (suppliers, 0)),
+    )
+    monkeypatch.setattr(supplier_discovery, "_should_expand_search", lambda *_: (False, ""))
+
+    result = await supplier_discovery.discover_suppliers(requirements)
+
+    assert [s.name for s in result.suppliers] == ["Legacy Supplier Record"]
+    assert result.filtered_suppliers == []
+
+
 def test_should_expand_when_below_surface_target():
     requirements = ParsedRequirements(product_type="hoodies")
     suppliers = [
