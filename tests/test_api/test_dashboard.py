@@ -940,6 +940,85 @@ def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
     )
 
 
+def test_dashboard_contacts_service_uses_python_filter_path_for_phone_digits_query():
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ) as list_contacts:
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                project_statuses=None,
+                contact_query="3125550142",
+            )
+        )
+
+    assert response.count == 0
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        contact_query=None,
+    )
+
+
+def test_dashboard_contacts_service_filters_db_rows_by_phone_digits_before_limit():
+    rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Acme Precision Metals",
+            "website": "https://acme.example",
+            "email": "sales@acme.example",
+            "phone": "+1 (312) 555-0142",
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 12,
+            "project_count": 3,
+            "last_interaction_at": 1710000000.0,
+            "last_project_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        },
+        {
+            "supplier_id": "22222222-2222-2222-2222-222222222222",
+            "name": "Bravo Tooling",
+            "website": "https://bravo.example",
+            "email": "hello@bravo.example",
+            "phone": "+1 (773) 555-0100",
+            "city": "Chicago",
+            "country": "USA",
+            "interaction_count": 8,
+            "project_count": 2,
+            "last_interaction_at": 1700000000.0,
+            "last_project_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        },
+    ]
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=rows),
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=1,
+                project_statuses=None,
+                contact_query="3125550142",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
+
+
 def test_dashboard_contacts_service_passes_none_query_to_repository():
     with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
         "app.services.dashboard_service.async_session_factory"

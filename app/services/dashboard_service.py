@@ -657,6 +657,12 @@ def _contact_matches_query(contact: dict[str, Any], query: str) -> bool:
     return bool(phone_value) and phone_needle in phone_value
 
 
+def _query_requires_python_contact_filter(query: str | None) -> bool:
+    if not query:
+        return False
+    return bool(re.sub(r"\D", "", query))
+
+
 def _runtime_contact_key_and_id(contact: dict[str, Any]) -> tuple[str, str]:
     supplier_id = str(contact.get("supplier_id") or "").strip()
     if supplier_id:
@@ -847,6 +853,10 @@ async def get_dashboard_contacts_for_user(
 ) -> DashboardContactsResponse:
     normalized_query = (contact_query or "").strip()
     query_filter = normalized_query or None
+    requires_python_filter = _query_requires_python_contact_filter(query_filter)
+    source_limit = limit
+    if requires_python_filter:
+        source_limit = min(200, max(limit * 5, limit))
     allowed_project_ids: set[str] | None = None
 
     if project_statuses:
@@ -872,8 +882,8 @@ async def get_dashboard_contacts_for_user(
             list_kwargs = {
                 "session": session,
                 "user_id": user_id,
-                "limit": limit,
-                "contact_query": query_filter,
+                "limit": source_limit,
+                "contact_query": query_filter if not requires_python_filter else None,
             }
             if allowed_project_ids is not None:
                 list_kwargs["project_ids"] = allowed_project_ids
@@ -884,22 +894,26 @@ async def get_dashboard_contacts_for_user(
         logger.warning("Dashboard contacts query failed", exc_info=True)
         rows = await _runtime_contacts_for_user(
             user_id=user_id,
-            limit=limit,
+            limit=source_limit,
             project_statuses=project_statuses,
-            contact_query=query_filter,
+            contact_query=query_filter if not requires_python_filter else None,
         )
     else:
         runtime_rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=200,
             project_statuses=project_statuses,
-            contact_query=query_filter,
+            contact_query=query_filter if not requires_python_filter else None,
         )
         rows = _merge_contact_rows(
             primary_rows=rows,
             supplemental_rows=runtime_rows,
-            limit=limit,
+            limit=source_limit,
         )
 
+    if query_filter and requires_python_filter:
+        rows = [row for row in rows if _contact_matches_query(row, query_filter)]
+
+    rows = rows[: max(1, min(limit, 200))]
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
