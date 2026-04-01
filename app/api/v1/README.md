@@ -43,6 +43,8 @@
 - `GET /api/v1/dashboard/summary` accepts optional `q` for case-insensitive dashboard
   project-title keyword filtering (example: `?q=coffee`), combinable with optional `status` filters.
   The `q` value is limited to 120 characters.
+- `GET /api/v1/dashboard/summary` scopes `recent_activity` to the same filtered project set
+  when `status` and/or `q` filters are supplied, so project cards and activity remain aligned.
 - `GET /api/v1/dashboard/contacts` accepts optional `q` for case-insensitive supplier contact
   keyword filtering across name, email, phone, website, city, and country. The `q` value is
   limited to 120 characters, and non-empty queries must be at least 2 characters after trimming.

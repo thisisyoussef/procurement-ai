@@ -855,6 +855,136 @@ def test_dashboard_summary_sorts_by_created_at_when_updated_at_missing():
     ]
 
 
+def test_dashboard_summary_scopes_recent_activity_when_status_filter_is_set():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-active"] = {
+        "id": "proj-summary-active",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Active project",
+        "product_description": "Need precision fasteners.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-active",
+                "timestamp": 300.0,
+                "event_type": "supplier_responded",
+                "title": "Quote received",
+                "description": "Active run update.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-closed"] = {
+        "id": "proj-summary-closed",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Closed project",
+        "product_description": "Need printed cartons.",
+        "status": "complete",
+        "current_stage": "complete",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-closed",
+                "timestamp": 250.0,
+                "event_type": "project_completed",
+                "title": "Run complete",
+                "description": "Closed run update.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/summary?status=discovering", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-summary-active"]
+    assert [event["id"] for event in payload["recent_activity"]] == ["evt-summary-active"]
+
+
+def test_dashboard_summary_scopes_recent_activity_when_query_filter_is_set():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-fasteners"] = {
+        "id": "proj-summary-fasteners",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need zinc-coated steel fasteners.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-fasteners",
+                "timestamp": 300.0,
+                "event_type": "supplier_responded",
+                "title": "Fastener quote ready",
+                "description": "Supplier shared fastener quote.",
+                "priority": "info",
+            }
+        ],
+    }
+    projects["proj-summary-labels"] = {
+        "id": "proj-summary-labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need premium labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-labels",
+                "timestamp": 250.0,
+                "event_type": "project_created",
+                "title": "Label project started",
+                "description": "Searching label suppliers.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=fasteners", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload["projects"]] == ["proj-summary-fasteners"]
+    assert [event["id"] for event in payload["recent_activity"]] == ["evt-summary-fasteners"]
+
+
+def test_dashboard_summary_returns_empty_recent_activity_when_filters_match_no_projects():
+    projects = get_legacy_project_dict()
+    projects["proj-summary-no-match"] = {
+        "id": "proj-summary-no-match",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Labels run",
+        "product_description": "Need matte labels.",
+        "status": "discovering",
+        "current_stage": "discovering",
+        "outreach_state": None,
+        "parsed_requirements": {},
+        "timeline_events": [
+            {
+                "id": "evt-summary-no-match",
+                "timestamp": 300.0,
+                "event_type": "project_created",
+                "title": "Labels started",
+                "description": "Started label sourcing.",
+                "priority": "info",
+            }
+        ],
+    }
+
+    response = client.get("/api/v1/dashboard/summary?q=fasteners", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projects"] == []
+    assert payload["recent_activity"] == []
+
+
 def test_dashboard_contacts_passes_trimmed_query_to_service():
     with patch(
         "app.api.v1.dashboard.get_dashboard_contacts_for_user",

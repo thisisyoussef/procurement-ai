@@ -414,6 +414,7 @@ async def _runtime_activity_for_user(
     user_id: str,
     limit: int,
     cursor: float | None,
+    project_ids: set[str] | None = None,
 ) -> list[DashboardActivityItem]:
     try:
         projects = await get_project_store().list_projects()
@@ -421,7 +422,12 @@ async def _runtime_activity_for_user(
         logger.warning("Dashboard runtime activity query failed", exc_info=True)
         return []
 
-    user_projects = [p for p in projects if str(p.get("user_id")) == str(user_id)]
+    user_projects = [
+        p
+        for p in projects
+        if str(p.get("user_id")) == str(user_id)
+        and (project_ids is None or str(p.get("id") or "") in project_ids)
+    ]
     fallback_events: list[DashboardActivityItem] = []
     for project in user_projects:
         name = (project.get("parsed_requirements") or {}).get("product_type") or project.get("title") or "Project"
@@ -435,23 +441,36 @@ async def _runtime_activity_for_user(
     return fallback_events[: max(1, limit)]
 
 
-async def _db_activity_for_user(user_id: str, limit: int, cursor: float | None) -> list[DashboardActivityItem]:
+async def _db_activity_for_user(
+    user_id: str,
+    limit: int,
+    cursor: float | None,
+    project_ids: set[str] | None = None,
+) -> list[DashboardActivityItem]:
     try:
         await _ensure_dashboard_schema()
         before = None
         if cursor:
             before = datetime.fromtimestamp(cursor, tz=timezone.utc)
 
+        source_limit = limit
+        if project_ids is not None:
+            source_limit = min(500, max(limit * 5, limit))
+
         async with async_session_factory() as session:
             rows = await dashboard_repo.list_project_events(
                 session=session,
                 user_id=user_id,
-                limit=limit,
+                limit=source_limit,
                 before=before,
             )
     except Exception:  # noqa: BLE001
         logger.warning("Dashboard DB activity query failed; falling back to runtime timeline", exc_info=True)
         return []
+
+    if project_ids is not None:
+        rows = [row for row in rows if str(row.get("project_id") or "") in project_ids]
+    rows = rows[: max(1, limit)]
 
     return [
         DashboardActivityItem(
@@ -498,11 +517,32 @@ async def get_dashboard_summary_for_user(
 
     project_cards = [_project_card(project) for project in filtered_projects]
     attention = _attention_items(filtered_projects)
-    activity = await _db_activity_for_user(user_id=user_id, limit=20, cursor=None)
+    scope_activity_to_filtered_projects = bool(project_statuses or project_query)
+    filtered_project_ids = {
+        str(project.get("id") or "").strip()
+        for project in filtered_projects
+        if str(project.get("id") or "").strip()
+    }
 
-    if not activity:
-        # Fallback to in-project timeline events so UI still has a feed without DB events.
-        activity = await _runtime_activity_for_user(user_id=user_id, limit=20, cursor=None)
+    activity: list[DashboardActivityItem]
+    if scope_activity_to_filtered_projects and not filtered_project_ids:
+        activity = []
+    else:
+        activity = await _db_activity_for_user(
+            user_id=user_id,
+            limit=20,
+            cursor=None,
+            project_ids=filtered_project_ids if scope_activity_to_filtered_projects else None,
+        )
+
+        if not activity:
+            # Fallback to in-project timeline events so UI still has a feed without DB events.
+            activity = await _runtime_activity_for_user(
+                user_id=user_id,
+                limit=20,
+                cursor=None,
+                project_ids=filtered_project_ids if scope_activity_to_filtered_projects else None,
+            )
 
     project_name_by_id = {card.id: card.name for card in project_cards}
     for event in activity:
