@@ -132,6 +132,46 @@ def test_dashboard_start_project_rejects_short_description():
     assert get_legacy_project_dict() == {}
 
 
+def test_dashboard_start_project_rejects_whitespace_only_description():
+    response = client.post(
+        "/api/v1/dashboard/projects/start",
+        json={"description": "            "},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 422
+    assert get_legacy_project_dict() == {}
+
+
+def test_dashboard_start_project_rejects_description_short_after_trim():
+    response = client.post(
+        "/api/v1/dashboard/projects/start",
+        json={"description": "          123456789         "},
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 422
+    assert get_legacy_project_dict() == {}
+
+
+def test_dashboard_start_project_trims_description_before_persisting():
+    with patch("app.api.v1.dashboard._run_pipeline_task", new_callable=AsyncMock):
+        response = client.post(
+            "/api/v1/dashboard/projects/start",
+            json={
+                "description": "   Need 500 custom insulated bottles with logo printing.   ",
+                "source": "dashboard_new",
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    project = get_legacy_project_dict()[payload["project_id"]]
+    assert project["product_description"] == "Need 500 custom insulated bottles with logo printing."
+    assert project["title"] == "Need 500 custom insulated bottles with logo printing."
+
+
 def test_dashboard_start_project_internal_error_returns_safe_message():
     with patch("app.api.v1.dashboard.get_project_store") as get_store:
         store = AsyncMock()
