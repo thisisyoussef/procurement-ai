@@ -593,13 +593,17 @@ async def get_dashboard_activity_for_user(
 ) -> tuple[list[DashboardActivityItem], str | None]:
     query_filter = (activity_query or "").strip().lower() or None
     project_ids: set[str] | None = None
+    user_projects: list[dict[str, Any]] | None = None
     if project_statuses:
-        projects = await get_project_store().list_projects()
+        user_projects = [
+            project
+            for project in await get_project_store().list_projects()
+            if str(project.get("user_id")) == str(user_id)
+        ]
         project_ids = {
             str(project.get("id") or "")
-            for project in projects
-            if str(project.get("user_id")) == str(user_id)
-            and _normalized_status(project) in project_statuses
+            for project in user_projects
+            if _normalized_status(project) in project_statuses
             and str(project.get("id") or "").strip()
         }
         if not project_ids:
@@ -614,7 +618,7 @@ async def get_dashboard_activity_for_user(
         limit=source_limit,
         cursor=cursor,
         project_ids=project_ids,
-        activity_query=activity_query,
+        activity_query=None,
     )
     if not events:
         events = await _runtime_activity_for_user(
@@ -622,8 +626,29 @@ async def get_dashboard_activity_for_user(
             limit=source_limit,
             cursor=cursor,
             project_ids=project_ids,
-            activity_query=activity_query,
+            activity_query=None,
         )
+
+    if events and any(event.project_id and not event.project_name for event in events):
+        if user_projects is None:
+            user_projects = [
+                project
+                for project in await get_project_store().list_projects()
+                if str(project.get("user_id")) == str(user_id)
+            ]
+        project_name_by_id = {
+            str(project.get("id") or ""): (
+                (project.get("parsed_requirements") or {}).get("product_type")
+                or project.get("title")
+                or "Project"
+            )
+            for project in user_projects
+            if str(project.get("id") or "").strip()
+        }
+        for event in events:
+            if event.project_id and not event.project_name:
+                event.project_name = project_name_by_id.get(str(event.project_id))
+
     if query_filter:
         events = [event for event in events if _activity_matches_query(event, query_filter)]
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.dashboard import PROJECT_START_FAILURE_DETAIL
 from app.core.auth import AuthUser, create_access_token
-from app.schemas.dashboard import DashboardContactsResponse
+from app.schemas.dashboard import DashboardActivityItem, DashboardContactsResponse
 from app.services.dashboard_service import _contact_matches_query
 from app.services.dashboard_service import get_dashboard_activity_for_user
 from app.services.dashboard_service import get_dashboard_contacts_for_user
@@ -1625,6 +1625,144 @@ def test_dashboard_activity_service_falls_back_to_runtime_timeline_when_db_empty
     assert [event.id for event in events] == ["evt-runtime-new", "evt-runtime-old"]
     assert [event.project_name for event in events] == ["New runtime project", "Old runtime project"]
     assert next_cursor == "200.0"
+
+
+def test_dashboard_activity_service_db_results_match_project_name_query():
+    projects = [
+        {
+            "id": "proj-db-name",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Precision Springs Program",
+            "status": "discovering",
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=projects)
+    db_events = [
+        DashboardActivityItem(
+            id="evt-db-name",
+            at=300.0,
+            time_label="just now",
+            title="Supplier replied",
+            description="Quote available.",
+            project_id="proj-db-name",
+            project_name=None,
+            type="supplier_responded",
+            priority="info",
+            payload={},
+        )
+    ]
+    db_mock = AsyncMock(return_value=db_events)
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=db_mock), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, _ = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                cursor=None,
+                activity_query="springs",
+            )
+        )
+
+    assert [event.id for event in events] == ["evt-db-name"]
+
+
+def test_dashboard_activity_service_db_results_match_project_id_query_without_db_prefilter():
+    projects = [
+        {
+            "id": "proj-db-id-123",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "General Sourcing Program",
+            "status": "discovering",
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=projects)
+    db_events = [
+        DashboardActivityItem(
+            id="evt-db-id",
+            at=300.0,
+            time_label="just now",
+            title="Update",
+            description="No id token in message.",
+            project_id="proj-db-id-123",
+            project_name=None,
+            type="project_update",
+            priority="info",
+            payload={},
+        )
+    ]
+    db_mock = AsyncMock(return_value=db_events)
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=db_mock), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, _ = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                cursor=None,
+                activity_query="id-123",
+            )
+        )
+
+    assert [event.id for event in events] == ["evt-db-id"]
+    assert db_mock.await_args.kwargs["activity_query"] is None
+
+
+def test_dashboard_activity_service_db_results_combine_status_filter_and_project_name_query():
+    projects = [
+        {
+            "id": "proj-db-discovering",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Discovering Springs",
+            "status": "discovering",
+        },
+        {
+            "id": "proj-db-complete",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Complete Bearings",
+            "status": "complete",
+        },
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=projects)
+    db_events = [
+        DashboardActivityItem(
+            id="evt-db-discovering",
+            at=300.0,
+            time_label="just now",
+            title="Project update",
+            description="Latest update.",
+            project_id="proj-db-discovering",
+            project_name=None,
+            type="project_update",
+            priority="info",
+            payload={},
+        )
+    ]
+    db_mock = AsyncMock(return_value=db_events)
+
+    with patch("app.services.dashboard_service._db_activity_for_user", new=db_mock), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        events, _ = asyncio.run(
+            get_dashboard_activity_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                cursor=None,
+                project_statuses={"discovering"},
+                activity_query="springs",
+            )
+        )
+
+    assert [event.id for event in events] == ["evt-db-discovering"]
+    assert db_mock.await_args.kwargs["project_ids"] == {"proj-db-discovering"}
 
 
 def test_dashboard_activity_endpoint_filters_by_status():
