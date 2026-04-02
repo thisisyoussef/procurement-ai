@@ -735,6 +735,71 @@ def test_dashboard_summary_returns_canonical_status_and_phase_for_legacy_values(
     assert payload["projects"][0]["phase_label"] == "Order placed"
 
 
+def test_dashboard_summary_attention_uses_normalized_clarifying_status():
+    projects = get_legacy_project_dict()
+    projects["proj-legacy-clarifying"] = {
+        "id": "proj-legacy-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Needs input",
+        "product_description": "Need precision washers.",
+        "status": " Clarifying ",
+        "current_stage": "clarifying",
+        "clarifying_questions": ["q1", "q2"],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    attention = payload["attention"]
+    assert any(item["kind"] == "clarifying_required" for item in attention)
+    assert any(item["target_phase"] == "brief" for item in attention if item["kind"] == "clarifying_required")
+
+
+def test_dashboard_summary_attention_uses_current_stage_when_status_missing():
+    projects = get_legacy_project_dict()
+    projects["proj-stage-clarifying"] = {
+        "id": "proj-stage-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Stage-only clarifying",
+        "product_description": "Need zinc-coated fasteners.",
+        "status": "   ",
+        "current_stage": "clarifying",
+        "clarifying_questions": ["q1"],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    attention = payload["attention"]
+    clarifying = [item for item in attention if item["kind"] == "clarifying_required"]
+    assert len(clarifying) == 1
+    assert "Answer 1 quick question" in clarifying[0]["subtitle"]
+
+
+def test_dashboard_summary_attention_does_not_emit_clarifying_for_non_clarifying_status():
+    projects = get_legacy_project_dict()
+    projects["proj-complete-no-clarifying"] = {
+        "id": "proj-complete-no-clarifying",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Completed run",
+        "product_description": "Need molded caps.",
+        "status": "complete",
+        "current_stage": "complete",
+        "clarifying_questions": ["q1", "q2"],
+        "outreach_state": None,
+        "parsed_requirements": {},
+    }
+
+    response = client.get("/api/v1/dashboard/summary", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert all(item["kind"] != "clarifying_required" for item in payload["attention"])
+
+
 def test_dashboard_summary_sorts_projects_active_first_then_recently_updated():
     projects = get_legacy_project_dict()
     projects["proj-complete-newest"] = {
