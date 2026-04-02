@@ -677,6 +677,7 @@ async def _runtime_contacts_for_user(
     *,
     user_id: str,
     limit: int,
+    project_ids: set[str] | None,
     project_statuses: set[str] | None,
     contact_query: str | None,
 ) -> list[dict[str, Any]]:
@@ -697,6 +698,8 @@ async def _runtime_contacts_for_user(
             continue
 
         project_id = str(project.get("id") or "")
+        if project_ids is not None and project_id not in project_ids:
+            continue
         project_ts = _parse_sort_timestamp(project.get("updated_at") or project.get("created_at"))
         suppliers = ((project.get("discovery_results") or {}).get("suppliers") or [])
         for supplier in suppliers:
@@ -718,7 +721,7 @@ async def _runtime_contacts_for_user(
                 continue
 
             supplier_key, supplier_id = _runtime_contact_key_and_id(contact)
-            project_ids = seen_projects_by_supplier.setdefault(supplier_key, set())
+            supplier_project_ids = seen_projects_by_supplier.setdefault(supplier_key, set())
 
             existing = aggregated.get(supplier_key)
             if not existing:
@@ -736,12 +739,12 @@ async def _runtime_contacts_for_user(
                     "last_project_id": project_id or None,
                 }
                 if project_id:
-                    project_ids.add(project_id)
+                    supplier_project_ids.add(project_id)
                 continue
 
             existing["interaction_count"] += 1
-            if project_id and project_id not in project_ids:
-                project_ids.add(project_id)
+            if project_id and project_id not in supplier_project_ids:
+                supplier_project_ids.add(project_id)
                 existing["project_count"] += 1
             if project_ts >= float(existing.get("last_interaction_at") or 0):
                 existing["last_interaction_at"] = project_ts or None
@@ -842,27 +845,46 @@ async def get_dashboard_contacts_for_user(
     *,
     user_id: str,
     limit: int = 50,
+    project_id: str | None = None,
     project_statuses: set[str] | None = None,
     contact_query: str | None = None,
 ) -> DashboardContactsResponse:
     normalized_query = (contact_query or "").strip()
     query_filter = normalized_query or None
+    scoped_project_id = (project_id or "").strip() or None
     allowed_project_ids: set[str] | None = None
 
-    if project_statuses:
+    if project_statuses or scoped_project_id:
         try:
             projects = await get_project_store().list_projects()
         except Exception:  # noqa: BLE001
             logger.warning("Dashboard contacts status filtering failed", exc_info=True)
             return DashboardContactsResponse(suppliers=[], count=0)
 
-        allowed_project_ids = {
+        user_project_ids = {
             str(project.get("id") or "")
             for project in projects
             if str(project.get("user_id")) == str(user_id)
-            and _normalized_status(project) in project_statuses
             and str(project.get("id") or "").strip()
         }
+
+        if scoped_project_id:
+            allowed_project_ids = {scoped_project_id} if scoped_project_id in user_project_ids else set()
+        if project_statuses:
+            status_project_ids = {
+                str(project.get("id") or "")
+                for project in projects
+                if str(project.get("user_id")) == str(user_id)
+                and _normalized_status(project) in project_statuses
+                and str(project.get("id") or "").strip()
+            }
+            if allowed_project_ids is None:
+                allowed_project_ids = status_project_ids
+            else:
+                allowed_project_ids &= status_project_ids
+
+        if allowed_project_ids is None:
+            allowed_project_ids = user_project_ids
         if not allowed_project_ids:
             return DashboardContactsResponse(suppliers=[], count=0)
 
@@ -885,6 +907,7 @@ async def get_dashboard_contacts_for_user(
         rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=limit,
+            project_ids=allowed_project_ids,
             project_statuses=project_statuses,
             contact_query=query_filter,
         )
@@ -892,6 +915,7 @@ async def get_dashboard_contacts_for_user(
         runtime_rows = await _runtime_contacts_for_user(
             user_id=user_id,
             limit=200,
+            project_ids=allowed_project_ids,
             project_statuses=project_statuses,
             contact_query=query_filter,
         )

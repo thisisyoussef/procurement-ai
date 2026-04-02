@@ -109,6 +109,11 @@ async def dashboard_activity(
 @router.get("/contacts", response_model=DashboardContactsResponse)
 async def dashboard_contacts(
     limit: int = Query(default=50, ge=1, le=200),
+    project_id: str | None = Query(
+        default=None,
+        max_length=120,
+        description="Optional project id filter to scope contacts to one project.",
+    ),
     status: list[str] | None = Query(
         default=None,
         description=(
@@ -125,10 +130,12 @@ async def dashboard_contacts(
 ):
     normalized_statuses = normalize_project_status_filters(status)
     query_text = (q or "").strip() or None
+    scoped_project_id = (project_id or "").strip() or None
     try:
         return await get_dashboard_contacts_for_user(
             user_id=current_user.user_id,
             limit=limit,
+            project_id=scoped_project_id,
             project_statuses=normalized_statuses,
             contact_query=query_text,
         )

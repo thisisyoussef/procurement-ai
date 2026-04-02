@@ -829,6 +829,7 @@ def test_dashboard_contacts_passes_trimmed_query_to_service():
     get_contacts.assert_awaited_once_with(
         user_id="00000000-0000-0000-0000-000000000001",
         limit=50,
+        project_id=None,
         project_statuses=None,
         contact_query="acme",
     )
@@ -845,6 +846,47 @@ def test_dashboard_contacts_ignores_whitespace_query():
     get_contacts.assert_awaited_once_with(
         user_id="00000000-0000-0000-0000-000000000001",
         limit=50,
+        project_id=None,
+        project_statuses=None,
+        contact_query=None,
+    )
+
+
+def test_dashboard_contacts_passes_trimmed_project_id_to_service():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get(
+            "/api/v1/dashboard/contacts?project_id=%20proj-123%20",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        project_id="proj-123",
+        project_statuses=None,
+        contact_query=None,
+    )
+
+
+def test_dashboard_contacts_ignores_whitespace_project_id():
+    with patch(
+        "app.api.v1.dashboard.get_dashboard_contacts_for_user",
+        new=AsyncMock(return_value=DashboardContactsResponse(suppliers=[], count=0)),
+    ) as get_contacts:
+        response = client.get(
+            "/api/v1/dashboard/contacts?project_id=%20%20%20",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    get_contacts.assert_awaited_once_with(
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=50,
+        project_id=None,
         project_statuses=None,
         contact_query=None,
     )
@@ -868,6 +910,7 @@ def test_dashboard_contacts_passes_status_filter_to_service():
     get_contacts.assert_awaited_once_with(
         user_id="00000000-0000-0000-0000-000000000001",
         limit=50,
+        project_id=None,
         project_statuses={"discovering"},
         contact_query=None,
     )
@@ -887,6 +930,7 @@ def test_dashboard_contacts_supports_alias_and_comma_separated_status_filters():
     get_contacts.assert_awaited_once_with(
         user_id="00000000-0000-0000-0000-000000000001",
         limit=50,
+        project_id=None,
         project_statuses={"complete", "failed", "canceled", "parsing"},
         contact_query=None,
     )
@@ -966,6 +1010,93 @@ def test_dashboard_contacts_service_passes_none_query_to_repository():
         limit=5,
         contact_query=None,
     )
+
+
+def test_dashboard_contacts_service_passes_project_id_scope_to_repository():
+    store = AsyncMock()
+    store.list_projects = AsyncMock(
+        return_value=[
+            {
+                "id": "proj-owned",
+                "user_id": "00000000-0000-0000-0000-000000000001",
+                "status": "discovering",
+                "current_stage": "discovering",
+            },
+            {
+                "id": "proj-other",
+                "user_id": "00000000-0000-0000-0000-000000000099",
+                "status": "discovering",
+                "current_stage": "discovering",
+            },
+        ]
+    )
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ) as list_contacts, patch(
+        "app.services.dashboard_service._runtime_contacts_for_user",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                project_id=" proj-owned ",
+                project_statuses=None,
+                contact_query=None,
+            )
+        )
+
+    assert response.count == 0
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=10,
+        contact_query=None,
+        project_ids={"proj-owned"},
+    )
+
+
+def test_dashboard_contacts_service_returns_empty_for_non_owned_project_scope():
+    store = AsyncMock()
+    store.list_projects = AsyncMock(
+        return_value=[
+            {
+                "id": "proj-owned",
+                "user_id": "00000000-0000-0000-0000-000000000001",
+                "status": "discovering",
+                "current_stage": "discovering",
+            },
+        ]
+    )
+    with patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=[{"name": "should-not-be-used"}]),
+    ) as list_contacts, patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=10,
+                project_id="proj-missing",
+                project_statuses=None,
+                contact_query=None,
+            )
+        )
+
+    assert response.count == 0
+    assert response.suppliers == []
+    list_contacts.assert_not_called()
 
 
 def test_dashboard_contacts_service_falls_back_to_runtime_contacts_when_db_unavailable():
