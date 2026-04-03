@@ -654,6 +654,31 @@ def test_list_projects_keyword_matches_product_description():
     assert [project["id"] for project in payload] == ["fasteners"]
 
 
+def test_list_projects_keyword_matches_project_id():
+    _projects.clear()
+    _projects["proj-2026-gearbox"] = {
+        "id": "proj-2026-gearbox",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Gearbox supplier run",
+        "product_description": "Need machined gearbox housings.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+    _projects["proj-2026-labels"] = {
+        "id": "proj-2026-labels",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Label refresh",
+        "product_description": "Need thermal labels.",
+        "status": "parsing",
+        "current_stage": "parsing",
+    }
+
+    response = client.get("/api/v1/projects?q=GEARBOX", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["proj-2026-gearbox"]
+
+
 def test_list_projects_combines_status_and_description_keyword_filters():
     _projects.clear()
     _projects["fasteners-discovering"] = {
@@ -680,6 +705,34 @@ def test_list_projects_combines_status_and_description_keyword_filters():
     assert response.status_code == 200
     payload = response.json()
     assert [project["id"] for project in payload] == ["fasteners-discovering"]
+
+
+def test_list_projects_combines_status_and_project_id_filters():
+    _projects.clear()
+    _projects["gearbox-discovering"] = {
+        "id": "gearbox-discovering",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run A",
+        "product_description": "Need machined gearbox housings.",
+        "status": "discovering",
+        "current_stage": "discovering",
+    }
+    _projects["gearbox-complete"] = {
+        "id": "gearbox-complete",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Run B",
+        "product_description": "Need machined gearbox housings.",
+        "status": "complete",
+        "current_stage": "complete",
+    }
+
+    response = client.get(
+        "/api/v1/projects?status=discovering&q=gearbox",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [project["id"] for project in payload] == ["gearbox-discovering"]
 
 
 def test_list_projects_title_keyword_ignores_whitespace_only_query():
