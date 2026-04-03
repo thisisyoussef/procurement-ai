@@ -52,7 +52,7 @@ async def dashboard_summary(
         default=None,
         max_length=120,
         description=(
-            "Optional case-insensitive project title or description keyword filter "
+            "Optional case-insensitive project id, title, or description keyword filter "
             "for dashboard cards."
         ),
     ),
