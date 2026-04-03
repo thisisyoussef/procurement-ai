@@ -12,6 +12,7 @@ os.environ["PROJECT_STORE_BACKEND"] = "inmemory"
 from app.main import app
 from app.api.v1.projects import (
     PROJECT_ANSWER_FAILURE_DETAIL,
+    PROJECT_RETROSPECTIVE_FAILURE_DETAIL,
     PROJECT_RETROSPECTIVE_ALREADY_SUBMITTED_DETAIL,
     PROJECT_START_FAILURE_DETAIL,
     _projects,
@@ -1232,6 +1233,46 @@ def test_submit_retrospective_is_visible_in_status():
     assert retrospective["overall_satisfaction"] == 5
     assert retrospective["communication_rating"] == 4
     assert retrospective["pricing_accuracy"] == "as_expected"
+
+
+def test_submit_retrospective_returns_safe_error_on_unexpected_failure():
+    _projects.clear()
+    project_id = "00000000-0000-0000-0000-000000000126"
+    _projects[project_id] = {
+        "id": project_id,
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Retrospective Safe Error",
+        "product_description": "Need stamped steel bracket supplier",
+        "status": "complete",
+        "current_stage": "complete",
+        "error": None,
+        "parsed_requirements": None,
+        "discovery_results": None,
+        "verification_results": None,
+        "comparison_result": None,
+        "recommendation_result": None,
+        "chat_messages": [],
+        "outreach_state": None,
+        "progress_events": [],
+        "clarifying_questions": None,
+        "decision_preference": None,
+        "buyer_context": None,
+        "retrospective": None,
+        "active_checkpoint": None,
+        "proactive_alerts": [],
+    }
+
+    with patch("app.api.v1.projects._save_project", new=AsyncMock(side_effect=RuntimeError("db creds leaked"))):
+        response = client.post(
+            f"/api/v1/projects/{project_id}/retrospective",
+            json={"supplier_chosen": "Acme Stamping"},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["detail"] == PROJECT_RETROSPECTIVE_FAILURE_DETAIL
+    assert "db creds leaked" not in payload["detail"]
 
 
 def test_submit_retrospective_rejects_duplicate_submission():
