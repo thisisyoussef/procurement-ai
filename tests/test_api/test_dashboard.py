@@ -897,7 +897,7 @@ def test_dashboard_contacts_rejects_invalid_status_filter():
     assert response.status_code == 422
 
 
-def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
+def test_dashboard_contacts_service_applies_query_after_merge_before_limit():
     rows = [
         {
             "supplier_id": "11111111-1111-1111-1111-111111111111",
@@ -935,8 +935,8 @@ def test_dashboard_contacts_service_passes_query_to_repository_before_limit():
     list_contacts.assert_awaited_once_with(
         session=ANY,
         user_id="00000000-0000-0000-0000-000000000001",
-        limit=1,
-        contact_query="acme",
+        limit=5,
+        contact_query=None,
     )
 
 
@@ -960,6 +960,56 @@ def test_dashboard_contacts_service_passes_none_query_to_repository():
         )
 
     assert response.count == 0
+    list_contacts.assert_awaited_once_with(
+        session=ANY,
+        user_id="00000000-0000-0000-0000-000000000001",
+        limit=5,
+        contact_query=None,
+    )
+
+
+def test_dashboard_contacts_service_matches_digit_phone_query_for_db_rows():
+    rows = [
+        {
+            "supplier_id": "11111111-1111-1111-1111-111111111111",
+            "name": "Acme Precision Metals",
+            "website": "https://acme.example",
+            "email": "sales@acme.example",
+            "phone": "+1 (312) 555-0142",
+            "city": "Detroit",
+            "country": "USA",
+            "interaction_count": 12,
+            "project_count": 3,
+            "last_interaction_at": 1710000000.0,
+            "last_project_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        }
+    ]
+    store = AsyncMock()
+    store.list_projects = AsyncMock(return_value=[])
+
+    with patch("app.services.dashboard_service._ensure_dashboard_schema", new=AsyncMock()), patch(
+        "app.services.dashboard_service.async_session_factory"
+    ) as session_factory, patch(
+        "app.services.dashboard_service.dashboard_repo.list_supplier_contacts_for_user",
+        new=AsyncMock(return_value=rows),
+    ) as list_contacts, patch(
+        "app.services.dashboard_service.get_project_store",
+        return_value=store,
+    ):
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=object())
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = asyncio.run(
+            get_dashboard_contacts_for_user(
+                user_id="00000000-0000-0000-0000-000000000001",
+                limit=1,
+                project_statuses=None,
+                contact_query="3125550142",
+            )
+        )
+
+    assert response.count == 1
+    assert [supplier.name for supplier in response.suppliers] == ["Acme Precision Metals"]
     list_contacts.assert_awaited_once_with(
         session=ANY,
         user_id="00000000-0000-0000-0000-000000000001",

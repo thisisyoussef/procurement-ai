@@ -848,6 +848,9 @@ async def get_dashboard_contacts_for_user(
     normalized_query = (contact_query or "").strip()
     query_filter = normalized_query or None
     allowed_project_ids: set[str] | None = None
+    source_limit = limit
+    if query_filter:
+        source_limit = min(500, max(limit * 5, limit))
 
     if project_statuses:
         try:
@@ -872,8 +875,9 @@ async def get_dashboard_contacts_for_user(
             list_kwargs = {
                 "session": session,
                 "user_id": user_id,
-                "limit": limit,
-                "contact_query": query_filter,
+                "limit": source_limit,
+                # Keep DB query broad, then apply one canonical matcher before final limit.
+                "contact_query": None,
             }
             if allowed_project_ids is not None:
                 list_kwargs["project_ids"] = allowed_project_ids
@@ -898,8 +902,12 @@ async def get_dashboard_contacts_for_user(
         rows = _merge_contact_rows(
             primary_rows=rows,
             supplemental_rows=runtime_rows,
-            limit=limit,
+            limit=source_limit,
         )
+
+    if query_filter:
+        rows = [row for row in rows if _contact_matches_query(row, query_filter)]
+    rows = rows[: max(1, min(limit, 200))]
 
     suppliers = [DashboardSupplierContact(**row) for row in rows]
     return DashboardContactsResponse(suppliers=suppliers, count=len(suppliers))
