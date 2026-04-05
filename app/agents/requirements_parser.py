@@ -21,6 +21,12 @@ from app.schemas.user_profile import UserSourcingProfile
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+_GROUNDING_STOPWORDS = {
+    "a", "an", "and", "as", "at", "be", "by", "for", "from", "in", "into", "is", "it",
+    "of", "on", "or", "that", "the", "this", "to", "we", "with", "need", "needs", "looking",
+    "source", "find", "custom", "customized", "units", "unit", "pieces", "piece", "pcs",
+}
+
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "requirements_parser.md").read_text()
 
 CLARIFICATION_FIELD_ALIASES = {
@@ -108,6 +114,35 @@ def _build_default_search_queries(product_type: str) -> list[str]:
     ]
 
 
+def _normalize_grounding_tokens(value: str) -> set[str]:
+    tokens = re.findall(r"[a-z0-9]+", value.lower())
+    normalized: set[str] = set()
+    for token in tokens:
+        if token in _GROUNDING_STOPWORDS or len(token) < 3:
+            continue
+        if token.endswith("es") and len(token) > 4:
+            token = token[:-2]
+        elif token.endswith("s") and len(token) > 4:
+            token = token[:-1]
+        normalized.add(token)
+    return normalized
+
+
+def _is_product_type_grounded(raw_description: str, product_type: str) -> bool:
+    candidate = (product_type or "").strip().lower()
+    raw = (raw_description or "").strip().lower()
+    if not candidate:
+        return False
+    if candidate in raw:
+        return True
+
+    raw_tokens = _normalize_grounding_tokens(raw_description)
+    product_tokens = _normalize_grounding_tokens(product_type)
+    if not product_tokens:
+        return False
+    return bool(raw_tokens & product_tokens)
+
+
 def _normalize_clarification_field(field: str | None) -> str:
     normalized = (field or "").strip().lower()
     if not normalized:
@@ -154,6 +189,12 @@ def _apply_domain_guardrails(raw_description: str, data: dict) -> dict:
         product_type = str(data.get("product_type") or "").strip()
     if not data.get("search_queries"):
         data["search_queries"] = _build_default_search_queries(product_type)
+
+    if not _is_product_type_grounded(raw_description, product_type):
+        rebuilt_product_type = _guess_product_type_from_raw(raw_description)
+        if rebuilt_product_type and rebuilt_product_type.strip():
+            data["product_type"] = rebuilt_product_type
+            data["search_queries"] = _build_default_search_queries(rebuilt_product_type)
     return data
 
 

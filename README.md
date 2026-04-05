@@ -36,6 +36,7 @@ Procurement AI is an AI-assisted sourcing platform for finding, vetting, compari
 - `POST /api/v1/dashboard/projects/start` normalizes `source` to supported dashboard entries (`dashboard_new`, `dashboard_search`) before telemetry/redirect attribution; unknown values default to `dashboard_new`.
 - `POST /api/v1/projects/{id}/retrospective` is allowed only after the project is `complete`; otherwise the API returns `400` with `Retrospective can only be submitted for completed projects`.
 - `POST /api/v1/projects/{id}/retrospective` accepts only the first submission per project; subsequent submissions return `409` with `Retrospective has already been submitted for this project.` and preserve the original feedback.
+- Requirements parsing now enforces product-category grounding: if an LLM response introduces a product type not supported by the user's wording, the backend rebuilds `product_type` and default B2B `search_queries` from the raw request before discovery.
 
 ## Local Development
 - Backend: `uvicorn app.main:app --reload --port 8000`

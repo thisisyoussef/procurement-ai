@@ -88,6 +88,51 @@ async def test_parse_requirements_rebuilds_when_category_is_not_in_user_input(mo
 
 @pytest.mark.asyncio
 @patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
+async def test_parse_requirements_keeps_grounded_product_type(mock_llm):
+    """If product_type is grounded in user input, parser should preserve it."""
+    mock_llm.return_value = MOCK_LLM_RESPONSE
+
+    result = await parse_requirements("Need 500 tote bags with custom print for a trade show.")
+
+    assert isinstance(result, ParsedRequirements)
+    assert "tote" in result.product_type.lower()
+    assert any("tote" in q.lower() for q in result.search_queries)
+
+
+@pytest.mark.asyncio
+@patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
+async def test_parse_requirements_rebuilds_queries_when_model_omits_them_and_category_mismatch(mock_llm):
+    """Mismatched category should force rebuilt product + default B2B queries from raw intent."""
+    mock_llm.return_value = json.dumps(
+        {
+            "product_type": "tote bag",
+            "material": "canvas",
+            "dimensions": None,
+            "quantity": 200,
+            "customization": None,
+            "delivery_location": None,
+            "deadline": None,
+            "certifications_needed": [],
+            "budget_range": None,
+            "missing_fields": [],
+            "search_queries": [],
+        }
+    )
+
+    result = await parse_requirements(
+        "Need 200 CNC machined aluminum brackets for a robotics assembly."
+    )
+
+    assert isinstance(result, ParsedRequirements)
+    assert "tote" not in result.product_type.lower()
+    assert result.search_queries
+    assert all("tote" not in q.lower() for q in result.search_queries)
+    assert any("manufacturer" in q.lower() for q in result.search_queries)
+    assert any("factory" in q.lower() for q in result.search_queries)
+
+
+@pytest.mark.asyncio
+@patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
 async def test_parse_requirements_backfills_clarifying_question_guidance(mock_llm, monkeypatch):
     from app.agents import requirements_parser as parser_module
 
