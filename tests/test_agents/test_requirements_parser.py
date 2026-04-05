@@ -84,6 +84,46 @@ async def test_parse_requirements_rebuilds_when_category_is_not_in_user_input(mo
     assert "tote" not in result.product_type.lower()
     assert result.search_queries
     assert all("tote" not in q.lower() for q in result.search_queries)
+    assert any("manufacturer" in q.lower() for q in result.search_queries)
+
+
+@pytest.mark.asyncio
+@patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
+async def test_parse_requirements_keeps_grounded_product_type_and_queries(mock_llm):
+    mock_llm.return_value = MOCK_LLM_RESPONSE
+
+    result = await parse_requirements(
+        "Need 500 custom cotton tote bags for a conference giveaway."
+    )
+
+    assert isinstance(result, ParsedRequirements)
+    assert "tote" in result.product_type.lower()
+    assert result.search_queries == [
+        "custom canvas tote bag manufacturer Los Angeles",
+        "tote bag supplier wholesale USA",
+        "cotton canvas tote bag factory custom printing",
+    ]
+
+
+@pytest.mark.asyncio
+@patch("app.agents.requirements_parser.call_llm_structured", new_callable=AsyncMock)
+async def test_parse_requirements_rebuilds_queries_when_category_mismatch(mock_llm):
+    mock_llm.return_value = json.dumps(
+        {
+            "product_type": "tote bag",
+            "quantity": 200,
+            "search_queries": ["buy tote bags online", "tote bag retail store near me"],
+            "missing_fields": ["material"],
+        }
+    )
+
+    result = await parse_requirements("Need 200 CNC machined aluminum brackets for robotics.")
+
+    assert isinstance(result, ParsedRequirements)
+    assert "tote" not in result.product_type.lower()
+    assert result.search_queries
+    assert all("tote" not in q.lower() for q in result.search_queries)
+    assert any("manufacturer" in q.lower() for q in result.search_queries)
 
 
 @pytest.mark.asyncio

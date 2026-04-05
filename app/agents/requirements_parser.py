@@ -66,6 +66,79 @@ CLARIFICATION_TEMPLATES = {
     },
 }
 
+_GROUNDING_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "by",
+    "for",
+    "from",
+    "in",
+    "need",
+    "needs",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+    "without",
+    "custom",
+    "oem",
+    "manufacturer",
+    "manufacturers",
+    "supplier",
+    "suppliers",
+    "factory",
+    "factories",
+    "production",
+    "partner",
+    "partners",
+}
+
+
+def _grounding_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.lower())
+        if token and token not in _GROUNDING_STOPWORDS and len(token) > 2
+    }
+
+
+def _is_product_type_grounded(raw_description: str, product_type: str) -> bool:
+    raw = raw_description.lower()
+    normalized_type = product_type.strip().lower()
+    if not normalized_type:
+        return False
+    if normalized_type in raw:
+        return True
+
+    type_tokens = _grounding_tokens(normalized_type)
+    raw_tokens = _grounding_tokens(raw)
+    if not type_tokens or not raw_tokens:
+        return False
+    return bool(type_tokens & raw_tokens)
+
+
+def _apply_category_grounding_guardrail(raw_description: str, data: dict) -> dict:
+    product_type = str(data.get("product_type") or "").strip()
+    if not product_type:
+        return data
+
+    if _is_product_type_grounded(raw_description, product_type):
+        return data
+
+    rebuilt_product_type = _guess_product_type_from_raw(raw_description)
+    logger.warning(
+        "Requirements parser product_type mismatch detected; rebuilding from user input. raw='%s' llm='%s' rebuilt='%s'",
+        raw_description[:120],
+        product_type,
+        rebuilt_product_type,
+    )
+    data["product_type"] = rebuilt_product_type
+    data["search_queries"] = _build_default_search_queries(rebuilt_product_type)
+    return data
+
 
 def _guess_product_type_from_raw(raw_description: str) -> str:
     raw = raw_description.strip()
@@ -305,6 +378,7 @@ Return only valid JSON matching the schema in the system prompt."""
                   progress_pct=75)
 
     data = _apply_domain_guardrails(raw_description, data)
+    data = _apply_category_grounding_guardrail(raw_description, data)
     data = _enhance_clarifying_questions(data)
 
     # Emit progress about regional strategies found
